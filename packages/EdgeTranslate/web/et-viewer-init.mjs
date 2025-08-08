@@ -1,5 +1,5 @@
 // EdgeTranslate PDF.js viewer bootstrap (MV3-safe: no inline script)
-import * as PDFJS from '../build/build/pdf.mjs';
+import * as PDFJS from '../build/pdf.mjs';
 
 // Expose as global for viewer.mjs
 if (!globalThis.pdfjsLib) {
@@ -7,7 +7,7 @@ if (!globalThis.pdfjsLib) {
 }
 
 try {
-  PDFJS.GlobalWorkerOptions.workerSrc = '../build/build/pdf.worker.mjs';
+  PDFJS.GlobalWorkerOptions.workerSrc = '../build/pdf.worker.mjs';
 } catch {}
 
 // Prepare URL before loading viewer.mjs, following official behavior where file param drives initial load
