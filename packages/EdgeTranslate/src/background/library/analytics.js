@@ -21,7 +21,7 @@ function sendHitRequest(page, type, extraHitData) {
             ? document.location.origin + document.location.pathname + document.location.search
             : "chrome-extension://service-worker";
     // Respect user opt-in and only send minimal data
-    useGoogleAnalytics(() => {
+    withGoogleAnalytics(() => {
         getUUID((UUID) => {
             // establish basic hit data(payload)
             let hitData = {
@@ -87,7 +87,7 @@ function generateURLRequest(requestData) {
  *
  * @param {function} callback the callback function executed when the result of settings is ready and value of UseGoogleAnalytics is true
  */
-function useGoogleAnalytics(callback) {
+function withGoogleAnalytics(callback) {
     getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS).then((result) => {
         if (result.OtherSettings.UseGoogleAnalytics) callback();
     });

@@ -86,11 +86,14 @@ class Channel {
                     if (chrome.runtime.lastError) {
                         const errorMessage = String(chrome.runtime.lastError.message || "");
                         const isTransient =
-                            errorMessage.includes("The message port closed before a response was received") ||
-                            errorMessage.includes("Receiving end does not exist");
+                            errorMessage.includes(
+                                "The message port closed before a response was received"
+                            ) || errorMessage.includes("Receiving end does not exist");
                         if (isTransient && attempt < 2) {
                             setTimeout(() => {
-                                sendWithRetry(attempt + 1).then(resolve).catch(reject);
+                                sendWithRetry(attempt + 1)
+                                    .then(resolve)
+                                    .catch(reject);
                             }, 100 * (attempt + 1));
                             return;
                         }
@@ -203,11 +206,14 @@ class Channel {
                         if (chrome.runtime.lastError) {
                             const errorMessage = String(chrome.runtime.lastError.message || "");
                             const isTransient =
-                                errorMessage.includes("The message port closed before a response was received") ||
-                                errorMessage.includes("Receiving end does not exist");
+                                errorMessage.includes(
+                                    "The message port closed before a response was received"
+                                ) || errorMessage.includes("Receiving end does not exist");
                             if (isTransient && attempt < 2) {
                                 setTimeout(() => {
-                                    sendWithRetry(attempt + 1).then(resolve).catch(reject);
+                                    sendWithRetry(attempt + 1)
+                                        .then(resolve)
+                                        .catch(reject);
                                 }, 100 * (attempt + 1));
                                 return;
                             }
