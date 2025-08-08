@@ -62,17 +62,21 @@ chrome.runtime.onSuspend.addListener(() => {
  */
 try {
     chrome.webNavigation.onCommitted.addListener(async (details) => {
-        // main_frame 만 처리, chrome://, edge:// 등은 제외
+        // main_frame 만 처리
         if (details.frameId !== 0 || !details.url) return;
         const url = details.url;
+
+        // 내부 확장 페이지/뷰어/비문서 스킴 제외
+        if (/^chrome-extension:\/\//i.test(url)) return;
+        if (/\/web\/viewer\.html/i.test(url)) return; // 이미 뷰어
+        if (/^data:|^blob:/i.test(url)) return;
         if (!/^https?:|^file:|^ftp:/i.test(url)) return;
 
-        // PDF 판별: 확장자 또는 MIME 힌트 파라미터
+        // PDF 판별: 파일 확장자 기준
         const isPdf = /\.pdf($|[?#])/i.test(url);
         if (!isPdf) return;
 
         // 확장 뷰어 URL 구성: web/viewer.html?file=<encoded>
-        // cross-origin 파일을 viewer가 fetch->blob으로 열 수 있게 file 파라미터만 전달
         const viewerUrl = chrome.runtime.getURL(`web/viewer.html?file=${encodeURIComponent(url)}`);
 
         // 탭 업데이트로 리디렉션
