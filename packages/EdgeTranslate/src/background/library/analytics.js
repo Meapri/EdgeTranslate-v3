@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
 export { sendHitRequest };
 
 // specification of this module is in: https://developers.google.com/analytics/devguides/collection/protocol/v1/parameters
+// Deprecated GA (UA) 제거 준비: 보관 값. 실제 전송은 설정에서 Opt-in 시에만 수행
 const ANALYTICS_ACCOUNT = "UA-153659474-1";
 const GA_URL = "https://www.google-analytics.com/collect";
 
@@ -19,7 +20,7 @@ function sendHitRequest(page, type, extraHitData) {
         typeof document !== "undefined" && document.location
             ? document.location.origin + document.location.pathname + document.location.search
             : "chrome-extension://service-worker";
-    // eslint-disable-next-line react-hooks/rules-of-hooks
+    // Respect user opt-in and only send minimal data
     useGoogleAnalytics(() => {
         getUUID((UUID) => {
             // establish basic hit data(payload)
@@ -27,7 +28,7 @@ function sendHitRequest(page, type, extraHitData) {
                 v: 1, // analytics protocol version
                 tid: ANALYTICS_ACCOUNT, // analytics protocol version
                 cid: UUID, // unique user ID
-                ul: navigator.language, //   user's language setting
+                ul: navigator.language, // user's language setting
                 an: chrome.runtime.getManifest().name, // the name of this extension
                 av: chrome.runtime.getManifest().version, // the version number of this extension
                 t: type, // hit(request) type
@@ -54,10 +55,14 @@ function sendHitRequest(page, type, extraHitData) {
                     );
                 });
             } else {
-                // 일반 환경에서는 XMLHttpRequest 사용
-                let request = new XMLHttpRequest();
-                request.open("POST", GA_URL, true);
-                request.send(generateURLRequest(hitData));
+                // 일반 환경에서도 fetch 사용으로 단일 경로화
+                fetch(GA_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: generateURLRequest(hitData),
+                }).catch((error) => {
+                    console.warn("[EdgeTranslate] Analytics 요청 실패:", error);
+                });
             }
         });
     });

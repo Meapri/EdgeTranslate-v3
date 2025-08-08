@@ -72,7 +72,24 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["**/*.css", "**/*.png", "**/*.js", "**/*.mjs", "**/*.wasm", "**/*.svg", "**/*.bcmap", "**/*.pfb", "**/*.ttf", "**/*.icc", "**/*.ftl", "**/*.json", "google/*"],
+            "resources": [
+                "web/**",
+                "build/**",
+                "content/**",
+                "google/*",
+                "**/*.css",
+                "**/*.png",
+                "**/*.js",
+                "**/*.mjs",
+                "**/*.wasm",
+                "**/*.svg",
+                "**/*.bcmap",
+                "**/*.pfb",
+                "**/*.ttf",
+                "**/*.icc",
+                "**/*.ftl",
+                "**/*.json"
+            ],
             "matches": ["<all_urls>"]
         }
     ],

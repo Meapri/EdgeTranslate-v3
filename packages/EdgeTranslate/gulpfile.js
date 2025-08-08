@@ -247,7 +247,7 @@ function packStatic() {
             .src([
                 "../../node_modules/pdfjs-dist/build/pdf.mjs",
                 "../../node_modules/pdfjs-dist/build/pdf.worker.mjs",
-            ], { base: "../../node_modules/pdfjs-dist" })
+            ], { base: "../../node_modules/pdfjs-dist/build" })
             .pipe(gulp.dest(`${output_dir}build/`));
 
         return mergeStream([staticJSFiles, googleJS, staticOtherFiles, webAssets, pdfjsCore]);
@@ -277,7 +277,7 @@ function packStatic() {
         .src([
             "../../node_modules/pdfjs-dist/build/pdf.mjs",
             "../../node_modules/pdfjs-dist/build/pdf.worker.mjs",
-        ], { base: "../../node_modules/pdfjs-dist" })
+        ], { base: "../../node_modules/pdfjs-dist/build" })
         .pipe(gulp.dest(`${output_dir}build/`));
 
     return mergeStream([staticJSFiles, googleJS, staticOtherFiles, webAssets, pdfjsCore]);
