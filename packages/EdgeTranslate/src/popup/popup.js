@@ -100,8 +100,9 @@ window.onload = function () {
             showSourceTarget(); // show source language and target language in input placeholder
         }
     );
-    // 统一添加事件监听
-    addEventListener();
+    // 统一添加 이벤트 리스너는 idle 시점에 등록하여 초기 페인트에 영향 최소화
+    const defer = (cb) => ("requestIdleCallback" in window ? requestIdleCallback(cb) : setTimeout(cb, 0));
+    defer(() => addEventListener());
 };
 
 /**

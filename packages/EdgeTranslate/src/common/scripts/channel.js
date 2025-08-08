@@ -80,16 +80,27 @@ class Channel {
      */
     request(service, params) {
         const message = JSON.stringify({ type: "service", service, params });
-
-        return new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(message, (result) => {
-                if (chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                } else {
-                    resolve(result);
-                }
+        const sendWithRetry = (attempt = 0) =>
+            new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage(message, (result) => {
+                    if (chrome.runtime.lastError) {
+                        const errorMessage = String(chrome.runtime.lastError.message || "");
+                        const isTransient =
+                            errorMessage.includes("The message port closed before a response was received") ||
+                            errorMessage.includes("Receiving end does not exist");
+                        if (isTransient && attempt < 2) {
+                            setTimeout(() => {
+                                sendWithRetry(attempt + 1).then(resolve).catch(reject);
+                            }, 100 * (attempt + 1));
+                            return;
+                        }
+                        reject(chrome.runtime.lastError);
+                    } else {
+                        resolve(result);
+                    }
+                });
             });
-        });
+        return sendWithRetry();
     }
 
     /**
@@ -186,15 +197,27 @@ class Channel {
 
         // Chrome uses callback, wrap it up.
         return (tabId, message) => {
-            return new Promise((resolve, reject) => {
-                chrome.tabs.sendMessage(tabId, message, (result) => {
-                    if (chrome.runtime.lastError) {
-                        reject(chrome.runtime.lastError);
-                    } else {
-                        resolve(result);
-                    }
+            const sendWithRetry = (attempt = 0) =>
+                new Promise((resolve, reject) => {
+                    chrome.tabs.sendMessage(tabId, message, (result) => {
+                        if (chrome.runtime.lastError) {
+                            const errorMessage = String(chrome.runtime.lastError.message || "");
+                            const isTransient =
+                                errorMessage.includes("The message port closed before a response was received") ||
+                                errorMessage.includes("Receiving end does not exist");
+                            if (isTransient && attempt < 2) {
+                                setTimeout(() => {
+                                    sendWithRetry(attempt + 1).then(resolve).catch(reject);
+                                }, 100 * (attempt + 1));
+                                return;
+                            }
+                            reject(chrome.runtime.lastError);
+                        } else {
+                            resolve(result);
+                        }
+                    });
                 });
-            });
+            return sendWithRetry();
         };
     }
 }

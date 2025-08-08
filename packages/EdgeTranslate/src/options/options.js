@@ -49,7 +49,7 @@ window.onload = () => {
      * attribute "setting-path": indicate the nested setting path. used to locate the path of one setting item in chrome storage
      */
     getOrSetDefaultSettings(undefined, DEFAULT_SETTINGS).then((result) => {
-        let inputElements = document.getElementsByTagName("input");
+        const inputElements = document.getElementsByTagName("input");
         const selectTranslatePositionElement = document.getElementById("select-translate-position");
         for (let element of [...inputElements, selectTranslatePositionElement]) {
             let settingItemPath = element.getAttribute("setting-path").split(/\s/g);

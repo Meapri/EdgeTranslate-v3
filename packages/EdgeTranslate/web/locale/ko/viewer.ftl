@@ -601,3 +601,18 @@ pdfjs-editor-add-signature-edit-button-label = 설명 편집
 ## Edit signature description dialog
 
 pdfjs-editor-edit-signature-dialog-title = 설명 편집
+
+## Comment edit actions (missing keys completion)
+
+pdfjs-editor-edit-comment-actions-button =
+    .title = 댓글 작업
+pdfjs-editor-edit-comment-actions-button-label = 댓글 작업
+pdfjs-editor-edit-comment-actions-edit-button-label = 편집
+pdfjs-editor-edit-comment-actions-delete-button-label = 삭제
+pdfjs-editor-edit-comment-close-button =
+    .title = 닫기
+pdfjs-editor-edit-comment-close-button-label = 닫기
+pdfjs-editor-edit-comment-manager-text-input =
+    .placeholder = 댓글 추가…
+pdfjs-editor-edit-comment-manager-cancel-button = 취소
+pdfjs-editor-edit-comment-manager-save-button = 저장
