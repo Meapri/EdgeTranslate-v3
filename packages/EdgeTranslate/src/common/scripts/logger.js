@@ -6,17 +6,26 @@ export {
     wrapConsoleForFiltering,
     setLogLevel,
     getLogLevel,
+    addErrorFilterPatterns,
+    addErrorFilterRegexes,
 };
 
 // Known noisy error patterns to suppress in logs
-const FILTERED_ERROR_PATTERNS = [
+const FILTERED_ERROR_PATTERNS = new Set([
     "Unable to download",
     "Unable to download all specified images",
+    "Image loading failed",
     "Cannot access",
     "before initialization",
     "Extension context invalidated",
     "Canvas error",
     "Network error",
+]);
+
+const FILTERED_ERROR_REGEXES = [
+    /Cannot access '.*' before initialization/i,
+    /ReferenceError.*before initialization/i,
+    /Unable to download.*images/i,
 ];
 
 function joinMessage(args) {
@@ -36,7 +45,8 @@ function joinMessage(args) {
                     }
                 }
             })
-            .join(" ");
+            .join(" ")
+            .trim();
     } catch (_) {
         // Fallback to safe string conversion
         return args
@@ -47,21 +57,55 @@ function joinMessage(args) {
                     return "[Unserializable Object]";
                 }
             })
-            .join(" ");
+            .join(" ")
+            .trim();
     }
 }
 
 function shouldFilterError(message) {
     if (!message) return false;
+    let text = "";
+    try {
+        text = typeof message === "string" ? message : message?.message || String(message);
+    } catch (_) {
+        text = "";
+    }
+
     try {
         return (
-            FILTERED_ERROR_PATTERNS.some((pattern) => message.includes(pattern)) ||
-            /Cannot access '.*' before initialization/.test(message) ||
-            /ReferenceError.*before initialization/.test(message) ||
-            /Unable to download.*images/.test(message)
+            Array.from(FILTERED_ERROR_PATTERNS).some(
+                (pattern) => text && typeof text === "string" && text.includes(pattern)
+            ) ||
+            FILTERED_ERROR_REGEXES.some((regex) => {
+                try {
+                    return regex.test(text);
+                } catch (_) {
+                    return false;
+                }
+            })
         );
     } catch (_) {
         return false;
+    }
+}
+
+function addErrorFilterPatterns(patterns) {
+    if (!patterns) return;
+    const list = Array.isArray(patterns) ? patterns : [patterns];
+    for (const pattern of list) {
+        if (typeof pattern === "string" && pattern.trim()) {
+            FILTERED_ERROR_PATTERNS.add(pattern);
+        }
+    }
+}
+
+function addErrorFilterRegexes(regexes) {
+    if (!regexes) return;
+    const list = Array.isArray(regexes) ? regexes : [regexes];
+    for (const regex of list) {
+        if (regex instanceof RegExp) {
+            FILTERED_ERROR_REGEXES.push(regex);
+        }
     }
 }
 

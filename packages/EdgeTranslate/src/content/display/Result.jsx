@@ -127,12 +127,15 @@ export default function Result(props) {
                                             e.preventDefault();
                                             e.stopPropagation();
                                             if (stopping) return;
-                                            
+
                                             console.log("Target TTS stop clicked");
                                             setStopping(true);
                                             // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
                                             const emitPromise = channel.emit("frame_closed");
-                                            if (emitPromise && typeof emitPromise.catch === "function") {
+                                            if (
+                                                emitPromise &&
+                                                typeof emitPromise.catch === "function"
+                                            ) {
                                                 emitPromise
                                                     .catch(() => {
                                                         // 실패 시 조용히 처리
@@ -216,17 +219,22 @@ export default function Result(props) {
                                             e.preventDefault();
                                             e.stopPropagation();
                                             if (stopping) return;
-                                            
+
                                             console.log("Source TTS stop clicked");
                                             setStopping(true);
                                             // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
                                             const emitPromise = channel.emit("frame_closed");
-                                            if (emitPromise && typeof emitPromise.catch === "function") {
-                                                emitPromise.catch(() => {
-                                                    // 실패 시 조용히 처리
-                                                }).finally(() => {
-                                                    setStopping(false);
-                                                });
+                                            if (
+                                                emitPromise &&
+                                                typeof emitPromise.catch === "function"
+                                            ) {
+                                                emitPromise
+                                                    .catch(() => {
+                                                        // 실패 시 조용히 처리
+                                                    })
+                                                    .finally(() => {
+                                                        setStopping(false);
+                                                    });
                                             } else {
                                                 // If emit doesn't return a promise, just call finally callback
                                                 setStopping(false);
@@ -820,13 +828,12 @@ function sourcePronounce(_, startPronounce) {
         lastClickedButton = "source";
         lastClickTime = currentTime;
 
-        const requestPromise = channel
-            .request("pronounce", {
-                pronouncing: "source",
-                text: window.translateResult.originalText,
-                language: window.translateResult.sourceLanguage,
-                speed: sourceTTSSpeed,
-            });
+        const requestPromise = channel.request("pronounce", {
+            pronouncing: "source",
+            text: window.translateResult.originalText,
+            language: window.translateResult.sourceLanguage,
+            speed: sourceTTSSpeed,
+        });
         if (requestPromise && typeof requestPromise.catch === "function") {
             requestPromise.catch(() => {
                 // TTS 실패 처리는 조용히
@@ -855,13 +862,12 @@ function targetPronounce(_, startPronounce) {
         lastClickedButton = "target";
         lastClickTime = currentTime;
 
-        const requestPromise = channel
-            .request("pronounce", {
-                pronouncing: "target",
-                text: window.translateResult.mainMeaning,
-                language: window.translateResult.targetLanguage,
-                speed: targetTTSSpeed,
-            });
+        const requestPromise = channel.request("pronounce", {
+            pronouncing: "target",
+            text: window.translateResult.mainMeaning,
+            language: window.translateResult.targetLanguage,
+            speed: targetTTSSpeed,
+        });
         if (requestPromise && typeof requestPromise.catch === "function") {
             requestPromise.catch(() => {
                 // TTS 실패 처리는 조용히

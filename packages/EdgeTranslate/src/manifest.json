@@ -1,7 +1,7 @@
 {
     "name": "__MSG_AppName__",
     "description": "__MSG_Description__",
-    "version": "2.8.6",
+    "version": "2.9",
   "homepage_url": "https://github.com/Meapri/EdgeTranslate-v3",
     "default_locale": "en",
     "background": {

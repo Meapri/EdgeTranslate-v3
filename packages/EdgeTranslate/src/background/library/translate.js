@@ -640,11 +640,11 @@ class TranslatorManager {
             this.channel.emitToTabs(currentTabId, "stop_tts", {
                 timestamp: new Date().getTime(),
             });
-            
+
             // TTS 중지 완료 이벤트 즉시 발송
             this.channel.emitToTabs(currentTabId, "pronouncing_finished", {
                 timestamp: new Date().getTime(),
-                pronouncing: "both" // source와 target 모두 중지
+                pronouncing: "both", // source와 target 모두 중지
             });
         }
 

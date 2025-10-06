@@ -1,30 +1,7 @@
 /** @jsx h */
 import { h, render } from "preact";
 import Panel from "./Panel.jsx";
-import { wrapConsoleForFiltering } from "common/scripts/logger.js";
-
-/**
- * Content Script 오류 필터링
- */
-const FILTERED_ERROR_PATTERNS = [
-    "Unable to download",
-    "Unable to download all specified images",
-    "Cannot access",
-    "before initialization",
-    "Extension context invalidated",
-    "Canvas error",
-    "Network error",
-];
-
-function shouldFilterError(message) {
-    return (
-        FILTERED_ERROR_PATTERNS.some((pattern) => message.includes(pattern)) ||
-        /Cannot access '.*' before initialization/.test(message) ||
-        /ReferenceError.*before initialization/.test(message) ||
-        /Unable to download.*images/.test(message) ||
-        /Unable to download all specified images/.test(message)
-    );
-}
+import { wrapConsoleForFiltering, shouldFilterError } from "common/scripts/logger.js";
 
 wrapConsoleForFiltering();
 
