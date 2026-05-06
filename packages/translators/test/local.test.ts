@@ -3,8 +3,11 @@ import LocalTranslator from "../src/translators/local";
 describe("LocalTranslator", () => {
     const originalFetch = global.fetch;
 
+    const originalTranslator = (globalThis as any).Translator;
+
     afterEach(() => {
         global.fetch = originalFetch;
+        (globalThis as any).Translator = originalTranslator;
         jest.restoreAllMocks();
     });
 
@@ -67,8 +70,37 @@ describe("LocalTranslator", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    test("does not advertise support when endpoint is missing", () => {
-        const translator = new LocalTranslator({ endpoint: "" });
+    test("does not advertise endpoint support when endpoint is missing", () => {
+        const translator = new LocalTranslator({ enabled: true, endpoint: "" });
         expect(translator.supportedLanguages().size).toBe(0);
+    });
+
+    test("translates with Chrome built-in Translator API mode", async () => {
+        const translateMock = jest.fn().mockResolvedValue("안녕");
+        const createMock = jest.fn().mockResolvedValue({ translate: translateMock });
+        const availabilityMock = jest.fn().mockResolvedValue("available");
+        (globalThis as any).Translator = {
+            availability: availabilityMock,
+            create: createMock,
+        };
+
+        const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(availabilityMock).toHaveBeenCalledWith({ sourceLanguage: "en", targetLanguage: "ko" });
+        expect(createMock).toHaveBeenCalledWith({ sourceLanguage: "en", targetLanguage: "ko" });
+        expect(translateMock).toHaveBeenCalledWith("hello");
+        expect(result).toMatchObject({
+            originalText: "hello",
+            mainMeaning: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+    });
+
+    test("advertises Chrome built-in support without endpoint", () => {
+        const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
+        expect(translator.supportedLanguages().has("ko")).toBe(true);
+        expect(translator.supportedLanguages().has("en")).toBe(true);
     });
 });

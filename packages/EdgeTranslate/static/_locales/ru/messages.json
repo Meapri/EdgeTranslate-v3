@@ -1292,11 +1292,11 @@
         "description": "Сокращение Local API Translate"
     },
     "LocalTranslatorConfig": {
-        "message": "Локальный API перевод",
+        "message": "Локальный перевод",
         "description": "Настройки пользовательского endpoint API перевода"
     },
     "LocalTranslatorEnabled": {
-        "message": "Включить Local API Translate",
+        "message": "Включить локальный перевод",
         "description": "Включить пользовательский локальный/API провайдер"
     },
     "LocalTranslatorEndpoint": {
@@ -1308,7 +1308,19 @@
         "description": "Необязательный ключ, отправляется как X-API-Key"
     },
     "LocalTranslatorHelp": {
-        "message": "Публичная сборка Web Store не содержит сервер или ключ. Вводите свой endpoint и API key только для доверенного сервера.",
+        "message": "Публичная сборка Web Store не содержит сервер или ключ. В режиме Endpoint укажите свой доверенный сервер; режим Chrome Built-in использует встроенный Translator API в поддерживаемом настольном Chrome и может скачать языковые пакеты при первом использовании.",
         "description": "Справка Local API"
+    },
+    "LocalTranslatorMode": {
+        "message": "Режим",
+        "description": "Режим локального провайдера перевода."
+    },
+    "LocalTranslatorModeEndpoint": {
+        "message": "Endpoint API",
+        "description": "Использовать пользовательский HTTP endpoint перевода."
+    },
+    "LocalTranslatorModeChromeBuiltin": {
+        "message": "Chrome Built-in",
+        "description": "Использовать встроенный Translator API настольного Chrome, если доступен."
     }
 }

@@ -1292,11 +1292,11 @@
         "description": "ローカルAPI翻訳の略称"
     },
     "LocalTranslatorConfig": {
-        "message": "ローカルAPI翻訳",
+        "message": "ローカル翻訳",
         "description": "ユーザー提供翻訳API endpoint設定"
     },
     "LocalTranslatorEnabled": {
-        "message": "ローカルAPI翻訳を有効化",
+        "message": "ローカル翻訳を有効化",
         "description": "ユーザー設定のローカル/API翻訳プロバイダーを有効にします"
     },
     "LocalTranslatorEndpoint": {
@@ -1308,7 +1308,19 @@
         "description": "X-API-Keyとして送信する任意のAPIキー"
     },
     "LocalTranslatorHelp": {
-        "message": "公開Web Storeビルドにはサーバーやキーは含まれません。信頼できるサーバーのendpointとAPIキーを自分で入力した場合のみ使用してください。",
+        "message": "公開 Web Store ビルドにはサーバーやキーは含まれません。Endpoint モードでは信頼できるサーバーを自分で入力し、Chrome 内蔵モードでは対応するデスクトップ版 Chrome の Translator API を使用します。初回使用時に言語パックをダウンロードする場合があります。",
         "description": "ローカルAPIヘルプ"
+    },
+    "LocalTranslatorMode": {
+        "message": "モード",
+        "description": "ローカル翻訳プロバイダーモード"
+    },
+    "LocalTranslatorModeEndpoint": {
+        "message": "Endpoint API",
+        "description": "ユーザー設定の HTTP 翻訳 endpoint を使用します。"
+    },
+    "LocalTranslatorModeChromeBuiltin": {
+        "message": "Chrome 内蔵",
+        "description": "対応するデスクトップ版 Chrome の内蔵 Translator API を使用します。"
     }
 }

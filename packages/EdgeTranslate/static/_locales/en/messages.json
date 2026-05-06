@@ -1292,11 +1292,11 @@
         "description": "Abbreviation of Local API Translate."
     },
     "LocalTranslatorConfig": {
-        "message": "Local API Translate",
+        "message": "Local Translate",
         "description": "Settings for a user-provided translation API endpoint."
     },
     "LocalTranslatorEnabled": {
-        "message": "Enable Local API Translate",
+        "message": "Enable Local Translate",
         "description": "Enable the user-configured local/API translation provider."
     },
     "LocalTranslatorEndpoint": {
@@ -1308,7 +1308,19 @@
         "description": "Optional API key sent as X-API-Key."
     },
     "LocalTranslatorHelp": {
-        "message": "For public Web Store builds, no server or key is bundled. Enter your own endpoint and API key only if you trust the server.",
+        "message": "For public Web Store builds, no server or key is bundled. Use Endpoint mode with your own trusted server, or Chrome Built-in mode on supported desktop Chrome versions. Chrome Built-in Translate may download language packs on first use.",
         "description": "Local API help text."
+    },
+    "LocalTranslatorMode": {
+        "message": "Mode",
+        "description": "Local translation provider mode."
+    },
+    "LocalTranslatorModeEndpoint": {
+        "message": "Endpoint API",
+        "description": "Use a user-configured HTTP translation endpoint."
+    },
+    "LocalTranslatorModeChromeBuiltin": {
+        "message": "Chrome Built-in",
+        "description": "Use Chrome desktop built-in Translator API when available."
     }
 }
