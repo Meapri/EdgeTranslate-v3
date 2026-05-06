@@ -36,7 +36,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
 const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_NAMES));
 const DEFAULT_TIMEOUT_MS = 60000;
-const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
 
 class RequestLimiter {
     private active = 0;
