@@ -1,8 +1,8 @@
 {
     "name": "__MSG_AppName__",
     "description": "__MSG_Description__",
-    "version": "2.9",
-  "homepage_url": "https://github.com/Meapri/EdgeTranslate-v3",
+    "version": "3.0.0",
+    "homepage_url": "https://github.com/Meapri/EdgeTranslate-v3",
     "default_locale": "en",
     "background": {
         "service_worker": "./background/background.js",
@@ -73,8 +73,24 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["**/*.css", "**/*.png", "**/*.js", "**/*.mjs", "**/*.wasm", "**/*.svg", "**/*.bcmap", "**/*.pfb", "**/*.ttf", "**/*.icc", "**/*.ftl", "**/*.json", "google/*"],
-            "matches": ["<all_urls>"]
+            "resources": [
+                "**/*.css",
+                "**/*.png",
+                "**/*.js",
+                "**/*.mjs",
+                "**/*.wasm",
+                "**/*.svg",
+                "**/*.bcmap",
+                "**/*.pfb",
+                "**/*.ttf",
+                "**/*.icc",
+                "**/*.ftl",
+                "**/*.json",
+                "google/*"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
         }
     ],
     "icons": {
