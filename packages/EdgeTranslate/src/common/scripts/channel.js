@@ -47,8 +47,14 @@ class Channel {
                         if (!server) break;
 
                         // We can call the callback only when we really provide the requested service.
-                        server(parsed.params, sender).then(
-                            (result) => callback && callback(result)
+                        Promise.resolve(server(parsed.params, sender)).then(
+                            (result) => callback && callback(result),
+                            (error) =>
+                                callback &&
+                                callback({
+                                    __edgeTranslateError: true,
+                                    message: error && error.message ? error.message : String(error),
+                                })
                         );
                         return true;
                     }
@@ -85,6 +91,8 @@ class Channel {
             chrome.runtime.sendMessage(message, (result) => {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
+                } else if (result && result.__edgeTranslateError) {
+                    reject(new Error(result.message || "Extension service request failed."));
                 } else {
                     resolve(result);
                 }
@@ -190,6 +198,10 @@ class Channel {
                 chrome.tabs.sendMessage(tabId, message, (result) => {
                     if (chrome.runtime.lastError) {
                         reject(chrome.runtime.lastError);
+                    } else if (result && result.__edgeTranslateError) {
+                        reject(
+                            new Error(result.message || "Extension tab service request failed.")
+                        );
                     } else {
                         resolve(result);
                     }
