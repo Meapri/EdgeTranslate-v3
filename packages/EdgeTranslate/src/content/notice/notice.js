@@ -16,7 +16,7 @@ window.onload = () => {
     });
 
     const reasonsList = document.getElementById("reasonsList");
-    if (BROWSER_ENV === "firefox") {
+    if (FEATURE_FLAGS.showFirefoxNoticeCopy) {
         const chromeReason = document.getElementById("chromeReason");
         reasonsList.removeChild(chromeReason);
     } else {

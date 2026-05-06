@@ -37,6 +37,7 @@ See https://github.com/adobe-type-tools/cmap-resources
 
   <!-- viewer.mjs는 et-viewer-init.mjs에서 동적으로 로드됩니다 (CSP/순서 보장) -->
   <link rel="stylesheet" href="edge-viewer.css">
+  <script src="edge-viewer-controls.js" type="module"></script>
   <!-- EdgeTranslate 컨텐츠 UI를 PDF 뷰어에도 주입하여 번역 패널/선택 번역 사용 가능하게 함 -->
   <link rel="stylesheet" href="../content/select/select.css" />
   <script src="../content/select/select.js"></script>
@@ -359,6 +360,10 @@ See https://github.com/adobe-type-tools/cmap-resources
 
                   <button id="downloadButton" class="toolbarButton" type="button" tabindex="0" data-l10n-id="pdfjs-save-button">
                     <span data-l10n-id="pdfjs-save-button-label"></span>
+                  </button>
+
+                  <button id="edgeTranslateClosePdfReaderButton" class="toolbarButton" type="button" tabindex="0" title="Open original PDF" aria-label="Open original PDF">
+                    <span>Open original PDF</span>
                   </button>
                 </div>
 

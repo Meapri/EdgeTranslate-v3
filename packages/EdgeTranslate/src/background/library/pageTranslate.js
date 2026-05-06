@@ -1,0 +1,148 @@
+import { logWarn } from "common/scripts/logger.js";
+import { promiseTabs } from "common/scripts/promise.js";
+import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+
+/**
+ * 使用用户选定的网页翻译引擎翻译当前网页。
+ *
+ * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
+ */
+function translatePage(channel) {
+    getOrSetDefaultSettings(["DefaultPageTranslator", "languageSetting"], DEFAULT_SETTINGS).then(
+        (result) => {
+            const translator = result.DefaultPageTranslator;
+            // const targetLang = (result.languageSetting && result.languageSetting.tl) || "en";
+
+            // Page translation is currently Chrome-only.
+            if (!FEATURE_FLAGS.pageTranslate) return;
+
+            switch (translator) {
+                case "GooglePageTranslate":
+                    executeGoogleScript(channel);
+                    break;
+                case "DomPageTranslate":
+                    // Safari 외 브라우저에서만 사용
+                    promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
+                        if (tabs && tabs[0]) {
+                            channel.emitToTabs(tabs[0].id, "start_dom_page_translate", {});
+                        }
+                    });
+                    break;
+                default:
+                    executeGoogleScript(channel);
+                    break;
+            }
+        }
+    );
+}
+
+/**
+ * 执行谷歌网页翻译相关脚本。
+ *
+ * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
+ */
+function executeGoogleScript(channel) {
+    promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        if (tabs[0]) {
+            // Prefer direct executeScript on Safari (content-script world bypasses page CSP)
+            const isSafari = (() => {
+                if (typeof navigator === "undefined" || !navigator.userAgent) return false;
+                const ua = navigator.userAgent;
+                return (
+                    /Safari\//.test(ua) &&
+                    !/Chrome\//.test(ua) &&
+                    !/Chromium\//.test(ua) &&
+                    !/Edg\//.test(ua)
+                );
+            })();
+            if (isSafari) {
+                // Run init.js in ISOLATED world (default) so chrome.* is available; it will inject a page script (injection.js)
+                if (chrome.scripting && chrome.scripting.executeScript) {
+                    const tabId = tabs[0].id;
+                    chrome.scripting
+                        .executeScript({
+                            target: { tabId, allFrames: false },
+                            files: ["google/init.js"],
+                            injectImmediately: true,
+                        })
+                        .then(() => {
+                            channel.emitToTabs(tabId, "start_page_translate", {
+                                translator: "google",
+                            });
+                            setTimeout(() => {
+                                try {
+                                    channel.emitToTabs(tabId, "start_dom_page_translate", {});
+                                } catch {}
+                            }, 800);
+                        })
+                        .catch(() => {
+                            try {
+                                chrome.tabs.executeScript(tabId, { file: "google/init.js" }, () => {
+                                    channel.emitToTabs(tabId, "start_page_translate", {
+                                        translator: "google",
+                                    });
+                                    setTimeout(() => {
+                                        try {
+                                            channel.emitToTabs(
+                                                tabId,
+                                                "start_dom_page_translate",
+                                                {}
+                                            );
+                                        } catch {}
+                                    }, 800);
+                                });
+                            } catch (error) {
+                                channel.emitToTabs(tabId, "inject_page_translate", {});
+                                setTimeout(() => {
+                                    try {
+                                        channel.emitToTabs(tabId, "start_dom_page_translate", {});
+                                    } catch {}
+                                }, 800);
+                            }
+                        });
+                    return;
+                }
+            }
+            const hasScripting =
+                typeof chrome !== "undefined" && chrome.scripting && chrome.scripting.executeScript;
+            if (hasScripting) {
+                const tabId = tabs[0].id;
+                chrome.scripting
+                    .executeScript({
+                        target: { tabId },
+                        files: ["google/init.js"],
+                    })
+                    .then(() => {
+                        channel.emitToTabs(tabId, "start_page_translate", {
+                            translator: "google",
+                        });
+                        setTimeout(() => {
+                            try {
+                                channel.emitToTabs(tabId, "start_dom_page_translate", {});
+                            } catch {}
+                        }, 800);
+                    })
+                    .catch((error) => {
+                        logWarn(`Chrome scripting error: ${error}`);
+                        // final fallback: ask content script to inject
+                        channel.emitToTabs(tabId, "inject_page_translate", {});
+                    });
+            } else {
+                // MV2-compatible executeScript via tabs
+                try {
+                    const tabId = tabs[0].id;
+                    chrome.tabs.executeScript(tabId, { file: "google/init.js" }, () => {
+                        channel.emitToTabs(tabId, "start_page_translate", {
+                            translator: "google",
+                        });
+                    });
+                } catch (error) {
+                    // delegate to content script
+                    channel.emitToTabs(tabs[0].id, "inject_page_translate", {});
+                }
+            }
+        }
+    });
+}
+
+export { translatePage, executeGoogleScript };

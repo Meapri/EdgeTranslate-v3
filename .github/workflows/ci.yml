@@ -2,21 +2,34 @@ name: CI
 
 on:
     push:
-        branches: ["master", "develop"]
+        branches: ["main"]
     pull_request:
-        branches: ["master", "develop"]
+        branches: ["main"]
 
 jobs:
-    build:
+    test-and-build:
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v3
-            - uses: actions/setup-node@v3
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
               with:
-                  node-version: "12"
-            - name: install dependencies
-              run: yarn install
-            - name: build packages for chrome and firefox
-              run: yarn build
-            - name: run all tests
-              run: yarn test
+                  node-version: "22"
+                  cache: "npm"
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run tests
+              run: npm test
+
+            - name: Build Chrome target
+              run: npm run build
+
+            - name: Build Firefox target
+              run: npm run build:firefox
+
+            - name: Build Safari target
+              run: npm run build:safari

@@ -12,6 +12,8 @@ describe("hybrid translator api", () => {
                 detailedMeanings: "GoogleTranslate",
                 definitions: "GoogleTranslate",
                 examples: "GoogleTranslate",
+                sourceLanguage: "GoogleTranslate",
+                targetLanguage: "GoogleTranslate",
             },
         },
         {}

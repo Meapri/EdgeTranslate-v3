@@ -29,6 +29,11 @@ Edge Translate의 포크 프로젝트로, Manifest V3에 맞춰 전면 리팩터
 - Firefox: 선택 번역, PDF 뷰어 지원(브라우저 이슈로 일부 기능이 제한될 수 있음), 전체 페이지 번역 미제공
 - Safari(macOS): 선택 번역, PDF 뷰어 지원, 전체 페이지 번역 미제공(플랫폼 정책/제한)
 
+### PDF 뷰어 참고
+- PDF 링크는 의도적으로 EdgeTranslate 내장 pdf.js 뷰어로 열립니다. 그래야 PDF 안에서도 선택 번역을 사용할 수 있습니다.
+- 로컬/다운로드 PDF(`file://`)도 Chrome의 “파일 URL 액세스 허용”이 켜져 있으면 확장 뷰어에서 처리됩니다. 로컬 파일은 blob 사전 로딩을 하지 않고 PDF.js가 직접 로드하도록 해 흰 화면 문제를 줄였습니다.
+- 현재 문서만 기본/원본 PDF 뷰어로 열고 싶다면 PDF 뷰어 툴바의 **Open original PDF** 버튼을 사용하세요. 이 동작은 리다이렉트 루프를 막기 위한 일회성 우회 표시를 URL에 붙입니다.
+
 ### 개인정보 및 보안
 - 통계/분석 데이터 수집 없음, 추적하지 않음
 - 최소 권한 원칙으로 동작
@@ -46,41 +51,46 @@ Safari(macOS)
 1) Xcode 프로젝트로 실행(리소스 동기화 필요, 개발/빌드 참고)
 
 ### 개발 / 빌드
-작업 디렉터리: `packages/EdgeTranslate`
+작업 디렉터리: 저장소 루트.
 
 1) 의존성 설치
 ```
-cd packages/EdgeTranslate
-npm install
+npm ci
 ```
 
-2) 브라우저별 빌드(병렬)
+2) 테스트 실행
+```
+npm test
+```
+
+3) 기본 빌드
 ```
 npm run build
 ```
-또는 개별 빌드
+공용 translators 패키지와 기본 대상인 Chrome 확장 빌드를 수행합니다.
+
+브라우저별 빌드
 ```
-npm run pack:chrome
-npm run pack:firefox
-npm run build:safari && npm run safari:rsync
+npm run build:chrome
+npm run build:firefox
+npm run build:safari
 ```
 
-3) Safari 개발(Xcode 동기화 워크플로우)
+전체 브라우저 패키징/빌드
 ```
-npm run dev:safari
+npm run build:all
 ```
-리소스가 `safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`로 동기화됩니다.
 
-4) Safari 배포 자동화(선택: 아카이브/내보내기/업로드)
-```
-npm run safari:release
-```
-App Store 계정 등 환경 변수 설정이 필요합니다.
+Safari 참고
+- `npm run build:safari`는 `packages/EdgeTranslate/build/safari/`까지만 생성하며 Xcode `Resources/` 디렉터리는 수정하지 않습니다.
+- Xcode 프로젝트에 명시적으로 반영해야 할 때만 `npm run safari:sync -w edge_translate`를 실행하세요.
+- `npm run safari:release -w edge_translate`는 build, sync, archive, export, upload를 수행하며 App Store 계정 환경 변수가 필요합니다.
 
 빌드 산출물 위치
 - Chrome: `packages/EdgeTranslate/build/chrome/`
 - Firefox: `packages/EdgeTranslate/build/firefox/`
-- Safari 리소스: `packages/EdgeTranslate/build/safari/` → rsync로 Xcode에 반영
+- Safari 빌드 산출물: `packages/EdgeTranslate/build/safari/`
+- Safari Xcode 리소스: 명시적 sync/release 후 `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
 
 ### 호스트 권한
 선택 번역 등 상시 콘텐츠 스크립트 주입을 위해 전역 호스트 권한이 필요합니다. Chrome은 `host_permissions: ["*://*/*"]`를 사용하며, Firefox/Safari는 `<all_urls>`에 매칭되는 콘텐츠 스크립트를 사용합니다. 확장 프로그램은 최소 권한 원칙을 따릅니다.

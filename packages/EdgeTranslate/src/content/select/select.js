@@ -331,7 +331,7 @@ function translateSubmit() {
 function shouldTranslate() {
     let selectionObject = window.getSelection();
     let selectionText = selectionObject.toString().trim();
-    if (BROWSER_ENV === "firefox")
+    if (FEATURE_FLAGS.useFirefoxSelectionBehavior)
         // on firefox, we don't need to tell the focusNode type because in input elements, selectionText is ""
         return (
             selectionText.length > 0 &&

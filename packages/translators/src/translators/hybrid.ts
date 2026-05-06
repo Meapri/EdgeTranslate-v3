@@ -71,24 +71,6 @@ class HybridTranslator {
         );
 
         this.useConfig(config);
-
-        // Warm up translators proactively to reduce first translation latency
-        this.warmUpTranslators();
-    }
-
-    /**
-     * Warm up translators in the background to reduce cold start latency
-     */
-    private async warmUpTranslators() {
-        // Start warming up translators immediately
-        setTimeout(() => {
-            // Warm up Bing translator
-            this.REAL_TRANSLATORS.BingTranslate.warmUp().catch(() => {
-                // Ignore warmup failures
-            });
-            
-            // Google translator doesn't have a warmUp method, so we skip it
-        }, 100); // Small delay to not block constructor
     }
 
     /**
@@ -196,7 +178,7 @@ class HybridTranslator {
     }
 
     /**
-     * Single translation without batching - used internally by batcher.
+     * Execute one uncached hybrid translation and combine component results.
      *
      * @param text text to translate
      * @param from source language
@@ -205,18 +187,6 @@ class HybridTranslator {
      * @returns {Promise<Object>} translation Promise
      */
     async translateSingle(text: string, from: string, to: string) {
-        // Track request statistics
-        this.stats.requests++;
-
-        // Create cache key and check for cached result
-        const cacheKey = `${from}|${to}|${text.toLowerCase().trim()}`;
-        const cached = this.cache.get(cacheKey);
-        
-        if (cached) {
-            this.stats.cacheHits++;
-            return cached;
-        }
-
         // Initiate translation requests.
         let requests: Promise<[HybridSupportedTranslators, TranslationResult]>[] = [];
         for (let translator of this.CONFIG.translators) {
@@ -275,8 +245,6 @@ class HybridTranslator {
         // Fill passthrough originalText if empty
         if (!translation.originalText) translation.originalText = text;
         
-        // Cache the final result
-        this.cache.set(cacheKey, translation);
         return translation;
     }
 
@@ -311,9 +279,9 @@ class HybridTranslator {
 
         const exec = (async (): Promise<TranslationResult> => {
             try {
-                // Use batching system for better efficiency
                 const result = await this.translateSingle(text, from, to);
                 this.stats.requests++;
+                this.cache.set(key, result);
                 return result;
             } catch (error) {
                 this.stats.errors++;

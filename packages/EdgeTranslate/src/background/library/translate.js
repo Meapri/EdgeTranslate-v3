@@ -1,8 +1,9 @@
 import { HybridTranslator } from "@edge_translate/translators";
 // common.log는 현재 파일에서 직접 사용하지 않습니다.
-import { logWarn } from "common/scripts/logger.js";
 import { promiseTabs, delayPromise } from "common/scripts/promise.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import TtlCache from "./ttlCache.js";
+import { executeGoogleScript } from "./pageTranslate.js";
 
 class TranslatorManager {
     /**
@@ -38,12 +39,6 @@ class TranslatorManager {
 
             // The default translator to use.
             this.DEFAULT_TRANSLATOR = configs.DefaultTranslator;
-            // Non-blocking warm-up to reduce first-translate latency
-            setTimeout(() => {
-                try {
-                    this.warmUpTranslators();
-                } catch {}
-            }, 0);
         });
 
         /**
@@ -57,14 +52,11 @@ class TranslatorManager {
             detectTtlMs: 10 * 60 * 1000, // 10 minutes
             translateTtlMs: 30 * 60 * 1000, // 30 minutes
             maxKeyTextLength: 500,
-            debounceWindowMs: 250,
         };
-        this.detectCache = new Map(); // key -> { value, expireAt }
-        this.translationCache = new Map(); // key -> { value, expireAt }
+        this.detectCache = new TtlCache({ maxEntries: this.cacheOptions.maxEntries });
+        this.translationCache = new TtlCache({ maxEntries: this.cacheOptions.maxEntries });
         this.inflightDetect = new Map(); // key -> Promise
         this.inflightTranslate = new Map(); // key -> Promise
-        this.lastTranslateKey = null;
-        this.lastTranslateAt = 0;
 
         /**
          * Start to provide services and listen to event.
@@ -120,55 +112,25 @@ class TranslatorManager {
         return `${translatorId}||${sl}||${tl}||${norm}`;
     }
 
-    /** Get from cache with TTL check and LRU touch */
-    getFromCache(map, key) {
-        const entry = map.get(key);
-        if (!entry) return null;
-        const now = Date.now();
-        if (entry.expireAt && entry.expireAt <= now) {
-            map.delete(key);
-            return null;
-        }
-        // Touch for LRU behavior: re-insert to back
-        map.delete(key);
-        map.set(key, entry);
-        return entry.value;
-    }
-
-    /** Set cache entry with TTL and simple LRU eviction */
-    setCacheEntry(map, key, value, ttlMs) {
-        try {
-            const expireAt = ttlMs ? Date.now() + ttlMs : 0;
-            if (map.has(key)) map.delete(key);
-            map.set(key, { value, expireAt });
-            const max = this.cacheOptions.maxEntries;
-            if (map.size > max) {
-                // delete oldest entry
-                const oldestKey = map.keys().next().value;
-                if (oldestKey !== undefined) map.delete(oldestKey);
-            }
-        } catch {}
-    }
-
     getDetectionFromCache(text) {
         const key = this.makeDetectKey(text);
-        return this.getFromCache(this.detectCache, key);
+        return this.detectCache.get(key);
     }
 
     rememberDetection(text, lang) {
         if (!text || !lang) return;
         const key = this.makeDetectKey(text);
-        this.setCacheEntry(this.detectCache, key, lang, this.cacheOptions.detectTtlMs);
+        this.detectCache.set(key, lang, this.cacheOptions.detectTtlMs);
     }
 
     getTranslationFromCache(text, sl, tl, translatorId) {
         const key = this.makeTranslateKey(text, sl, tl, translatorId);
-        return this.getFromCache(this.translationCache, key);
+        return this.translationCache.get(key);
     }
 
     rememberTranslation(text, sl, tl, translatorId, result) {
         const key = this.makeTranslateKey(text, sl, tl, translatorId);
-        this.setCacheEntry(this.translationCache, key, result, this.cacheOptions.translateTtlMs);
+        this.translationCache.set(key, result, this.cacheOptions.translateTtlMs);
     }
 
     /**
@@ -240,58 +202,6 @@ class TranslatorManager {
     }
 
     /**
-     * Warm up translators to minimize cold-start latency.
-     * Attempts lightweight operations (token fetch/detect tiny text) for default and configured translators.
-     */
-    async warmUpTranslators() {
-        try {
-            await this.config_loader;
-            const candidates = new Set();
-            if (this.DEFAULT_TRANSLATOR) candidates.add(this.DEFAULT_TRANSLATOR);
-            if (this.HYBRID_TRANSLATOR && this.HYBRID_TRANSLATOR.REAL_TRANSLATORS) {
-                Object.keys(this.HYBRID_TRANSLATOR.REAL_TRANSLATORS).forEach((k) =>
-                    candidates.add(k)
-                );
-            }
-            const tinyText = "a";
-            const tasks = [];
-            for (const id of candidates) {
-                const t = this.TRANSLATORS[id];
-                if (!t) continue;
-                // Prefer explicit token update methods when available
-                if (typeof t.updateTokens === "function") {
-                    tasks.push(
-                        Promise.resolve()
-                            .then(() => t.updateTokens())
-                            .catch(() => {})
-                    );
-                    continue;
-                }
-                if (typeof t.updateTKK === "function") {
-                    tasks.push(
-                        Promise.resolve()
-                            .then(() => t.updateTKK())
-                            .catch(() => {})
-                    );
-                    continue;
-                }
-                // Fallback to a cheap detect call
-                if (typeof t.detect === "function") {
-                    tasks.push(
-                        Promise.resolve()
-                            .then(() => t.detect(tinyText))
-                            .catch(() => {})
-                    );
-                }
-            }
-            // Run warm-ups with a soft timeout to avoid hanging
-            const softTimeout = (p, ms) =>
-                Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
-            await softTimeout(Promise.allSettled(tasks), 2500);
-        } catch {}
-    }
-
-    /**
      * Register event listeners.
      *
      * This should be called for only once!
@@ -299,8 +209,8 @@ class TranslatorManager {
     listenToEvents() {
         // Google page translate button clicked event.
         this.channel.on("translate_page_google", () => {
-            // Safari/Firefox에서는 전체 페이지 번역 비활성화
-            if (typeof BROWSER_ENV !== "undefined" && BROWSER_ENV !== "chrome") return;
+            // Page translation is currently Chrome-only.
+            if (!FEATURE_FLAGS.pageTranslate) return;
             executeGoogleScript(this.channel);
         });
 
@@ -494,18 +404,8 @@ class TranslatorManager {
                 }
             }
 
-            // Debounce burst calls of same key within a window
             const translatorId = this.DEFAULT_TRANSLATOR;
             const key = this.makeTranslateKey(text, sl, tl, translatorId);
-            const now = Date.now();
-            if (
-                this.lastTranslateKey === key &&
-                now - this.lastTranslateAt < this.cacheOptions.debounceWindowMs
-            ) {
-                // Skip duplicate immediate calls; relying on cache/inflight
-            }
-            this.lastTranslateKey = key;
-            this.lastTranslateAt = now;
 
             // Try translation cache first
             let result = this.getTranslationFromCache(text, sl, tl, translatorId);
@@ -726,168 +626,4 @@ class TranslatorManager {
     }
 }
 
-/**
- * 使用用户选定的网页翻译引擎翻译当前网页。
- *
- * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
- */
-function translatePage(channel) {
-    getOrSetDefaultSettings(["DefaultPageTranslator", "languageSetting"], DEFAULT_SETTINGS).then(
-        (result) => {
-            const translator = result.DefaultPageTranslator;
-            // const targetLang = (result.languageSetting && result.languageSetting.tl) || "en";
-
-            // Safari/Firefox에서는 전체 페이지 번역을 제공하지 않음
-            if (typeof BROWSER_ENV !== "undefined" && BROWSER_ENV !== "chrome") return;
-
-            switch (translator) {
-                case "GooglePageTranslate":
-                    executeGoogleScript(channel);
-                    break;
-                case "DomPageTranslate":
-                    // Safari 외 브라우저에서만 사용
-                    promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
-                        if (tabs && tabs[0]) {
-                            channel.emitToTabs(tabs[0].id, "start_dom_page_translate", {});
-                        }
-                    });
-                    break;
-                default:
-                    executeGoogleScript(channel);
-                    break;
-            }
-        }
-    );
-}
-
-/**
- * 执行谷歌网页翻译相关脚本。
- *
- * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
- */
-function executeGoogleScript(channel) {
-    promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
-        if (tabs[0]) {
-            // Prefer direct executeScript on Safari (content-script world bypasses page CSP)
-            const isSafari = (() => {
-                if (typeof navigator === "undefined" || !navigator.userAgent) return false;
-                const ua = navigator.userAgent;
-                return (
-                    /Safari\//.test(ua) &&
-                    !/Chrome\//.test(ua) &&
-                    !/Chromium\//.test(ua) &&
-                    !/Edg\//.test(ua)
-                );
-            })();
-            if (isSafari) {
-                // Run init.js in ISOLATED world (default) so chrome.* is available; it will inject a page script (injection.js)
-                if (chrome.scripting && chrome.scripting.executeScript) {
-                    const tabId = tabs[0].id;
-                    chrome.scripting
-                        .executeScript({
-                            target: { tabId, allFrames: false },
-                            files: ["google/init.js"],
-                            injectImmediately: true,
-                        })
-                        .then(() => {
-                            channel.emitToTabs(tabId, "start_page_translate", {
-                                translator: "google",
-                            });
-                            setTimeout(() => {
-                                try {
-                                    channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                                } catch {}
-                            }, 800);
-                        })
-                        .catch(() => {
-                            try {
-                                chrome.tabs.executeScript(tabId, { file: "google/init.js" }, () => {
-                                    channel.emitToTabs(tabId, "start_page_translate", {
-                                        translator: "google",
-                                    });
-                                    setTimeout(() => {
-                                        try {
-                                            channel.emitToTabs(
-                                                tabId,
-                                                "start_dom_page_translate",
-                                                {}
-                                            );
-                                        } catch {}
-                                    }, 800);
-                                });
-                            } catch (error) {
-                                channel.emitToTabs(tabId, "inject_page_translate", {});
-                                setTimeout(() => {
-                                    try {
-                                        channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                                    } catch {}
-                                }, 800);
-                            }
-                        });
-                    return;
-                }
-            }
-            const hasScripting =
-                typeof chrome !== "undefined" && chrome.scripting && chrome.scripting.executeScript;
-            if (hasScripting) {
-                const tabId = tabs[0].id;
-                chrome.scripting
-                    .executeScript({
-                        target: { tabId },
-                        files: ["google/init.js"],
-                    })
-                    .then(() => {
-                        channel.emitToTabs(tabId, "start_page_translate", {
-                            translator: "google",
-                        });
-                        setTimeout(() => {
-                            try {
-                                channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                            } catch {}
-                        }, 800);
-                    })
-                    .catch((error) => {
-                        logWarn(`Chrome scripting error: ${error}`);
-                        // final fallback: ask content script to inject
-                        channel.emitToTabs(tabId, "inject_page_translate", {});
-                    });
-            } else {
-                // MV2-compatible executeScript via tabs
-                try {
-                    const tabId = tabs[0].id;
-                    chrome.tabs.executeScript(tabId, { file: "google/init.js" }, () => {
-                        channel.emitToTabs(tabId, "start_page_translate", {
-                            translator: "google",
-                        });
-                    });
-                } catch (error) {
-                    // delegate to content script
-                    channel.emitToTabs(tabs[0].id, "inject_page_translate", {});
-                }
-            }
-        }
-    });
-}
-
-/**
- * Open Google site translate proxy for current tab URL (Safari fallback).
- *
- * @param {string} targetLang target language like 'en', 'zh-CN'
- */
-// function openGoogleSiteTranslate(targetLang) {
-//     promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
-//         if (!tabs[0]) return;
-//         const currentUrl = tabs[0].url || "";
-//         if (!currentUrl) return;
-//         const proxy = `https://translate.google.com/translate?sl=auto&tl=${encodeURIComponent(
-//             targetLang
-//         )}&u=${encodeURIComponent(currentUrl)}`;
-//         try {
-//             chrome.tabs.create({ url: proxy });
-//         } catch (e) {
-//             logWarn("Open Google site translate failed", e);
-//         }
-//     });
-// }
-
-export { TranslatorManager, translatePage, executeGoogleScript };
+export { TranslatorManager };

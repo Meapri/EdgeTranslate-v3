@@ -149,10 +149,23 @@ function buildJS() {
     process.env.EDGE_TARGET_BROWSER = browser;
     let webpack_config = require(webpack_path);
     webpack_config.plugins = webpack_config.plugins || [];
+    const buildFlags = {
+        pageTranslate: browser === "chrome",
+        showFirefoxOptionsMenu: browser === "firefox",
+        showFirefoxNoticeCopy: browser === "firefox",
+        useFirefoxSelectionBehavior: browser === "firefox",
+        useFirefoxTabMessaging: browser === "firefox",
+        chromeDevHotReload: browser === "chrome" && environment === "development",
+    };
+
     webpack_config.plugins.push(
         new webpack.DefinePlugin({
             BROWSER_ENV: JSON.stringify(browser),
             BUILD_ENV: JSON.stringify(environment),
+            IS_CHROME: JSON.stringify(browser === "chrome"),
+            IS_FIREFOX: JSON.stringify(browser === "firefox"),
+            IS_SAFARI: JSON.stringify(browser === "safari"),
+            FEATURE_FLAGS: JSON.stringify(buildFlags),
             "process.env.NODE_ENV": JSON.stringify(environment),
         })
     );

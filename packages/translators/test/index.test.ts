@@ -11,6 +11,8 @@ const HYBRID_TRANSLATOR = new HybridTranslator(
             detailedMeanings: "GoogleTranslate",
             definitions: "GoogleTranslate",
             examples: "GoogleTranslate",
+            sourceLanguage: "GoogleTranslate",
+            targetLanguage: "GoogleTranslate",
         },
     },
     {}

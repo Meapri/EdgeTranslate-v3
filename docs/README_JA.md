@@ -29,6 +29,11 @@
 - Firefox: 選択翻訳、PDF ビューア（ブラウザーの問題により一部制限あり）、ページ全体の翻訳は非対応
 - Safari（macOS）: 選択翻訳、PDF ビューア、ページ全体の翻訳は非対応（プラットフォームの方針/制限）
 
+### PDF ビューアの注意事項
+- PDF リンクは意図的に EdgeTranslate 内蔵の pdf.js ビューアで開きます。これにより PDF 内でも選択翻訳を利用できます。
+- ローカル/ダウンロード済み PDF（`file://`）も、Chrome で「ファイルの URL へのアクセスを許可」が有効な場合は拡張機能ビューアで処理されます。ローカルファイルは blob として事前読み込みせず、PDF.js が直接読み込むようにして空白ページ問題を抑えています。
+- 現在の文書だけを元の/ブラウザー標準 PDF ビューアで開きたい場合は、PDF ビューアのツールバーにある **Open original PDF** ボタンを使用してください。この操作ではリダイレクトループを避けるため、一時的なバイパスマーカーを URL に追加します。
+
 ### プライバシーとセキュリティ
 - 分析/統計は収集せず、トラッキングもしません
 - 最小権限の原則
@@ -46,41 +51,46 @@ Safari（macOS）
 1）Xcode プロジェクトで実行（リソース同期が必要。開発/ビルド参照）
 
 ### 開発 / ビルド
-作業ディレクトリ: `packages/EdgeTranslate`
+作業ディレクトリ: リポジトリのルート。
 
 1）依存関係のインストール
 ```
-cd packages/EdgeTranslate
-npm install
+npm ci
 ```
 
-2）全ブラウザーを並列ビルド
+2）テストの実行
+```
+npm test
+```
+
+3）デフォルトビルド
 ```
 npm run build
 ```
-または個別ビルド
+共有 translators パッケージと、主要ターゲットである Chrome 拡張機能をビルドします。
+
+ブラウザー別ビルド
 ```
-npm run pack:chrome
-npm run pack:firefox
-npm run build:safari && npm run safari:rsync
+npm run build:chrome
+npm run build:firefox
+npm run build:safari
 ```
 
-3）Safari 開発（Xcode 同期ワークフロー）
+全ブラウザーのパッケージング/ビルド
 ```
-npm run dev:safari
+npm run build:all
 ```
-リソースは `safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/` に同期されます。
 
-4）任意の Safari リリース自動化（アーカイブ/エクスポート/アップロード）
-```
-npm run safari:release
-```
-環境変数（App Store アカウント等）の設定が必要です。
+Safari の注意事項
+- `npm run build:safari` は `packages/EdgeTranslate/build/safari/` のみを生成し、Xcode の `Resources/` ディレクトリは変更しません。
+- Xcode プロジェクトへ明示的に同期する必要がある場合のみ `npm run safari:sync -w edge_translate` を実行してください。
+- `npm run safari:release -w edge_translate` は build、sync、archive、export、upload を実行し、App Store 認証情報の環境変数が必要です。
 
 ビルド出力
 - Chrome: `packages/EdgeTranslate/build/chrome/`
 - Firefox: `packages/EdgeTranslate/build/firefox/`
-- Safari リソース: `packages/EdgeTranslate/build/safari/` → rsync で Xcode へ
+- Safari ビルド出力: `packages/EdgeTranslate/build/safari/`
+- Safari Xcode リソース: 明示的な sync/release 後に `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
 
 ### ホスト権限
 常駐コンテンツスクリプト（選択翻訳 等）のためにグローバルなホスト権限が必要です。Chrome は `host_permissions: ["*://*/*"]`、Firefox/Safari は `<all_urls>` にマッチするコンテンツスクリプトを使用します。拡張機能は最小権限の方針に従います。

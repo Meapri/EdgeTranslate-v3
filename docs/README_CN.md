@@ -29,6 +29,11 @@
 - Firefox：选择翻译、PDF 阅读器（受浏览器问题限制部分功能）、不提供整页翻译
 - Safari（macOS）：选择翻译、PDF 阅读器、不提供整页翻译（平台政策/限制）
 
+### PDF 阅读器说明
+- PDF 链接会有意打开到 EdgeTranslate 内置的 pdf.js 阅读器中，这样才能在 PDF 内继续使用划词翻译。
+- 本地/已下载 PDF（`file://`）在 Chrome 启用“允许访问文件 URL”后仍由扩展阅读器处理。阅读器不会把本地文件预加载成 blob，而是让 PDF.js 直接读取，以减少空白页问题。
+- 如需仅对当前文档返回原始/浏览器 PDF 阅读器，可点击 PDF 阅读器工具栏中的 **Open original PDF**。该操作会在 URL 上添加一次性绕过标记，避免再次重定向形成循环。
+
 ### 隐私与安全
 - 不收集分析/统计，不跟踪
 - 最小权限原则
@@ -46,41 +51,46 @@ Safari（macOS）
 1）通过 Xcode 项目运行（资源需同步，见开发/构建）
 
 ### 开发 / 构建
-工作目录：`packages/EdgeTranslate`
+工作目录：仓库根目录。
 
 1）安装依赖
 ```
-cd packages/EdgeTranslate
-npm install
+npm ci
 ```
 
-2）并行构建全部浏览器
+2）运行测试
+```
+npm test
+```
+
+3）默认构建
 ```
 npm run build
 ```
-或分别构建
+该命令会构建共享 translators 包以及主要目标 Chrome 扩展。
+
+按浏览器分别构建
 ```
-npm run pack:chrome
-npm run pack:firefox
-npm run build:safari && npm run safari:rsync
+npm run build:chrome
+npm run build:firefox
+npm run build:safari
 ```
 
-3）Safari 开发（Xcode 同步工作流）
+全部浏览器打包/构建
 ```
-npm run dev:safari
+npm run build:all
 ```
-资源会同步到 `safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`。
 
-4）可选的 Safari 发布自动化（归档/导出/上传）
-```
-npm run safari:release
-```
-需要配置环境变量（App Store 账号等）。
+Safari 说明
+- `npm run build:safari` 只生成 `packages/EdgeTranslate/build/safari/`，不会修改 Xcode `Resources/` 目录。
+- 只有需要同步到 Xcode 项目时，才运行 `npm run safari:sync -w edge_translate`。
+- `npm run safari:release -w edge_translate` 会执行 build、sync、archive、export、upload，并需要 App Store 凭据环境变量。
 
 构建输出位置
 - Chrome：`packages/EdgeTranslate/build/chrome/`
 - Firefox：`packages/EdgeTranslate/build/firefox/`
-- Safari 资源：`packages/EdgeTranslate/build/safari/` → rsync 到 Xcode
+- Safari 构建输出：`packages/EdgeTranslate/build/safari/`
+- Safari Xcode 资源：显式 sync/release 后位于 `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
 
 ### 主机权限
 为实现常驻内容脚本（如选择翻译）需要全局主机权限。Chrome 使用 `host_permissions: ["*://*/*"]`；Firefox/Safari 通过 `<all_urls>` 匹配的内容脚本实现。扩展遵循最小权限原则。

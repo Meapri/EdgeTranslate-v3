@@ -1,6 +1,11 @@
 import type { AxiosRequestConfig, AxiosResponse } from "axios";
 import { PronunciationSpeed, TranslationResult } from "../types";
 import { LRUCache } from "../utils/lru";
+import {
+    parseExampleResult as parseBingExampleResult,
+    parseLookupResult as parseBingLookupResult,
+    parseTranslateResult as parseBingTranslateResult,
+} from "./bingParsers";
 
 // Use axios for browser compatibility
 import axios from "../axios";
@@ -25,8 +30,6 @@ class BingTranslator {
         // Try to load cached tokens first
         this.loadCachedTokens();
         
-        // Start lightweight background warmup
-        setTimeout(() => this.warmUp().catch(() => {}), 0);
     }
 
     /**
@@ -520,17 +523,8 @@ class BingTranslator {
      *
      * @returns Parsed result
      */
-    parseTranslateResult(result: any, extras: TranslationResult) {
-        const parsed = extras || new Object();
-
-        try {
-            const translations = result[0].translations;
-            parsed.mainMeaning = translations[0].text;
-            parsed.tPronunciation = translations[0].transliteration.text;
-            // eslint-disable-next-line no-empty
-        } catch (error) {}
-
-        return parsed;
+    parseTranslateResult(result: any, extras: TranslationResult): TranslationResult {
+        return parseBingTranslateResult(result, extras);
     }
 
     /**
@@ -541,66 +535,8 @@ class BingTranslator {
      *
      * @returns Parsed result
      */
-    parseLookupResult(result: any, extras: TranslationResult) {
-        const parsed = extras || new Object();
-
-        try {
-            parsed.originalText = result[0].displaySource;
-
-            const translations = result[0].translations;
-            parsed.mainMeaning = translations[0].displayTarget;
-            parsed.tPronunciation = translations[0].transliteration;
-
-            const detailedMeanings = [];
-            const definitions = [];
-            
-            for (const i in translations) {
-                const synonyms = [];
-                for (const j in translations[i].backTranslations) {
-                    synonyms.push(translations[i].backTranslations[j].displayText);
-                }
-
-                // Add detailed meanings with part of speech
-                detailedMeanings.push({
-                    pos: translations[i].posTag,
-                    meaning: translations[i].displayTarget,
-                    synonyms,
-                });
-
-                // Add definitions with examples if available
-                if (translations[i].examples && translations[i].examples.length > 0) {
-                    for (const example of translations[i].examples) {
-                        definitions.push({
-                            pos: translations[i].posTag,
-                            meaning: translations[i].displayTarget,
-                            example: example.sourceExample || example.targetExample,
-                        });
-                    }
-                }
-            }
-
-            parsed.detailedMeanings = detailedMeanings;
-            
-            // Only add definitions if we have any
-            if (definitions.length > 0) {
-                parsed.definitions = definitions;
-            }
-            
-            // Extract additional examples if available in the root response
-            if (result[0].examples && result[0].examples.length > 0) {
-                const examples = [];
-                for (const example of result[0].examples) {
-                    examples.push({
-                        source: example.sourcePrefix + example.sourceTerm + example.sourceSuffix,
-                        target: example.targetPrefix + example.targetTerm + example.targetSuffix,
-                    });
-                }
-                parsed.examples = examples;
-            }
-            // eslint-disable-next-line no-empty
-        } catch (error) {}
-
-        return parsed;
+    parseLookupResult(result: any, extras: TranslationResult): TranslationResult {
+        return parseBingLookupResult(result, extras);
     }
 
     /**
@@ -611,27 +547,8 @@ class BingTranslator {
      *
      * @returns parse result
      */
-    parseExampleResult(result: any, extras: TranslationResult) {
-        const parsed = extras || new Object();
-
-        try {
-            parsed.examples = result[0].examples.map(
-                (example: {
-                    sourcePrefix: string;
-                    sourceTerm: string;
-                    sourceSuffix: string;
-                    targetPrefix: string;
-                    targetTerm: string;
-                    targetSuffix: string;
-                }) => ({
-                    source: `${example.sourcePrefix}<b>${example.sourceTerm}</b>${example.sourceSuffix}`,
-                    target: `${example.targetPrefix}<b>${example.targetTerm}</b>${example.targetSuffix}`,
-                })
-            );
-            // eslint-disable-next-line no-empty
-        } catch (error) {}
-
-        return parsed;
+    parseExampleResult(result: any, extras: TranslationResult): TranslationResult {
+        return parseBingExampleResult(result, extras);
     }
 
     /**

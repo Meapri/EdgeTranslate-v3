@@ -171,7 +171,7 @@ class Channel {
      * @returns {Function | null} message sender
      */
     _getTabMessageSender() {
-        if (BROWSER_ENV === "firefox") {
+        if (FEATURE_FLAGS.useFirefoxTabMessaging) {
             if (!browser.tabs || !browser.tabs.sendMessage) {
                 return null;
             }

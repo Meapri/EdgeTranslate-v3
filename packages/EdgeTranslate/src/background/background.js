@@ -1,4 +1,5 @@
-import { TranslatorManager, translatePage, executeGoogleScript } from "./library/translate.js";
+import { TranslatorManager } from "./library/translate.js";
+import { translatePage, executeGoogleScript } from "./library/pageTranslate.js";
 import {
     addUrlBlacklist,
     addDomainBlacklist,
@@ -41,7 +42,6 @@ function setupContextMenus() {
     if (contextMenusInitialized) return;
     // Clear existing menus first to avoid duplicate id errors on SW restart/reload
     const createAll = () => {
-        const isSafari = BROWSER_ENV === "safari";
         chrome.contextMenus.create({
             id: "translate",
             title: `${chrome.i18n.getMessage("Translate")} '%s'`,
@@ -49,7 +49,7 @@ function setupContextMenus() {
         });
 
         // Add an entry to options page for Firefox as it doesn't have one.
-        if (BROWSER_ENV === "firefox") {
+        if (FEATURE_FLAGS.showFirefoxOptionsMenu) {
             chrome.contextMenus.create({
                 id: "settings",
                 title: chrome.i18n.getMessage("Settings"),
@@ -63,7 +63,7 @@ function setupContextMenus() {
             contexts: ["action"],
         });
 
-        if (!isSafari && BROWSER_ENV !== "firefox") {
+        if (FEATURE_FLAGS.pageTranslate) {
             chrome.contextMenus.create({
                 id: "translate_page",
                 title: chrome.i18n.getMessage("TranslatePage"),
@@ -71,7 +71,7 @@ function setupContextMenus() {
             });
         }
 
-        if (!isSafari && BROWSER_ENV !== "firefox") {
+        if (FEATURE_FLAGS.pageTranslate) {
             chrome.contextMenus.create({
                 id: "translate_page_google",
                 title: chrome.i18n.getMessage("TranslatePageGoogle"),
@@ -380,7 +380,7 @@ chrome.commands.onCommand.addListener((command) => {
 /**
  * dynamic importing hot reload function only in development env
  */
-if (BUILD_ENV === "development" && BROWSER_ENV === "chrome") {
+if (FEATURE_FLAGS.chromeDevHotReload) {
     import("./library/hot_reload.js").then((module) => {
         module.hotReload();
     });

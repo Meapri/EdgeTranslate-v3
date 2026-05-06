@@ -787,7 +787,25 @@ html[data-theme] #findbar input {
   vertical-align: middle !important;
 }
 
+#edgeTranslateClosePdfReaderButton::before {
+  content: "×";
+  mask-image: none !important;
+  background: none !important;
+  color: var(--et-text);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
 
-
-
+#edgeTranslateClosePdfReaderButton span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 

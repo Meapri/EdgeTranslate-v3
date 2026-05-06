@@ -28,6 +28,11 @@ View this page in other languages:
 - Firefox: Selection translation, PDF viewer (some limitations due to browser issues), no full-page translation
 - Safari (macOS): Selection translation, PDF viewer, no full-page translation (platform policies/limits)
 
+### PDF Viewer Notes
+- PDF links are intentionally opened in the built-in EdgeTranslate/pdf.js viewer so selection translation also works inside PDFs.
+- Local/downloaded PDFs (`file://`) remain handled by the extension viewer when Chrome's “Allow access to file URLs” is enabled. The viewer avoids blob-preloading local files so PDF.js can load them directly.
+- Use the **Open original PDF** button in the PDF viewer toolbar to leave the extension viewer for the current document. That action adds a one-time native-viewer bypass marker to prevent redirect loops.
+
 ### Privacy & Security
 - No analytics/statistics collection; no tracking
 - Minimal-permissions principle
@@ -45,41 +50,46 @@ Safari (macOS)
 1) Run via the Xcode project with synchronized resources (see Development/Build)
 
 ### Development / Build
-Working directory: `packages/EdgeTranslate`
+Working directory: repository root.
 
 1) Install dependencies
 ```
-cd packages/EdgeTranslate
-npm install
+npm ci
 ```
 
-2) Build all browsers in parallel
+2) Run tests
+```
+npm test
+```
+
+3) Default build
 ```
 npm run build
 ```
-Or per-browser
+This builds shared translator packages and the primary Chrome extension build.
+
+Per-browser builds
 ```
-npm run pack:chrome
-npm run pack:firefox
-npm run build:safari && npm run safari:rsync
+npm run build:chrome
+npm run build:firefox
+npm run build:safari
 ```
 
-3) Safari development (Xcode sync workflow)
+All-browser packaging/build
 ```
-npm run dev:safari
+npm run build:all
 ```
-Resources sync to `safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`.
 
-4) Optional Safari release automation (archive/export/upload)
-```
-npm run safari:release
-```
-Requires environment variables (App Store credentials, etc.).
+Safari notes
+- `npm run build:safari` only writes `packages/EdgeTranslate/build/safari/`. It does not mutate the Xcode `Resources/` directory.
+- Use `npm run safari:sync -w edge_translate` only when you intentionally want to copy `build/safari/` into the Xcode project.
+- `npm run safari:release -w edge_translate` performs build, sync, archive, export, and upload, and requires App Store credentials.
 
 Build outputs
 - Chrome: `packages/EdgeTranslate/build/chrome/`
 - Firefox: `packages/EdgeTranslate/build/firefox/`
-- Safari resources: `packages/EdgeTranslate/build/safari/` → rsync to Xcode
+- Safari build output: `packages/EdgeTranslate/build/safari/`
+- Safari Xcode resources: `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/` after explicit sync/release only
 
 ### Host Permissions
 Global host permissions are required for always-on content scripts (selection translation, etc.). Chrome uses `host_permissions: ["*://*/*"]`; Firefox/Safari use `<all_urls>`-matched content scripts. The extension adheres to a minimal-permissions approach.

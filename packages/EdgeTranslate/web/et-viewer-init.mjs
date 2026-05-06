@@ -2,6 +2,7 @@
 import * as PDFJS from '../build/build/pdf.mjs';
 import { applyEarlyThemeFromStorageAndSystem, applyEarlyPageTheme, setupThemeToggle } from './et-viewer-theme.mjs';
 import { setupSecondaryToolbarScroll } from './et-viewer-secondary-toolbar.mjs';
+import { parsePdfTarget, shouldPreloadPdfAsBlob } from './edge-viewer-file.js';
 
 // Expose as global for viewer.mjs
 if (!globalThis.pdfjsLib) {
@@ -60,8 +61,7 @@ try {
     let rawUrl = fileParam;
     try { rawUrl = decodeURIComponent(fileParam); } catch {}
 
-    let target;
-    try { target = new URL(rawUrl, location.href); } catch { target = null; }
+    const target = parsePdfTarget(rawUrl, location.href);
 
     const isBlobUrl = typeof rawUrl === 'string' && rawUrl.startsWith('blob:');
     const sourceParam = params.get('source');
@@ -90,7 +90,7 @@ try {
       } catch (e) {
         console.warn('[EdgeTranslate] PDF blob rehydration failed:', e);
       }
-    } else if (target && target.origin !== location.origin && !isBlobUrl) {
+    } else if (shouldPreloadPdfAsBlob({ rawUrl, viewerOrigin: location.origin, baseUrl: location.href })) {
       // Cross-origin: preload then point file param at same-origin blob URL before viewer runs
       try {
         const res = await fetch(target.href);

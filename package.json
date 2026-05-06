@@ -24,6 +24,10 @@
     },
     "scripts": {
         "build": "turbo run build",
+        "build:all": "npm run build -w @edge_translate/translators && npm run build:all -w edge_translate",
+        "build:chrome": "npm run build -w @edge_translate/translators && npm run build:chrome -w edge_translate",
+        "build:firefox": "npm run build -w @edge_translate/translators && npm run build:firefox -w edge_translate",
+        "build:safari": "npm run build -w @edge_translate/translators && npm run build:safari -w edge_translate",
         "test": "turbo run test"
     },
     "devDependencies": {
@@ -37,6 +41,7 @@
         "eslint-plugin-prettier": "^3.4.1",
         "husky": "^4.3.8",
         "jest": "^27.5.1",
+        "jest-environment-jsdom": "^27.5.1",
         "prettier": "^2.6.0",
         "turbo": "^1.2.16"
     },

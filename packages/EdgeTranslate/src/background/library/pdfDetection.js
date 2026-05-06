@@ -6,6 +6,7 @@ const DEFAULT_PDF_DETECTION_CONFIG = {
         file: "file",
         source: "source",
     },
+    bypassParam: "edge_translate_pdf_native",
     downloadDispositionTokens: ["attachment"],
     pdfMimeTypes: ["application/pdf", "application/x-pdf", "text/pdf"],
     fallbackMimeSniffers: [{ mime: "application/octet-stream", hint: "pdf" }],
@@ -39,6 +40,7 @@ function extendConfig(overrides = {}) {
             ...DEFAULT_PDF_DETECTION_CONFIG.viewerQuery,
             ...(overrides.viewerQuery || {}),
         },
+        bypassParam: overrides.bypassParam || DEFAULT_PDF_DETECTION_CONFIG.bypassParam,
         pdfMimeTypes: overrides.pdfMimeTypes || DEFAULT_PDF_DETECTION_CONFIG.pdfMimeTypes,
         fallbackMimeSniffers:
             overrides.fallbackMimeSniffers || DEFAULT_PDF_DETECTION_CONFIG.fallbackMimeSniffers,
@@ -56,6 +58,24 @@ function extendConfig(overrides = {}) {
         networkProbeCacheTtlMs:
             overrides.networkProbeCacheTtlMs ?? DEFAULT_PDF_DETECTION_CONFIG.networkProbeCacheTtlMs,
     };
+}
+
+function hasPdfViewerBypass(url, config) {
+    if (!url || typeof url !== "string") return false;
+    const marker = `${config.bypassParam}=1`;
+    return url.includes(marker);
+}
+
+function shouldHandlePdfNavigationUrl(url, config) {
+    if (!url || typeof url !== "string") return false;
+    if (hasPdfViewerBypass(url, config)) return false;
+
+    try {
+        const { protocol } = new URL(url);
+        return config.navigationSchemes.includes(protocol);
+    } catch (_) {
+        return false;
+    }
 }
 
 function safeGetHeader(headers, target) {
@@ -299,6 +319,7 @@ function setupWebRequestListener({ cache, probeCache, config, logInfo, logWarn }
     const listener = (details) => {
         try {
             if (details.frameId !== 0 || typeof details.url !== "string") return;
+            if (!shouldHandlePdfNavigationUrl(details.url, config)) return;
 
             const headers = details.responseHeaders || [];
             const contentType = safeGetHeader(headers, "content-type");
@@ -359,12 +380,7 @@ function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, 
             if (details.frameId !== 0 || typeof details.url !== "string") return;
             const { url, tabId } = details;
 
-            try {
-                const protocol = new URL(url).protocol;
-                if (protocol && !config.navigationSchemes.includes(protocol)) return;
-            } catch (_) {
-                // Ignore invalid URL parsing errors
-            }
+            if (!shouldHandlePdfNavigationUrl(url, config)) return;
 
             let shouldRedirect = true;
             const cached = cache.get(url);
@@ -459,3 +475,5 @@ export function setupPdfDetection({ config: overrides, logInfo, logWarn } = {}) 
         config,
     };
 }
+
+export { extendConfig, hasPdfViewerBypass, shouldHandlePdfNavigationUrl };
