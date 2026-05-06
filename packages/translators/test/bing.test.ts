@@ -1,19 +1,61 @@
 import BingTranslator from "../src/translators/bing";
 
 describe("bing translator api", () => {
-    const TRANSLATOR = new BingTranslator();
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
 
-    it("to update IG and IID", async () => {
-        await TRANSLATOR.updateTokens();
-        expect(typeof TRANSLATOR.IG).toEqual("string");
-        expect(TRANSLATOR.IG.length).toBeGreaterThan(0);
+    it("updates IG and IID without depending on live Bing responses", async () => {
+        const translator = new BingTranslator();
+        jest.spyOn(translator as any, "_doUpdateTokens").mockImplementation(async function (this: any) {
+            this.IG = "TESTIG123";
+            this.key = "123456";
+            this.token = "test-token";
+            this.IID = "translator.5028";
+            this.tokensInitiated = true;
+        });
 
-        expect(typeof TRANSLATOR.IID).toEqual("string");
-        expect(TRANSLATOR.IID!.length).toBeGreaterThan(0);
-    }, 10000);
+        await translator.updateTokens();
 
-    it("should translate text from English to Korean", async () => {
-        const result = await TRANSLATOR.translate("Hello world", "en", "ko");
-        expect(result.mainMeaning).toBeTruthy();
-    }, 15000);
+        expect(translator.IG).toBe("TESTIG123");
+        expect(translator.IID).toBe("translator.5028");
+    });
+
+    it("translates text from English to Korean using mocked Bing responses", async () => {
+        const translator = new BingTranslator();
+        translator.IG = "TESTIG123";
+        translator.key = "123456";
+        translator.token = "test-token";
+        translator.IID = "translator.5028";
+
+        jest.spyOn(translator, "request").mockImplementation(async (constructParams: any, args: string[]) => {
+            const params = constructParams.call(translator, ...args);
+            if (params.url.startsWith("ttranslatev3")) {
+                return [
+                    {
+                        detectedLanguage: { language: "en" },
+                        translations: [
+                            {
+                                text: "안녕하세요",
+                                transliteration: { text: "annyeonghaseyo" },
+                            },
+                        ],
+                    },
+                ];
+            }
+            if (params.url.startsWith("tlookupv3") || params.url.startsWith("texamplev3")) {
+                return [];
+            }
+            throw new Error(`Unexpected Bing mock request: ${params.url}`);
+        });
+
+        const result = await translator.translate("Hello world", "en", "ko");
+
+        expect(result).toMatchObject({
+            originalText: "Hello world",
+            mainMeaning: "안녕하세요",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+    });
 });
