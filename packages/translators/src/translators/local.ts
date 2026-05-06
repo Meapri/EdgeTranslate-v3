@@ -36,6 +36,30 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
 const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_NAMES));
 const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
+
+class RequestLimiter {
+    private active = 0;
+    private queue: Array<() => void> = [];
+
+    constructor(private readonly maxConcurrent: number) {}
+
+    async run<T>(task: () => Promise<T>): Promise<T> {
+        if (this.active >= this.maxConcurrent) {
+            await new Promise<void>((resolve) => this.queue.push(resolve));
+        }
+        this.active += 1;
+        try {
+            return await task();
+        } finally {
+            this.active -= 1;
+            const next = this.queue.shift();
+            if (next) next();
+        }
+    }
+}
+
+const localRequestLimiter = new RequestLimiter(DEFAULT_MAX_CONCURRENT_REQUESTS);
 
 function normalizeEndpoint(endpoint?: string) {
     return (endpoint || "").trim();
@@ -106,7 +130,7 @@ class LocalTranslator {
         const existing = this.inflight.get(key);
         if (existing) return existing;
 
-        const request = this.requestTranslation(text, from, to)
+        const request = localRequestLimiter.run(() => this.requestTranslation(text, from, to))
             .then((result) => {
                 this.cache.set(key, result);
                 return result;
