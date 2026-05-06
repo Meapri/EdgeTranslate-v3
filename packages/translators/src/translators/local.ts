@@ -35,6 +35,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
 };
 
 const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_NAMES));
+const DEFAULT_TIMEOUT_MS = 60000;
 
 function normalizeEndpoint(endpoint?: string) {
     return (endpoint || "").trim();
@@ -59,7 +60,7 @@ class LocalTranslator {
     private enabled = false;
     private endpoint = "";
     private apiKey = "";
-    private timeoutMs = 15000;
+    private timeoutMs = DEFAULT_TIMEOUT_MS;
     private cache = new LRUCache<string, TranslationResult>({ max: 200, ttl: 10 * 60 * 1000 });
     private inflight = new Map<string, Promise<TranslationResult>>();
 
@@ -71,7 +72,7 @@ class LocalTranslator {
         this.enabled = Boolean(config.enabled);
         this.endpoint = normalizeEndpoint(config.endpoint);
         this.apiKey = (config.apiKey || "").trim();
-        this.timeoutMs = config.timeoutMs || 15000;
+        this.timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT_MS;
         this.cache.clear();
         this.inflight.clear();
     }
@@ -116,6 +117,14 @@ class LocalTranslator {
         return request;
     }
 
+    private maxTokensFor(text: string) {
+        const length = text.length;
+        if (length <= 300) return 96;
+        if (length <= 900) return 320;
+        if (length <= 2500) return 896;
+        return 1792;
+    }
+
     private async requestTranslation(text: string, from: string, to: string) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -134,6 +143,8 @@ class LocalTranslator {
                     text,
                     source_language: toLanguageName(from),
                     target_language: toLanguageName(to),
+                    style: "natural, concise, faithful",
+                    max_tokens: this.maxTokensFor(text),
                 }),
                 signal: controller.signal,
             });
