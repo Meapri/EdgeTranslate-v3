@@ -1,5 +1,6 @@
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import { translateWithChromeOnDevice } from "common/scripts/chrome_builtin_translate.js";
 
 /**
  * Control the visibility of page translator banners.
@@ -24,6 +25,10 @@ class BannerController {
         this._translatedSet = new WeakSet();
         this._scheduleBatch = null;
         this._pendingNodes = new Set();
+        this._domPageTranslateOptions = { engine: "dom", sl: "auto", tl: "en" };
+        this._domTranslationCache = new Map();
+        this._domActiveTranslations = 0;
+        this._domMaxConcurrentTranslations = 2;
 
         this.addListeners();
     }
@@ -65,8 +70,22 @@ class BannerController {
             }
         });
 
-        // Kick off DOM fallback on explicit request
-        this.channel.on("start_dom_page_translate", () => {
+        // Provide Chrome on-device translation APIs from a window/content-script context.
+        this.channel.provide("chrome_builtin_translate", async (params) => {
+            const text = params && params.text ? params.text : "";
+            const from = (params && params.sl) || (params && params.from) || "auto";
+            const to = (params && params.tl) || (params && params.to) || "en";
+            const engine = (params && params.engine) || "geminiNano";
+            return translateWithChromeOnDevice(text, from, to, engine);
+        });
+
+        // Kick off DOM fallback/on-device page translation on explicit request
+        this.channel.on("start_dom_page_translate", (detail = {}) => {
+            this._domPageTranslateOptions = {
+                engine: detail.engine || "dom",
+                sl: detail.sl || "auto",
+                tl: detail.tl || "en",
+            };
             this.startDomFallback();
             // initial scan to cover existing content
             const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -274,13 +293,65 @@ class BannerController {
      * Translate a batch of text nodes, marking parents to avoid duplicates.
      */
     translateBatchNodes(nodes) {
-        const parents = new Set();
+        const items = [];
         for (const n of nodes) {
             const p = n.parentElement;
-            if (p && !this._translatedSet.has(p)) parents.add(p);
+            if (!p || this._translatedSet.has(p)) continue;
+            const text = String(n.nodeValue || "").trim();
+            if (text.length < 2) continue;
+            items.push({ node: n, parent: p, text });
+            this._translatedSet.add(p);
+            p.setAttribute("data-et-translated", "1");
         }
-        if (!parents.size) return;
-        parents.forEach((p) => p.setAttribute("data-et-translated", "1"));
+        if (!items.length) return;
+
+        if (!["chromeBuiltin", "geminiNano"].includes(this._domPageTranslateOptions.engine)) return;
+        items.forEach((item) => this.enqueueChromeBuiltinNodeTranslation(item));
+    }
+
+    enqueueChromeBuiltinNodeTranslation(item) {
+        const run = async () => {
+            this._domActiveTranslations += 1;
+            try {
+                const { sl, tl } = this._domPageTranslateOptions;
+                const cacheKey = `${sl}|${tl}|${item.text}`;
+                let translated = this._domTranslationCache.get(cacheKey);
+                if (!translated) {
+                    const result = await translateWithChromeOnDevice(
+                        item.text,
+                        sl,
+                        tl,
+                        this._domPageTranslateOptions.engine
+                    );
+                    translated = result.mainMeaning || result.translatedText;
+                    if (translated) this._domTranslationCache.set(cacheKey, translated);
+                }
+                if (translated && item.node.parentElement === item.parent) {
+                    item.node.nodeValue = translated;
+                }
+            } catch (error) {
+                item.parent.removeAttribute("data-et-translated");
+                this._translatedSet.delete(item.parent);
+            } finally {
+                this._domActiveTranslations -= 1;
+                this.flushDomTranslationQueue();
+            }
+        };
+
+        if (!this._domTranslationQueue) this._domTranslationQueue = [];
+        this._domTranslationQueue.push(run);
+        this.flushDomTranslationQueue();
+    }
+
+    flushDomTranslationQueue() {
+        if (!this._domTranslationQueue) return;
+        while (
+            this._domActiveTranslations < this._domMaxConcurrentTranslations &&
+            this._domTranslationQueue.length
+        ) {
+            const next = this._domTranslationQueue.shift();
+            next();
+        }
     }
 }
 

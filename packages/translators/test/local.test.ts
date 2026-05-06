@@ -4,10 +4,12 @@ describe("LocalTranslator", () => {
     const originalFetch = global.fetch;
 
     const originalTranslator = (globalThis as any).Translator;
+    const originalLanguageModel = (globalThis as any).LanguageModel;
 
     afterEach(() => {
         global.fetch = originalFetch;
         (globalThis as any).Translator = originalTranslator;
+        (globalThis as any).LanguageModel = originalLanguageModel;
         jest.restoreAllMocks();
     });
 
@@ -59,7 +61,10 @@ describe("LocalTranslator", () => {
         });
         global.fetch = fetchMock as any;
 
-        const translator = new LocalTranslator({ enabled: true, endpoint: "http://local.test/translate" });
+        const translator = new LocalTranslator({
+            enabled: true,
+            endpoint: "http://local.test/translate",
+        });
         const [first, second] = await Promise.all([
             translator.translate("hello", "auto", "ko"),
             translator.translate("hello", "auto", "ko"),
@@ -87,7 +92,10 @@ describe("LocalTranslator", () => {
         const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
         const result = await translator.translate("hello", "en", "ko");
 
-        expect(availabilityMock).toHaveBeenCalledWith({ sourceLanguage: "en", targetLanguage: "ko" });
+        expect(availabilityMock).toHaveBeenCalledWith({
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
         expect(createMock).toHaveBeenCalledWith({ sourceLanguage: "en", targetLanguage: "ko" });
         expect(translateMock).toHaveBeenCalledWith("hello");
         expect(result).toMatchObject({
@@ -102,5 +110,32 @@ describe("LocalTranslator", () => {
         const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
         expect(translator.supportedLanguages().has("ko")).toBe(true);
         expect(translator.supportedLanguages().has("en")).toBe(true);
+    });
+
+    test("translates with Chrome Gemini Nano mode", async () => {
+        const promptMock = jest.fn().mockResolvedValue("안녕");
+        const createMock = jest.fn().mockResolvedValue({ prompt: promptMock });
+        const availabilityMock = jest.fn().mockResolvedValue("available");
+        (globalThis as any).LanguageModel = {
+            availability: availabilityMock,
+            create: createMock,
+        };
+
+        const translator = new LocalTranslator({ enabled: true, mode: "geminiNano" });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(availabilityMock).toHaveBeenCalled();
+        expect(createMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                initialPrompts: expect.any(Array),
+            })
+        );
+        expect(promptMock).toHaveBeenCalledWith(expect.stringContaining("hello"));
+        expect(result).toMatchObject({
+            originalText: "hello",
+            mainMeaning: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
     });
 });
