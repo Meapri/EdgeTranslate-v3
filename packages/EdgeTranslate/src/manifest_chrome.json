@@ -1,12 +1,6 @@
 {
     "background": {},
-    "permissions": [
-        "notifications",
-        "contextMenus",
-        "storage",
-        "cookies",
-        "tabs"
-    ],
+    "permissions": [],
     "host_permissions": [
         "<all_urls>"
     ],

@@ -368,7 +368,7 @@ chrome.commands.onCommand.addListener((command) => {
  * Header modifications for CSP and CORS are now handled differently:
  * 1. CSP modifications may need to be handled through content scripts injection
  * 2. CORS issues should be addressed through proper server-side configurations
- * 3. Some functionality may need to be reimplemented using declarativeNetRequest
+ * 3. Some functionality may need a browser-specific replacement if reintroduced
  *
  * For now, these header modifications are commented out as they require
  * a different approach in Manifest V3. The translation functionality
