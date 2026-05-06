@@ -112,7 +112,9 @@ const LANGUAGES = [
 ];
 
 const TECB = "TECB_1E07F158C6FA4460B352973E9693B329";
-const API_KEY = "AIzaSyBWDj0QJvVIx8XOhRegXX5_SrRWxhT5Hs4";
+// Do not commit Google API keys. If this utility ever needs a key, provide it
+// through the environment when regenerating static Google page-translate assets.
+const API_KEY = process.env.GOOGLE_TRANSLATE_API_KEY || "";
 
 async function get_element_js(language, httpsAgent) {
     let config = httpsAgent !== null ? { httpsAgent } : {};

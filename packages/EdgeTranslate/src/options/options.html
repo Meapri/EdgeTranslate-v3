@@ -152,6 +152,60 @@
                     </div>
                 </div>
 
+                <label class="setting-title i18n" data-i18n-name="LocalTranslatorConfig"></label>
+                <div class="row">
+                    <div class="column">
+                        <input
+                            type="checkbox"
+                            setting-type="switch"
+                            setting-path="LocalTranslatorConfig enabled"
+                            class="switch"
+                            id="local-translator-enabled"
+                        />
+                        <span class="space"></span>
+                        <label
+                            for="local-translator-enabled"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorEnabled"
+                        ></label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="column">
+                        <label
+                            for="local-translator-endpoint"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorEndpoint"
+                            data-insert-pos="afterBegin"
+                        >
+                            <input
+                                type="text"
+                                setting-type="text"
+                                setting-path="LocalTranslatorConfig endpoint"
+                                id="local-translator-endpoint"
+                                placeholder="https://example.com/translate"
+                            />
+                        </label>
+                    </div>
+                    <div class="column">
+                        <label
+                            for="local-translator-api-key"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorApiKey"
+                            data-insert-pos="afterBegin"
+                        >
+                            <input
+                                type="password"
+                                setting-type="text"
+                                setting-path="LocalTranslatorConfig apiKey"
+                                id="local-translator-api-key"
+                                autocomplete="off"
+                            />
+                        </label>
+                    </div>
+                </div>
+                <p class="i18n" data-i18n-name="LocalTranslatorHelp"></p>
+
                 <label class="setting-title i18n" data-i18n-name="HybridTranslatorConfig"></label>
                 <div class="row">
                     <div class="column">

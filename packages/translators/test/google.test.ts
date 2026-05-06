@@ -60,4 +60,13 @@ describe("google translator api", () => {
                 done(error);
             });
     });
+
+    it("preserves detected source language from better API responses", () => {
+        const result = TRANSLATOR.parseBetterResult({
+            sentences: [{ trans: "안녕하세요", orig: "hello" }],
+            ld_result: { srclangs: ["en"] },
+        });
+
+        expect(result.sourceLanguage).toEqual("en");
+    });
 });

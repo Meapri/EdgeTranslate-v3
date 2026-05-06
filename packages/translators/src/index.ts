@@ -2,6 +2,7 @@ import BingTranslator from "./translators/bing";
 import GoogleTranslator from "./translators/google";
 import DeepLTranslator from "./translators/deepl";
 import HybridTranslator from "./translators/hybrid";
+import LocalTranslator from "./translators/local";
 import axios from "./axios";
 
 /**
@@ -235,6 +236,7 @@ export {
   BingTranslator,
   GoogleTranslator,
   DeepLTranslator,
+  LocalTranslator,
 };
 
 // Export types

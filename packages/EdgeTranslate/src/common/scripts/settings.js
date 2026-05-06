@@ -30,6 +30,11 @@ const DEFAULT_SETTINGS = {
     },
     DefaultTranslator: "GoogleTranslate",
     DefaultPageTranslator: "GooglePageTranslate",
+    LocalTranslatorConfig: {
+        enabled: false,
+        endpoint: "",
+        apiKey: "",
+    },
     HybridTranslatorConfig: {
         // The translators used in current hybrid translate.
         translators: ["BingTranslate", "GoogleTranslate"],

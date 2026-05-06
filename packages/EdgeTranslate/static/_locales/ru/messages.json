@@ -259,7 +259,6 @@
         "message": "Перевести страницу с помощью Google",
         "description": "Перевод текущей страницы с помощью Google Translate API."
     },
-    
     "PrivacyPolicy": {
         "message": "Политика конфиденциальности",
         "description": "Политика конфиденциальности."
@@ -1283,5 +1282,33 @@
     "Zulu": {
         "message": "Zulu",
         "description": "Zulu"
+    },
+    "LocalTranslate": {
+        "message": "Локальный API перевод",
+        "description": "Пользовательский локальный/API провайдер перевода"
+    },
+    "LocalTranslateShort": {
+        "message": "Local API",
+        "description": "Сокращение Local API Translate"
+    },
+    "LocalTranslatorConfig": {
+        "message": "Локальный API перевод",
+        "description": "Настройки пользовательского endpoint API перевода"
+    },
+    "LocalTranslatorEnabled": {
+        "message": "Включить Local API Translate",
+        "description": "Включить пользовательский локальный/API провайдер"
+    },
+    "LocalTranslatorEndpoint": {
+        "message": "Endpoint URL",
+        "description": "URL endpoint API перевода"
+    },
+    "LocalTranslatorApiKey": {
+        "message": "API key",
+        "description": "Необязательный ключ, отправляется как X-API-Key"
+    },
+    "LocalTranslatorHelp": {
+        "message": "Публичная сборка Web Store не содержит сервер или ключ. Вводите свой endpoint и API key только для доверенного сервера.",
+        "description": "Справка Local API"
     }
 }

@@ -19,11 +19,21 @@ class TranslatorManager {
          * @type {Promise<Void>} Initialize configurations.
          */
         this.config_loader = getOrSetDefaultSettings(
-            ["HybridTranslatorConfig", "DefaultTranslator", "languageSetting", "OtherSettings"],
+            [
+                "HybridTranslatorConfig",
+                "DefaultTranslator",
+                "languageSetting",
+                "OtherSettings",
+                "LocalTranslatorConfig",
+            ],
             DEFAULT_SETTINGS
         ).then((configs) => {
             // Init hybrid translator.
-            this.HYBRID_TRANSLATOR = new HybridTranslator(configs.HybridTranslatorConfig, channel);
+            this.HYBRID_TRANSLATOR = new HybridTranslator(
+                configs.HybridTranslatorConfig,
+                channel,
+                configs.LocalTranslatorConfig
+            );
 
             // Supported translators.
             this.TRANSLATORS = {
@@ -140,7 +150,9 @@ class TranslatorManager {
      */
     provideServices() {
         // Translate service.
-        this.channel.provide("translate", (params) => this.translate(params.text, params.position));
+        this.channel.provide("translate", (params, sender) =>
+            this.translate(params.text, params.position, sender)
+        );
 
         // Quiet single-text translate service for DOM page translation (no UI events)
         this.channel.provide("translate_text_quiet", async (params) => {
@@ -239,6 +251,13 @@ class TranslatorManager {
                         this.clearCaches();
                     }
 
+                    if (changes["LocalTranslatorConfig"]) {
+                        this.HYBRID_TRANSLATOR.useLocalConfig(
+                            changes["LocalTranslatorConfig"].newValue
+                        );
+                        this.clearCaches();
+                    }
+
                     if (changes["OtherSettings"]) {
                         this.IN_MUTUAL_MODE = changes["OtherSettings"].newValue.MutualTranslate;
                     }
@@ -317,6 +336,13 @@ class TranslatorManager {
         return tabId;
     }
 
+    resolveTargetTabId(sender) {
+        if (sender && sender.tab && typeof sender.tab.id === "number") {
+            return Promise.resolve(sender.tab.id);
+        }
+        return this.getCurrentTabId();
+    }
+
     /**
      *
      * 检测给定文本的语言。
@@ -357,12 +383,12 @@ class TranslatorManager {
      *
      * @returns {Promise<void>} translate finished Promise
      */
-    async translate(text, position) {
+    async translate(text, position, sender) {
         // Ensure that configurations have been initialized.
         await this.config_loader;
 
         // get current tab id
-        const currentTabId = await this.getCurrentTabId();
+        const currentTabId = await this.resolveTargetTabId(sender);
         if (currentTabId === -1) return;
 
         /**

@@ -11238,7 +11238,7 @@ Dual licensed under the MIT and GPL licenses.
         _.l.Ud = function(a, b) {
             this.g.vb() ? this.g.l.send({
                 display_language: b,
-                key: "AIzaSyBWDj0QJvVIx8XOhRegXX5_SrRWxhT5Hs4"
+                key: ""
             }, a).then(function(c) {
                 return a(c)
             }) : (this.uf(),

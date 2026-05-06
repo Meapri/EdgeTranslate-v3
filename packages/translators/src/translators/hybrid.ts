@@ -8,13 +8,15 @@ import {
 import BingTranslator from "./bing";
 import DeepLTranslator from "./deepl";
 import GoogleTranslator from "./google";
+import LocalTranslator, { LocalTranslatorConfig } from "./local";
 import { LRUCache } from "../utils/lru";
 import { fnv1a32 } from "../utils/hash";
 
 export type HybridSupportedTranslators =
     | "BingTranslate"
     | "DeepLTranslate"
-    | "GoogleTranslate";
+    | "GoogleTranslate"
+    | "LocalTranslate";
 
 export type HybridConfig = {
     selections: Selections;
@@ -35,6 +37,7 @@ class HybridTranslator {
         BingTranslate: BingTranslator;
         GoogleTranslate: GoogleTranslator;
         DeepLTranslate: DeepLTranslator;
+        LocalTranslate: LocalTranslator;
     };
     MAIN_TRANSLATOR: HybridSupportedTranslators = "GoogleTranslate";
 
@@ -50,7 +53,7 @@ class HybridTranslator {
         errors: 0
     };
 
-    constructor(config: HybridConfig, channel: any) {
+    constructor(config: HybridConfig, channel: any, localConfig: LocalTranslatorConfig = {}) {
         this.channel = channel;
 
         /**
@@ -60,6 +63,7 @@ class HybridTranslator {
             BingTranslate: new BingTranslator(),
             GoogleTranslate: new GoogleTranslator(),
             DeepLTranslate: null as unknown as DeepLTranslator,
+            LocalTranslate: new LocalTranslator(localConfig),
         };
 
         /**
@@ -71,6 +75,10 @@ class HybridTranslator {
         );
 
         this.useConfig(config);
+    }
+
+    useLocalConfig(config: LocalTranslatorConfig = {}) {
+        this.REAL_TRANSLATORS.LocalTranslate.useConfig(config);
     }
 
     /**

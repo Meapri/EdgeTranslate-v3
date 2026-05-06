@@ -1,131 +1,474 @@
 {
-    "AppName": { "message": "Edge Translate", "description": "앱 이름" },
-    "Description": { "message": "원하는 내용을 번역하세요.", "description": "앱 설명" },
-
-    "ChangeLanguageSetting": { "message": "언어 설정 변경", "description": "언어 설정 변경" },
-    "TranslateSelectedText": { "message": "선택한 텍스트 번역", "description": "선택 텍스트 번역 단축키" },
-    "FixResultFrame": { "message": "결과 창 고정", "description": "번역 결과 창 고정" },
-    "UnfixResultFrame": { "message": "결과 창 고정 해제", "description": "번역 결과 창 고정 해제" },
-    "CloseResultFrame": { "message": "결과 창 닫기", "description": "번역 결과 창 닫기" },
-    "ExchangeSourceAndTargetLanguage": { "message": "원문/번역 언어 교체", "description": "원문/번역 언어 교체" },
-
-    "CommonMeanings": { "message": "일반 의미", "description": "일반 의미" },
-    "DetailedMeanings": { "message": "자세한 의미", "description": "자세한 의미" },
-    "Definitions": { "message": "정의", "description": "정의" },
-    "DefinitionsMeaning": { "message": "의미", "description": "정의 의미" },
-    "DefinitionsExample": { "message": "예문", "description": "정의 예문" },
-    "Synonyms": { "message": "동의어", "description": "동의어" },
-    "OriginalText": { "message": "원문", "description": "원문" },
-    "Phrases": { "message": "구문", "description": "구문" },
-    "Examples": { "message": "예문", "description": "예문" },
-    "PhoneticSymbol": { "message": "발음 기호", "description": "발음 기호" },
-    "SourcePronunciation": { "message": "원문 발음", "description": "원문 발음" },
-    "TargetPronunciation": { "message": "번역문 발음", "description": "번역문 발음" },
-    "SourcePronunciationIcon": { "message": "원문 발음 아이콘", "description": "원문 발음 아이콘" },
-    "TargetPronunciationIcon": { "message": "번역문 발음 아이콘", "description": "번역문 발음 아이콘" },
-    "Pronounce": { "message": "발음", "description": "발음" },
-    "PronounceSelected": { "message": "선택 텍스트 발음", "description": "선택 텍스트 발음" },
-    "PronounceOriginal": { "message": "원문 읽기", "description": "원문 읽기" },
-    "PronounceTranslated": { "message": "번역문 읽기", "description": "번역문 읽기" },
-
-    "ClickToExpand": { "message": "펼치기", "description": "펼치기" },
-    "ClickToFold": { "message": "접기", "description": "접기" },
-    "EditText": { "message": "텍스트 편집", "description": "텍스트 편집" },
-    "Retranslate": { "message": "다시 번역", "description": "다시 번역" },
-    "CopyResult": { "message": "결과 복사", "description": "결과 복사" },
-    "Translate": { "message": "번역", "description": "번역" },
-    "ShortcutSetting": { "message": "단축키 설정", "description": "단축키 설정" },
-
-    "AddUrlBlacklist": { "message": "현재 사이트 차단 목록에 추가", "description": "사이트 차단 추가" },
-    "RemoveUrlBlacklist": { "message": "현재 사이트 차단 목록에서 제거", "description": "사이트 차단 제거" },
-    "AddDomainBlacklist": { "message": "현재 도메인 차단 목록에 추가", "description": "도메인 차단 추가" },
-    "RemoveDomainBlacklist": { "message": "현재 도메인 차단 목록에서 제거", "description": "도메인 차단 제거" },
-
-    "DataCollectionNotice": { "message": "Edge Translate를 사용해 주셔서 감사합니다. 옵션에서 설정을 확인하세요.", "description": "환영 알림(통계 없음)" },
-    "PrivacyPolicyLink": { "message": "https://github.com/Meapri/EdgeTranslate-v3", "description": "프로젝트 링크" },
-    "ExtensionInstalled": { "message": "Edge Translate가 설치되었습니다! 위키를 확인해 보세요!", "description": "설치 알림" },
-    "WikiLink": { "message": "https://github.com/EdgeTranslate/EdgeTranslate/blob/master/docs/wiki/ko/Introduction.md", "description": "위키 링크" },
-    "ExtensionUpdated": { "message": "Edge Translate가 업데이트되었습니다! 새로운 내용을 확인해 보세요!", "description": "업데이트 알림" },
-
-    "InputHint": { "message": "내용을 입력해 주세요", "description": "입력 힌트" },
-    "AutoDetect": { "message": "자동 감지", "description": "자동 감지" },
-    "SourceLanguage": { "message": "원문 언어", "description": "원문 언어" },
-    "TargetLanguage": { "message": "번역 언어", "description": "번역 언어" },
-    "PermissionRemind": { "message": "이 페이지에서 EdgeTranslate를 사용하려면 확장 프로그램 관리에서 '파일 URL에 대한 액세스 허용'을 켜야 합니다.", "description": "파일 URL 권한 안내" },
-
-    "ContentSettings": { "message": "콘텐츠 설정", "description": "결과 표시 항목 선택" },
-    "DefaultPageTranslator": { "message": "기본 페이지 번역기", "description": "기본 페이지 번역기" },
-    "LayoutSettings": { "message": "레이아웃 설정", "description": "표시 방식 선택" },
-    "PopupFromRight": { "message": "오른쪽에서 팝업", "description": "오른쪽 팝업" },
-    "PopupFromLeft": { "message": "왼쪽에서 팝업", "description": "왼쪽 팝업" },
-    "ResizeSetting": { "message": "페이지 크기 조절", "description": "원문 가림 방지" },
-    "RTLSetting": { "message": "오른쪽에서 왼쪽 정렬", "description": "RTL 표시" },
-    "FoldLongContentSetting": { "message": "긴 내용 접기", "description": "긴 번역 접기" },
-
-    "OtherSettings": { "message": "기타 설정", "description": "기타 설정" },
-    "SelectTranslate": { "message": "드래그 번역 사용", "description": "선택 번역 사용" },
-    "TranslateAfterSelect": { "message": "선택 즉시 번역", "description": "선택 후 즉시 표시" },
-    "TranslateAfterDblClick": { "message": "더블클릭 즉시 번역", "description": "더블클릭 후 즉시 표시" },
-    "CancelTextSelection": { "message": "번역 후 선택 해제", "description": "번역 후 선택 해제" },
-
-    "GooglePageTranslate": { "message": "Google 페이지 번역", "description": "Google로 현재 페이지 번역" },
-    "TranslatePage": { "message": "이 페이지 번역", "description": "기본 번역기로 페이지 번역" },
-    "CancelPageTranslate": { "message": "페이지 번역 취소", "description": "페이지 번역 취소" },
-    "TogglePageTranslateBanner": { "message": "페이지 번역 배너 토글", "description": "배너 표시/숨김" },
-    "TranslatePageGoogle": { "message": "Google로 이 페이지 번역", "description": "Google 페이지 번역" },
-    
-
-    "PrivacyPolicy": { "message": "개인정보 처리방침", "description": "개인정보 처리방침" },
-    "Settings": { "message": "설정", "description": "설정" },
-    "SelectTranslatePosition": { "message": "번역 버튼 위치", "description": "버튼 위치 선택" },
-    "TopRight": { "message": "우상단", "description": "우상단" },
-    "TopLeft": { "message": "좌상단", "description": "좌상단" },
-    "BottomRight": { "message": "우하단", "description": "우하단" },
-    "BottomLeft": { "message": "좌하단", "description": "좌하단" },
-    "SettingsTitle": { "message": "EdgeTranslate 설정", "description": "설정 페이지" },
-    "MutualTranslation": { "message": "상호 번역 모드", "description": "두 언어 상호 번역" },
-    "MutualTranslationWarning": { "message": "원문 언어가 '자동 감지'일 때는 상호 번역을 사용할 수 없습니다.", "description": "상호 번역 경고" },
-    "Fold": { "message": "언어 설정 접기", "description": "언어 설정 접기" },
-    "Unfold": { "message": "언어 설정 펼치기", "description": "언어 설정 펼치기" },
-
-    "HybridTranslatorConfig": { "message": "하이브리드 번역기 설정", "description": "각 영역 공급자 설정" },
-    "MainTranslator": { "message": "메인 공급자", "description": "주 번역 공급자" },
-    "DetailedTranslator": { "message": "상세 의미 공급자", "description": "상세 의미 공급자" },
-    "DefinitionTranslator": { "message": "정의 공급자", "description": "정의 공급자" },
-    "ExampleTranslator": { "message": "예문 공급자", "description": "예문 공급자" },
-
-    "BingTranslate": { "message": "Bing 번역", "description": "Bing 번역" },
-    "BingTranslateShort": { "message": "Bing", "description": "Bing" },
-    "DeepLTranslate": { "message": "DeepL 번역", "description": "DeepL 번역" },
-    "DeepLTranslateShort": { "message": "DeepL", "description": "DeepL" },
-    "GoogleTranslate": { "message": "Google 번역", "description": "Google 번역" },
-    "GoogleTranslateShort": { "message": "Google", "description": "Google" },
-    "HybridTranslate": { "message": "하이브리드 번역", "description": "하이브리드 번역" },
-    "HybridTranslateShort": { "message": "하이브리드", "description": "하이브리드" },
-
-    "NOTICE": { "message": "Edge Translate 알림", "description": "알림" },
-    "NoticeTitle": { "message": "왜 이 페이지가 표시되나요?", "description": "알림 제목" },
-    "NoticeReason1": { "message": "설치 또는 업데이트 후 번역이 필요한 기존 페이지를 새로고침하지 않았을 수 있습니다.", "description": "사유 1" },
-    "NoticeReason2": { "message": "스크립트를 주입할 수 없는 페이지에서 Edge Translate를 사용 중입니다.", "description": "사유 2" },
-    "NoticeExampleSites": { "message": "예:", "description": "예시" },
-    "BlankPage": { "message": "빈 페이지", "description": "빈 페이지" },
-    "NoticeReason3": { "message": "파일 URL에 대한 권한이 없어 파일 페이지에서 동작하지 않을 수 있습니다.", "description": "사유 3" },
-    "NoticeReason4": { "message": "Firefox에서는 파일 페이지에서 확장 실행이 허용되지 않습니다.", "description": "사유 4" },
-    "EnablePermission": { "message": "어떻게 활성화하나요?", "description": "활성화 방법" },
-    "OpenThisPage": { "message": "이 페이지 열기", "description": "이 페이지 열기" },
-    "ReloadPage": { "message": "파일 페이지 새로고침", "description": "파일 페이지 새로고침" },
-    "NoticeLinks": { "message": "링크", "description": "링크" },
-    "WIKI": { "message": "위키", "description": "위키 제목" },
-    "BugReport": { "message": "버그 신고", "description": "버그 신고" },
-
-    "NETERR": { "message": "네트워크 오류입니다. 연결을 확인해 주세요.", "description": "네트워크 오류" },
-    "APIERR": { "message": "요청 파라미터 오류입니다. 다른 번역기를 사용하거나 잠시 후 다시 시도해 주세요. 지속되면 개발자에게 문의해 주세요.", "description": "API 오류" },
-    "PRONOUN_ERR": { "message": "발음 재생에 실패했습니다. 네트워크를 확인하거나 다른 번역기를 선택해 보세요.", "description": "발음 오류" },
-    "ERR_CODE": { "message": "오류 코드", "description": "오류 코드" },
-    "ERR_MSG": { "message": "오류 메시지", "description": "오류 메시지" },
-    "ERR_ACT": { "message": "실행 동작", "description": "실행 동작" },
-
-    "Korean": { "message": "한국어", "description": "언어 이름" }
+    "AppName": {
+        "message": "Edge Translate",
+        "description": "앱 이름"
+    },
+    "Description": {
+        "message": "원하는 내용을 번역하세요.",
+        "description": "앱 설명"
+    },
+    "ChangeLanguageSetting": {
+        "message": "언어 설정 변경",
+        "description": "언어 설정 변경"
+    },
+    "TranslateSelectedText": {
+        "message": "선택한 텍스트 번역",
+        "description": "선택 텍스트 번역 단축키"
+    },
+    "FixResultFrame": {
+        "message": "결과 창 고정",
+        "description": "번역 결과 창 고정"
+    },
+    "UnfixResultFrame": {
+        "message": "결과 창 고정 해제",
+        "description": "번역 결과 창 고정 해제"
+    },
+    "CloseResultFrame": {
+        "message": "결과 창 닫기",
+        "description": "번역 결과 창 닫기"
+    },
+    "ExchangeSourceAndTargetLanguage": {
+        "message": "원문/번역 언어 교체",
+        "description": "원문/번역 언어 교체"
+    },
+    "CommonMeanings": {
+        "message": "일반 의미",
+        "description": "일반 의미"
+    },
+    "DetailedMeanings": {
+        "message": "자세한 의미",
+        "description": "자세한 의미"
+    },
+    "Definitions": {
+        "message": "정의",
+        "description": "정의"
+    },
+    "DefinitionsMeaning": {
+        "message": "의미",
+        "description": "정의 의미"
+    },
+    "DefinitionsExample": {
+        "message": "예문",
+        "description": "정의 예문"
+    },
+    "Synonyms": {
+        "message": "동의어",
+        "description": "동의어"
+    },
+    "OriginalText": {
+        "message": "원문",
+        "description": "원문"
+    },
+    "Phrases": {
+        "message": "구문",
+        "description": "구문"
+    },
+    "Examples": {
+        "message": "예문",
+        "description": "예문"
+    },
+    "PhoneticSymbol": {
+        "message": "발음 기호",
+        "description": "발음 기호"
+    },
+    "SourcePronunciation": {
+        "message": "원문 발음",
+        "description": "원문 발음"
+    },
+    "TargetPronunciation": {
+        "message": "번역문 발음",
+        "description": "번역문 발음"
+    },
+    "SourcePronunciationIcon": {
+        "message": "원문 발음 아이콘",
+        "description": "원문 발음 아이콘"
+    },
+    "TargetPronunciationIcon": {
+        "message": "번역문 발음 아이콘",
+        "description": "번역문 발음 아이콘"
+    },
+    "Pronounce": {
+        "message": "발음",
+        "description": "발음"
+    },
+    "PronounceSelected": {
+        "message": "선택 텍스트 발음",
+        "description": "선택 텍스트 발음"
+    },
+    "PronounceOriginal": {
+        "message": "원문 읽기",
+        "description": "원문 읽기"
+    },
+    "PronounceTranslated": {
+        "message": "번역문 읽기",
+        "description": "번역문 읽기"
+    },
+    "ClickToExpand": {
+        "message": "펼치기",
+        "description": "펼치기"
+    },
+    "ClickToFold": {
+        "message": "접기",
+        "description": "접기"
+    },
+    "EditText": {
+        "message": "텍스트 편집",
+        "description": "텍스트 편집"
+    },
+    "Retranslate": {
+        "message": "다시 번역",
+        "description": "다시 번역"
+    },
+    "CopyResult": {
+        "message": "결과 복사",
+        "description": "결과 복사"
+    },
+    "Translate": {
+        "message": "번역",
+        "description": "번역"
+    },
+    "ShortcutSetting": {
+        "message": "단축키 설정",
+        "description": "단축키 설정"
+    },
+    "AddUrlBlacklist": {
+        "message": "현재 사이트 차단 목록에 추가",
+        "description": "사이트 차단 추가"
+    },
+    "RemoveUrlBlacklist": {
+        "message": "현재 사이트 차단 목록에서 제거",
+        "description": "사이트 차단 제거"
+    },
+    "AddDomainBlacklist": {
+        "message": "현재 도메인 차단 목록에 추가",
+        "description": "도메인 차단 추가"
+    },
+    "RemoveDomainBlacklist": {
+        "message": "현재 도메인 차단 목록에서 제거",
+        "description": "도메인 차단 제거"
+    },
+    "DataCollectionNotice": {
+        "message": "Edge Translate를 사용해 주셔서 감사합니다. 옵션에서 설정을 확인하세요.",
+        "description": "환영 알림(통계 없음)"
+    },
+    "PrivacyPolicyLink": {
+        "message": "https://github.com/Meapri/EdgeTranslate-v3",
+        "description": "프로젝트 링크"
+    },
+    "ExtensionInstalled": {
+        "message": "Edge Translate가 설치되었습니다! 위키를 확인해 보세요!",
+        "description": "설치 알림"
+    },
+    "WikiLink": {
+        "message": "https://github.com/EdgeTranslate/EdgeTranslate/blob/master/docs/wiki/ko/Introduction.md",
+        "description": "위키 링크"
+    },
+    "ExtensionUpdated": {
+        "message": "Edge Translate가 업데이트되었습니다! 새로운 내용을 확인해 보세요!",
+        "description": "업데이트 알림"
+    },
+    "InputHint": {
+        "message": "내용을 입력해 주세요",
+        "description": "입력 힌트"
+    },
+    "AutoDetect": {
+        "message": "자동 감지",
+        "description": "자동 감지"
+    },
+    "SourceLanguage": {
+        "message": "원문 언어",
+        "description": "원문 언어"
+    },
+    "TargetLanguage": {
+        "message": "번역 언어",
+        "description": "번역 언어"
+    },
+    "PermissionRemind": {
+        "message": "이 페이지에서 EdgeTranslate를 사용하려면 확장 프로그램 관리에서 '파일 URL에 대한 액세스 허용'을 켜야 합니다.",
+        "description": "파일 URL 권한 안내"
+    },
+    "ContentSettings": {
+        "message": "콘텐츠 설정",
+        "description": "결과 표시 항목 선택"
+    },
+    "DefaultPageTranslator": {
+        "message": "기본 페이지 번역기",
+        "description": "기본 페이지 번역기"
+    },
+    "LayoutSettings": {
+        "message": "레이아웃 설정",
+        "description": "표시 방식 선택"
+    },
+    "PopupFromRight": {
+        "message": "오른쪽에서 팝업",
+        "description": "오른쪽 팝업"
+    },
+    "PopupFromLeft": {
+        "message": "왼쪽에서 팝업",
+        "description": "왼쪽 팝업"
+    },
+    "ResizeSetting": {
+        "message": "페이지 크기 조절",
+        "description": "원문 가림 방지"
+    },
+    "RTLSetting": {
+        "message": "오른쪽에서 왼쪽 정렬",
+        "description": "RTL 표시"
+    },
+    "FoldLongContentSetting": {
+        "message": "긴 내용 접기",
+        "description": "긴 번역 접기"
+    },
+    "OtherSettings": {
+        "message": "기타 설정",
+        "description": "기타 설정"
+    },
+    "SelectTranslate": {
+        "message": "드래그 번역 사용",
+        "description": "선택 번역 사용"
+    },
+    "TranslateAfterSelect": {
+        "message": "선택 즉시 번역",
+        "description": "선택 후 즉시 표시"
+    },
+    "TranslateAfterDblClick": {
+        "message": "더블클릭 즉시 번역",
+        "description": "더블클릭 후 즉시 표시"
+    },
+    "CancelTextSelection": {
+        "message": "번역 후 선택 해제",
+        "description": "번역 후 선택 해제"
+    },
+    "GooglePageTranslate": {
+        "message": "Google 페이지 번역",
+        "description": "Google로 현재 페이지 번역"
+    },
+    "TranslatePage": {
+        "message": "이 페이지 번역",
+        "description": "기본 번역기로 페이지 번역"
+    },
+    "CancelPageTranslate": {
+        "message": "페이지 번역 취소",
+        "description": "페이지 번역 취소"
+    },
+    "TogglePageTranslateBanner": {
+        "message": "페이지 번역 배너 토글",
+        "description": "배너 표시/숨김"
+    },
+    "TranslatePageGoogle": {
+        "message": "Google로 이 페이지 번역",
+        "description": "Google 페이지 번역"
+    },
+    "PrivacyPolicy": {
+        "message": "개인정보 처리방침",
+        "description": "개인정보 처리방침"
+    },
+    "Settings": {
+        "message": "설정",
+        "description": "설정"
+    },
+    "SelectTranslatePosition": {
+        "message": "번역 버튼 위치",
+        "description": "버튼 위치 선택"
+    },
+    "TopRight": {
+        "message": "우상단",
+        "description": "우상단"
+    },
+    "TopLeft": {
+        "message": "좌상단",
+        "description": "좌상단"
+    },
+    "BottomRight": {
+        "message": "우하단",
+        "description": "우하단"
+    },
+    "BottomLeft": {
+        "message": "좌하단",
+        "description": "좌하단"
+    },
+    "SettingsTitle": {
+        "message": "EdgeTranslate 설정",
+        "description": "설정 페이지"
+    },
+    "MutualTranslation": {
+        "message": "상호 번역 모드",
+        "description": "두 언어 상호 번역"
+    },
+    "MutualTranslationWarning": {
+        "message": "원문 언어가 '자동 감지'일 때는 상호 번역을 사용할 수 없습니다.",
+        "description": "상호 번역 경고"
+    },
+    "Fold": {
+        "message": "언어 설정 접기",
+        "description": "언어 설정 접기"
+    },
+    "Unfold": {
+        "message": "언어 설정 펼치기",
+        "description": "언어 설정 펼치기"
+    },
+    "HybridTranslatorConfig": {
+        "message": "하이브리드 번역기 설정",
+        "description": "각 영역 공급자 설정"
+    },
+    "MainTranslator": {
+        "message": "메인 공급자",
+        "description": "주 번역 공급자"
+    },
+    "DetailedTranslator": {
+        "message": "상세 의미 공급자",
+        "description": "상세 의미 공급자"
+    },
+    "DefinitionTranslator": {
+        "message": "정의 공급자",
+        "description": "정의 공급자"
+    },
+    "ExampleTranslator": {
+        "message": "예문 공급자",
+        "description": "예문 공급자"
+    },
+    "BingTranslate": {
+        "message": "Bing 번역",
+        "description": "Bing 번역"
+    },
+    "BingTranslateShort": {
+        "message": "Bing",
+        "description": "Bing"
+    },
+    "DeepLTranslate": {
+        "message": "DeepL 번역",
+        "description": "DeepL 번역"
+    },
+    "DeepLTranslateShort": {
+        "message": "DeepL",
+        "description": "DeepL"
+    },
+    "GoogleTranslate": {
+        "message": "Google 번역",
+        "description": "Google 번역"
+    },
+    "GoogleTranslateShort": {
+        "message": "Google",
+        "description": "Google"
+    },
+    "HybridTranslate": {
+        "message": "하이브리드 번역",
+        "description": "하이브리드 번역"
+    },
+    "HybridTranslateShort": {
+        "message": "하이브리드",
+        "description": "하이브리드"
+    },
+    "NOTICE": {
+        "message": "Edge Translate 알림",
+        "description": "알림"
+    },
+    "NoticeTitle": {
+        "message": "왜 이 페이지가 표시되나요?",
+        "description": "알림 제목"
+    },
+    "NoticeReason1": {
+        "message": "설치 또는 업데이트 후 번역이 필요한 기존 페이지를 새로고침하지 않았을 수 있습니다.",
+        "description": "사유 1"
+    },
+    "NoticeReason2": {
+        "message": "스크립트를 주입할 수 없는 페이지에서 Edge Translate를 사용 중입니다.",
+        "description": "사유 2"
+    },
+    "NoticeExampleSites": {
+        "message": "예:",
+        "description": "예시"
+    },
+    "BlankPage": {
+        "message": "빈 페이지",
+        "description": "빈 페이지"
+    },
+    "NoticeReason3": {
+        "message": "파일 URL에 대한 권한이 없어 파일 페이지에서 동작하지 않을 수 있습니다.",
+        "description": "사유 3"
+    },
+    "NoticeReason4": {
+        "message": "Firefox에서는 파일 페이지에서 확장 실행이 허용되지 않습니다.",
+        "description": "사유 4"
+    },
+    "EnablePermission": {
+        "message": "어떻게 활성화하나요?",
+        "description": "활성화 방법"
+    },
+    "OpenThisPage": {
+        "message": "이 페이지 열기",
+        "description": "이 페이지 열기"
+    },
+    "ReloadPage": {
+        "message": "파일 페이지 새로고침",
+        "description": "파일 페이지 새로고침"
+    },
+    "NoticeLinks": {
+        "message": "링크",
+        "description": "링크"
+    },
+    "WIKI": {
+        "message": "위키",
+        "description": "위키 제목"
+    },
+    "BugReport": {
+        "message": "버그 신고",
+        "description": "버그 신고"
+    },
+    "NETERR": {
+        "message": "네트워크 오류입니다. 연결을 확인해 주세요.",
+        "description": "네트워크 오류"
+    },
+    "APIERR": {
+        "message": "요청 파라미터 오류입니다. 다른 번역기를 사용하거나 잠시 후 다시 시도해 주세요. 지속되면 개발자에게 문의해 주세요.",
+        "description": "API 오류"
+    },
+    "PRONOUN_ERR": {
+        "message": "발음 재생에 실패했습니다. 네트워크를 확인하거나 다른 번역기를 선택해 보세요.",
+        "description": "발음 오류"
+    },
+    "ERR_CODE": {
+        "message": "오류 코드",
+        "description": "오류 코드"
+    },
+    "ERR_MSG": {
+        "message": "오류 메시지",
+        "description": "오류 메시지"
+    },
+    "ERR_ACT": {
+        "message": "실행 동작",
+        "description": "실행 동작"
+    },
+    "Korean": {
+        "message": "한국어",
+        "description": "언어 이름"
+    },
+    "LocalTranslate": {
+        "message": "로컬 API 번역",
+        "description": "사용자가 설정하는 로컬/API 번역 공급자"
+    },
+    "LocalTranslateShort": {
+        "message": "로컬 API",
+        "description": "로컬 API 번역 약칭"
+    },
+    "LocalTranslatorConfig": {
+        "message": "로컬 API 번역",
+        "description": "사용자 제공 번역 API endpoint 설정"
+    },
+    "LocalTranslatorEnabled": {
+        "message": "로컬 API 번역 사용",
+        "description": "사용자가 설정한 로컬/API 번역 공급자 사용"
+    },
+    "LocalTranslatorEndpoint": {
+        "message": "Endpoint URL",
+        "description": "번역 API endpoint URL"
+    },
+    "LocalTranslatorApiKey": {
+        "message": "API 키",
+        "description": "X-API-Key로 전송할 선택 API 키"
+    },
+    "LocalTranslatorHelp": {
+        "message": "웹스토어 공개 빌드에는 서버 주소나 키가 포함되지 않습니다. 신뢰하는 서버의 endpoint와 API 키를 직접 입력했을 때만 사용하세요.",
+        "description": "로컬 API 안내"
+    }
 }
-
-

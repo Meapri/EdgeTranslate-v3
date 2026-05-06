@@ -259,7 +259,6 @@
         "message": "使用谷歌翻譯此頁",
         "description": "使用谷歌翻譯的api翻譯當前頁面。"
     },
-    
     "PrivacyPolicy": {
         "message": "隱私政策",
         "description": "隱私政策。"
@@ -1283,5 +1282,33 @@
     "Zulu": {
         "message": "祖魯語",
         "description": "祖魯語"
+    },
+    "LocalTranslate": {
+        "message": "本機 API 翻譯",
+        "description": "使用者設定的本機/API 翻譯服務"
+    },
+    "LocalTranslateShort": {
+        "message": "本機 API",
+        "description": "本機 API 翻譯簡稱"
+    },
+    "LocalTranslatorConfig": {
+        "message": "本機 API 翻譯",
+        "description": "使用者提供的翻譯 API endpoint 設定"
+    },
+    "LocalTranslatorEnabled": {
+        "message": "啟用本機 API 翻譯",
+        "description": "啟用使用者設定的本機/API 翻譯服務"
+    },
+    "LocalTranslatorEndpoint": {
+        "message": "Endpoint URL",
+        "description": "翻譯 API endpoint URL"
+    },
+    "LocalTranslatorApiKey": {
+        "message": "API 金鑰",
+        "description": "可選，作為 X-API-Key 傳送"
+    },
+    "LocalTranslatorHelp": {
+        "message": "公開 Web Store 版本不會內建伺服器位址或金鑰。請只在信任該伺服器時自行輸入 endpoint 和 API 金鑰。",
+        "description": "本機 API 說明"
     }
 }

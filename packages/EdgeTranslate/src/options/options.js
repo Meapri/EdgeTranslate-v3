@@ -107,6 +107,14 @@ window.onload = () => {
                         );
                     };
                     break;
+                case "text":
+                    element.value = settingItemValue || "";
+                    element.onchange = (event) => {
+                        const target = event.target;
+                        const settingItemPath = target.getAttribute("setting-path").split(/\s/g);
+                        saveOption(result, settingItemPath, target.value.trim());
+                    };
+                    break;
                 default:
                     break;
             }

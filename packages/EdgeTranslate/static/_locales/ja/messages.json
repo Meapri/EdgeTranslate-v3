@@ -259,7 +259,6 @@
         "message": "Googleでこのページを翻訳",
         "description": "Google翻訳APIで現在のページを翻訳します。"
     },
-    
     "PrivacyPolicy": {
         "message": "プライバシーポリシー",
         "description": "プライバシーポリシー"
@@ -1283,5 +1282,33 @@
     "Zulu": {
         "message": "Zulu",
         "description": "Zulu"
+    },
+    "LocalTranslate": {
+        "message": "ローカルAPI翻訳",
+        "description": "ユーザー設定のローカル/API翻訳プロバイダー"
+    },
+    "LocalTranslateShort": {
+        "message": "ローカルAPI",
+        "description": "ローカルAPI翻訳の略称"
+    },
+    "LocalTranslatorConfig": {
+        "message": "ローカルAPI翻訳",
+        "description": "ユーザー提供翻訳API endpoint設定"
+    },
+    "LocalTranslatorEnabled": {
+        "message": "ローカルAPI翻訳を有効化",
+        "description": "ユーザー設定のローカル/API翻訳プロバイダーを有効にします"
+    },
+    "LocalTranslatorEndpoint": {
+        "message": "Endpoint URL",
+        "description": "翻訳API endpoint URL"
+    },
+    "LocalTranslatorApiKey": {
+        "message": "APIキー",
+        "description": "X-API-Keyとして送信する任意のAPIキー"
+    },
+    "LocalTranslatorHelp": {
+        "message": "公開Web Storeビルドにはサーバーやキーは含まれません。信頼できるサーバーのendpointとAPIキーを自分で入力した場合のみ使用してください。",
+        "description": "ローカルAPIヘルプ"
     }
 }

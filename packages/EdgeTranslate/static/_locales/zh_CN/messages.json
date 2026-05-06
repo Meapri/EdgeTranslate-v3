@@ -259,7 +259,6 @@
         "message": "使用谷歌翻译此页",
         "description": "使用谷歌翻译的api翻译当前页面。"
     },
-    
     "PrivacyPolicy": {
         "message": "隐私政策",
         "description": "隐私政策。"
@@ -1283,5 +1282,33 @@
     "Zulu": {
         "message": "祖鲁语",
         "description": "祖鲁语"
+    },
+    "LocalTranslate": {
+        "message": "本地 API 翻译",
+        "description": "用户配置的本地/API 翻译服务"
+    },
+    "LocalTranslateShort": {
+        "message": "本地 API",
+        "description": "本地 API 翻译简称"
+    },
+    "LocalTranslatorConfig": {
+        "message": "本地 API 翻译",
+        "description": "用户提供的翻译 API endpoint 设置"
+    },
+    "LocalTranslatorEnabled": {
+        "message": "启用本地 API 翻译",
+        "description": "启用用户配置的本地/API 翻译服务"
+    },
+    "LocalTranslatorEndpoint": {
+        "message": "Endpoint URL",
+        "description": "翻译 API endpoint URL"
+    },
+    "LocalTranslatorApiKey": {
+        "message": "API 密钥",
+        "description": "可选，作为 X-API-Key 发送"
+    },
+    "LocalTranslatorHelp": {
+        "message": "公开 Web Store 版本不会内置服务器地址或密钥。仅在你信任该服务器时自行输入 endpoint 和 API 密钥。",
+        "description": "本地 API 帮助"
     }
 }

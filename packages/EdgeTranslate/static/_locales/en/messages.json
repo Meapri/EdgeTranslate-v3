@@ -263,7 +263,6 @@
         "message": "Translate this page with Google",
         "description": "Translate current page with Google translate api."
     },
-    
     "Settings": {
         "message": "Settings",
         "description": "Settings"
@@ -1283,5 +1282,33 @@
     "Zulu": {
         "message": "Zulu",
         "description": "Zulu"
+    },
+    "LocalTranslate": {
+        "message": "Local API Translate",
+        "description": "User-configured local/API translation provider."
+    },
+    "LocalTranslateShort": {
+        "message": "Local API",
+        "description": "Abbreviation of Local API Translate."
+    },
+    "LocalTranslatorConfig": {
+        "message": "Local API Translate",
+        "description": "Settings for a user-provided translation API endpoint."
+    },
+    "LocalTranslatorEnabled": {
+        "message": "Enable Local API Translate",
+        "description": "Enable the user-configured local/API translation provider."
+    },
+    "LocalTranslatorEndpoint": {
+        "message": "Endpoint URL",
+        "description": "URL of your translation API endpoint."
+    },
+    "LocalTranslatorApiKey": {
+        "message": "API key",
+        "description": "Optional API key sent as X-API-Key."
+    },
+    "LocalTranslatorHelp": {
+        "message": "For public Web Store builds, no server or key is bundled. Enter your own endpoint and API key only if you trust the server.",
+        "description": "Local API help text."
     }
 }

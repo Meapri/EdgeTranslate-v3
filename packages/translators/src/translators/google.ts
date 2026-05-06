@@ -394,6 +394,12 @@ class GoogleTranslator {
             );
         }
 
+        const sourceLanguageCode =
+            response.ld_result?.extended_srclangs?.[0] || response.ld_result?.srclangs?.[0];
+        if (sourceLanguageCode) {
+            result.sourceLanguage = this.CODE_TO_LAN.get(sourceLanguageCode) || sourceLanguageCode;
+        }
+
         return result;
     }
 
