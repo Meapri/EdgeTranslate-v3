@@ -29,6 +29,10 @@ class BannerController {
         this._domTranslationCache = new Map();
         this._domActiveTranslations = 0;
         this._domMaxConcurrentTranslations = 2;
+        this._domOnDeviceUnavailable = false;
+        this._onDeviceBridgePromise = null;
+        this._onDeviceBridgeRequestId = 0;
+        this._onDeviceBridgePending = new Map();
 
         this.addListeners();
     }
@@ -70,13 +74,13 @@ class BannerController {
             }
         });
 
-        // Provide Chrome on-device translation APIs from a window/content-script context.
+        // Provide Chrome on-device translation APIs from the page main world when possible.
         this.channel.provide("chrome_builtin_translate", async (params) => {
             const text = params && params.text ? params.text : "";
             const from = (params && params.sl) || (params && params.from) || "auto";
             const to = (params && params.tl) || (params && params.to) || "en";
             const engine = (params && params.engine) || "geminiNano";
-            return translateWithChromeOnDevice(text, from, to, engine);
+            return this.translateWithOnDeviceEngine(text, from, to, engine);
         });
 
         // Kick off DOM fallback/on-device page translation on explicit request
@@ -86,6 +90,7 @@ class BannerController {
                 sl: detail.sl || "auto",
                 tl: detail.tl || "en",
             };
+            this._domOnDeviceUnavailable = false;
             this.startDomFallback();
             // initial scan to cover existing content
             const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -101,6 +106,101 @@ class BannerController {
                 // nothing needed here yet (fallback scheduling is background-side), keep hook for future use
             }
         });
+
+        window.addEventListener("message", this.handleOnDeviceBridgeResponse.bind(this));
+    }
+
+    async ensureOnDeviceBridge() {
+        if (this._onDeviceBridgePromise) return this._onDeviceBridgePromise;
+
+        this._onDeviceBridgePromise = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                window.removeEventListener("message", readyHandler);
+                reject(new Error("Chrome on-device translation bridge did not become ready."));
+            }, 3000);
+
+            const readyHandler = (event) => {
+                if (event.source !== window || !event.data) return;
+                if (event.data.type !== "edge_translate_on_device_bridge_ready") return;
+                clearTimeout(timeout);
+                window.removeEventListener("message", readyHandler);
+                resolve();
+            };
+
+            window.addEventListener("message", readyHandler);
+
+            const existing = document.getElementById("edge-translate-on-device-bridge");
+            if (existing) {
+                clearTimeout(timeout);
+                window.removeEventListener("message", readyHandler);
+                resolve();
+                return;
+            }
+
+            const script = document.createElement("script");
+            script.id = "edge-translate-on-device-bridge";
+            script.src = chrome.runtime.getURL("chrome_builtin/on_device_bridge.js");
+            script.async = false;
+            script.onerror = () => {
+                clearTimeout(timeout);
+                window.removeEventListener("message", readyHandler);
+                reject(new Error("Failed to inject Chrome on-device translation bridge."));
+            };
+            (document.documentElement || document.head || document.body).appendChild(script);
+        });
+
+        return this._onDeviceBridgePromise;
+    }
+
+    requestOnDeviceBridge(detail) {
+        return new Promise((resolve, reject) => {
+            const requestId = `et-${Date.now()}-${++this._onDeviceBridgeRequestId}`;
+            const timeout = setTimeout(() => {
+                this._onDeviceBridgePending.delete(requestId);
+                reject(new Error("Chrome on-device translation bridge request timed out."));
+            }, 30000);
+
+            this._onDeviceBridgePending.set(requestId, { resolve, reject, timeout });
+            window.postMessage(
+                {
+                    type: "edge_translate_on_device_request",
+                    requestId,
+                    detail,
+                },
+                "*"
+            );
+        });
+    }
+
+    handleOnDeviceBridgeResponse(event) {
+        if (event.source !== window || !event.data) return;
+        if (event.data.type !== "edge_translate_on_device_response") return;
+
+        const pending = this._onDeviceBridgePending.get(event.data.requestId);
+        if (!pending) return;
+        this._onDeviceBridgePending.delete(event.data.requestId);
+        clearTimeout(pending.timeout);
+
+        if (event.data.error) {
+            pending.reject(
+                new Error(event.data.error.message || "Chrome on-device translation failed.")
+            );
+        } else {
+            pending.resolve(event.data.result);
+        }
+    }
+
+    async translateWithOnDeviceEngine(text, from, to, engine) {
+        try {
+            await this.ensureOnDeviceBridge();
+            return await this.requestOnDeviceBridge({ text, sl: from, tl: to, engine });
+        } catch (bridgeError) {
+            try {
+                return await translateWithChromeOnDevice(text, from, to, engine);
+            } catch (contentError) {
+                throw bridgeError || contentError;
+            }
+        }
     }
 
     /**
@@ -306,6 +406,7 @@ class BannerController {
         if (!items.length) return;
 
         if (!["chromeBuiltin", "geminiNano"].includes(this._domPageTranslateOptions.engine)) return;
+        if (this._domOnDeviceUnavailable) return;
         items.forEach((item) => this.enqueueChromeBuiltinNodeTranslation(item));
     }
 
@@ -317,7 +418,7 @@ class BannerController {
                 const cacheKey = `${sl}|${tl}|${item.text}`;
                 let translated = this._domTranslationCache.get(cacheKey);
                 if (!translated) {
-                    const result = await translateWithChromeOnDevice(
+                    const result = await this.translateWithOnDeviceEngine(
                         item.text,
                         sl,
                         tl,
@@ -332,6 +433,10 @@ class BannerController {
             } catch (error) {
                 item.parent.removeAttribute("data-et-translated");
                 this._translatedSet.delete(item.parent);
+                if (this.isOnDeviceUnavailableError(error)) {
+                    this._domOnDeviceUnavailable = true;
+                    if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
+                }
             } finally {
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
@@ -352,6 +457,11 @@ class BannerController {
             const next = this._domTranslationQueue.shift();
             next();
         }
+    }
+
+    isOnDeviceUnavailableError(error) {
+        const message = error && error.message ? error.message : String(error || "");
+        return /not available|unavailable|did not become ready|Failed to inject/i.test(message);
     }
 }
 
