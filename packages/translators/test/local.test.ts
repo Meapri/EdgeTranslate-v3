@@ -45,8 +45,6 @@ describe("LocalTranslator", () => {
             text: "hello",
             source_language: "auto",
             target_language: "Korean",
-            style: "natural, concise, faithful",
-            max_tokens: 96,
         });
     });
 

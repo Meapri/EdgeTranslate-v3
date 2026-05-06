@@ -117,14 +117,6 @@ class LocalTranslator {
         return request;
     }
 
-    private maxTokensFor(text: string) {
-        const length = text.length;
-        if (length <= 300) return 96;
-        if (length <= 900) return 320;
-        if (length <= 2500) return 896;
-        return 1792;
-    }
-
     private async requestTranslation(text: string, from: string, to: string) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -143,8 +135,6 @@ class LocalTranslator {
                     text,
                     source_language: toLanguageName(from),
                     target_language: toLanguageName(to),
-                    style: "natural, concise, faithful",
-                    max_tokens: this.maxTokensFor(text),
                 }),
                 signal: controller.signal,
             });
