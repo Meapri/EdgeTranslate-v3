@@ -28,8 +28,8 @@ jobs:
             - name: Build Chrome target
               run: npm run build
 
-            - name: Build Firefox target
-              run: npm run build:firefox
+            - name: Build and validate Firefox package
+              run: npm run lint:firefox
 
             - name: Build Safari target
               run: npm run build:safari

@@ -76,6 +76,12 @@ npm run build:firefox
 npm run build:safari
 ```
 
+Firefox インストール用パッケージと検証
+```
+npm run pack:firefox
+npm run lint:firefox
+```
+
 全ブラウザーのパッケージング/ビルド
 ```
 npm run build:all
@@ -88,7 +94,8 @@ Safari の注意事項
 
 ビルド出力
 - Chrome: `packages/EdgeTranslate/build/chrome/`
-- Firefox: `packages/EdgeTranslate/build/firefox/`
+- Firefox 展開済みビルド: `packages/EdgeTranslate/build/firefox/`
+- Firefox インストール用パッケージ: `packages/EdgeTranslate/build/edge_translate_firefox.xpi`
 - Safari ビルド出力: `packages/EdgeTranslate/build/safari/`
 - Safari Xcode リソース: 明示的な sync/release 後に `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
 

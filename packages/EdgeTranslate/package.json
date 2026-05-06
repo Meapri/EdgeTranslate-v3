@@ -23,7 +23,8 @@
         "safari:upload": "xcrun altool --upload-app -f 'safari-xcode/build/export/EdgeTranslate.pkg' -t macos -u $APPLE_ID -p $APP_SPEC_PASS",
         "safari:release": "npm run build:safari && npm run safari:sync && npm run safari:archive && npm run safari:export && npm run safari:upload",
         "e2e:chrome": "SELENIUM_BROWSER=chrome jest -i --config './test/e2e/jest/jest.config.js'",
-        "e2e:firefox": "SELENIUM_BROWSER=firefox jest -i --config './test/e2e/jest/jest.config.js'"
+        "e2e:firefox": "SELENIUM_BROWSER=firefox jest -i --config './test/e2e/jest/jest.config.js'",
+        "lint:firefox": "npm run pack:firefox && npx --yes web-ext@8.9.0 lint -s build/firefox"
     },
     "devDependencies": {
         "@babel/core": "^7.17.7",

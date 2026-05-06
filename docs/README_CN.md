@@ -76,6 +76,12 @@ npm run build:firefox
 npm run build:safari
 ```
 
+Firefox 可安装包与验证
+```
+npm run pack:firefox
+npm run lint:firefox
+```
+
 全部浏览器打包/构建
 ```
 npm run build:all
@@ -88,7 +94,8 @@ Safari 说明
 
 构建输出位置
 - Chrome：`packages/EdgeTranslate/build/chrome/`
-- Firefox：`packages/EdgeTranslate/build/firefox/`
+- Firefox 未打包构建：`packages/EdgeTranslate/build/firefox/`
+- Firefox 可安装包：`packages/EdgeTranslate/build/edge_translate_firefox.xpi`
 - Safari 构建输出：`packages/EdgeTranslate/build/safari/`
 - Safari Xcode 资源：显式 sync/release 后位于 `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
 

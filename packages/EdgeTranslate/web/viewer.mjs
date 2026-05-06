@@ -9903,7 +9903,7 @@ class Autolinker {
   static #index = 0;
   static #regex;
   static findLinks(text) {
-    this.#regex ??= /\b(?:https?:\/\/|mailto:|www\.)(?:[\S--[\p{P}<>]]|\/|[\S--[\[\]]]+[\S--[\p{P}<>]])+|\b[\S--[@\p{Ps}\p{Pe}<>]]+@([\S--[\p{P}<>]]+(?:\.[\S--[\p{P}<>]]+)+)/gmv;
+    this.#regex ??= /\b(?:https?:\/\/|mailto:|www\.)[^\s<>\]]+|\b[^\s@<>\[\]()]+@([^\s@<>\[\]()]+(?:\.[^\s@<>\[\]()]+)+)/gmiu;
     const [normalizedText, diffs] = normalize(text, {
       ignoreDashEOL: true
     });

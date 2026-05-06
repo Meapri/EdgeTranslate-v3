@@ -28,7 +28,9 @@
         "build:chrome": "npm run build -w @edge_translate/translators && npm run build:chrome -w edge_translate",
         "build:firefox": "npm run build -w @edge_translate/translators && npm run build:firefox -w edge_translate",
         "build:safari": "npm run build -w @edge_translate/translators && npm run build:safari -w edge_translate",
-        "test": "turbo run test"
+        "test": "turbo run test",
+        "pack:firefox": "npm run build -w @edge_translate/translators && npm run pack:firefox -w edge_translate",
+        "lint:firefox": "npm run pack:firefox && npx --yes web-ext@8.9.0 lint -s packages/EdgeTranslate/build/firefox"
     },
     "devDependencies": {
         "@commitlint/cli": "^13.2.1",

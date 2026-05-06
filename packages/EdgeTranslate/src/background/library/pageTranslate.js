@@ -43,105 +43,37 @@ function translatePage(channel) {
  */
 function executeGoogleScript(channel) {
     promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
-        if (tabs[0]) {
-            // Prefer direct executeScript on Safari (content-script world bypasses page CSP)
-            const isSafari = (() => {
-                if (typeof navigator === "undefined" || !navigator.userAgent) return false;
-                const ua = navigator.userAgent;
-                return (
-                    /Safari\//.test(ua) &&
-                    !/Chrome\//.test(ua) &&
-                    !/Chromium\//.test(ua) &&
-                    !/Edg\//.test(ua)
-                );
-            })();
-            if (isSafari) {
-                // Run init.js in ISOLATED world (default) so chrome.* is available; it will inject a page script (injection.js)
-                if (chrome.scripting && chrome.scripting.executeScript) {
-                    const tabId = tabs[0].id;
-                    chrome.scripting
-                        .executeScript({
-                            target: { tabId, allFrames: false },
-                            files: ["google/init.js"],
-                            injectImmediately: true,
-                        })
-                        .then(() => {
-                            channel.emitToTabs(tabId, "start_page_translate", {
-                                translator: "google",
-                            });
-                            setTimeout(() => {
-                                try {
-                                    channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                                } catch {}
-                            }, 800);
-                        })
-                        .catch(() => {
-                            try {
-                                chrome.tabs.executeScript(tabId, { file: "google/init.js" }, () => {
-                                    channel.emitToTabs(tabId, "start_page_translate", {
-                                        translator: "google",
-                                    });
-                                    setTimeout(() => {
-                                        try {
-                                            channel.emitToTabs(
-                                                tabId,
-                                                "start_dom_page_translate",
-                                                {}
-                                            );
-                                        } catch {}
-                                    }, 800);
-                                });
-                            } catch (error) {
-                                channel.emitToTabs(tabId, "inject_page_translate", {});
-                                setTimeout(() => {
-                                    try {
-                                        channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                                    } catch {}
-                                }, 800);
-                            }
-                        });
-                    return;
-                }
-            }
-            const hasScripting =
-                typeof chrome !== "undefined" && chrome.scripting && chrome.scripting.executeScript;
-            if (hasScripting) {
-                const tabId = tabs[0].id;
-                chrome.scripting
-                    .executeScript({
-                        target: { tabId },
-                        files: ["google/init.js"],
-                    })
-                    .then(() => {
-                        channel.emitToTabs(tabId, "start_page_translate", {
-                            translator: "google",
-                        });
-                        setTimeout(() => {
-                            try {
-                                channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                            } catch {}
-                        }, 800);
-                    })
-                    .catch((error) => {
-                        logWarn(`Chrome scripting error: ${error}`);
-                        // final fallback: ask content script to inject
-                        channel.emitToTabs(tabId, "inject_page_translate", {});
-                    });
-            } else {
-                // MV2-compatible executeScript via tabs
-                try {
-                    const tabId = tabs[0].id;
-                    chrome.tabs.executeScript(tabId, { file: "google/init.js" }, () => {
-                        channel.emitToTabs(tabId, "start_page_translate", {
-                            translator: "google",
-                        });
-                    });
-                } catch (error) {
-                    // delegate to content script
-                    channel.emitToTabs(tabs[0].id, "inject_page_translate", {});
-                }
-            }
+        if (!tabs[0]) return;
+
+        const tabId = tabs[0].id;
+        const canExecuteScript =
+            typeof chrome !== "undefined" && chrome.scripting && chrome.scripting.executeScript;
+
+        if (!canExecuteScript) {
+            channel.emitToTabs(tabId, "inject_page_translate", {});
+            return;
         }
+
+        chrome.scripting
+            .executeScript({
+                target: { tabId, allFrames: false },
+                files: ["google/init.js"],
+                injectImmediately: true,
+            })
+            .then(() => {
+                channel.emitToTabs(tabId, "start_page_translate", {
+                    translator: "google",
+                });
+                setTimeout(() => {
+                    try {
+                        channel.emitToTabs(tabId, "start_dom_page_translate", {});
+                    } catch {}
+                }, 800);
+            })
+            .catch((error) => {
+                logWarn(`Chrome scripting error: ${error}`);
+                channel.emitToTabs(tabId, "inject_page_translate", {});
+            });
     });
 }
 

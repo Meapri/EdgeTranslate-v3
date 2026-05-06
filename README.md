@@ -75,6 +75,12 @@ npm run build:firefox
 npm run build:safari
 ```
 
+Firefox installable package and validation
+```
+npm run pack:firefox
+npm run lint:firefox
+```
+
 All-browser packaging/build
 ```
 npm run build:all
@@ -87,7 +93,8 @@ Safari notes
 
 Build outputs
 - Chrome: `packages/EdgeTranslate/build/chrome/`
-- Firefox: `packages/EdgeTranslate/build/firefox/`
+- Firefox unpacked build: `packages/EdgeTranslate/build/firefox/`
+- Firefox installable package: `packages/EdgeTranslate/build/edge_translate_firefox.xpi`
 - Safari build output: `packages/EdgeTranslate/build/safari/`
 - Safari Xcode resources: `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/` after explicit sync/release only
 

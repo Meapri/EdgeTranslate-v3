@@ -76,6 +76,12 @@ npm run build:firefox
 npm run build:safari
 ```
 
+Firefox 설치 패키지와 검증
+```
+npm run pack:firefox
+npm run lint:firefox
+```
+
 전체 브라우저 패키징/빌드
 ```
 npm run build:all
@@ -88,7 +94,8 @@ Safari 참고
 
 빌드 산출물 위치
 - Chrome: `packages/EdgeTranslate/build/chrome/`
-- Firefox: `packages/EdgeTranslate/build/firefox/`
+- Firefox 압축 해제 빌드: `packages/EdgeTranslate/build/firefox/`
+- Firefox 설치 패키지: `packages/EdgeTranslate/build/edge_translate_firefox.xpi`
 - Safari 빌드 산출물: `packages/EdgeTranslate/build/safari/`
 - Safari Xcode 리소스: 명시적 sync/release 후 `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
 

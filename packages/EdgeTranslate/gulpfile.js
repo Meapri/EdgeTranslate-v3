@@ -89,10 +89,14 @@ function setProductEnvironment(done) {
 /**
  * A private task to clean old packages before building new ones
  */
+function getPackageExtension() {
+    return browser === "firefox" ? "xpi" : "zip";
+}
+
 function clean() {
     let output_dir = `./build/${browser}/`;
-    let packageName = `edge_translate_${browser}.zip`;
-    return del([output_dir, `./build/${packageName}`]);
+    let packageName = `edge_translate_${browser}.${getPackageExtension()}`;
+    return del([output_dir, `./build/${packageName}`, `./build/edge_translate_${browser}.zip`]);
 }
 
 /**
@@ -100,7 +104,7 @@ function clean() {
  */
 function packToZip() {
     let match_dir = `./build/${browser}/**/*`;
-    let packageName = `edge_translate_${browser}.zip`;
+    let packageName = `edge_translate_${browser}.${getPackageExtension()}`;
     return gulp.src(match_dir).pipe(zip(packageName)).pipe(gulp.dest("./build/"));
 }
 
@@ -211,8 +215,41 @@ function manifest() {
         .pipe(
             through.obj(function (file, enc, callback) {
                 try {
+                    const manifestJson = JSON.parse(file.contents.toString(enc));
+                    if (browser === "firefox") {
+                        delete manifestJson.applications;
+                        manifestJson.browser_specific_settings = {
+                            gecko: {
+                                id: "nickyfeng@edgetranslate.com",
+                                strict_min_version: "109.0",
+                            },
+                        };
+
+                        if (manifestJson.background && manifestJson.background.service_worker) {
+                            const workerFile = manifestJson.background.service_worker;
+                            manifestJson.background = { scripts: [workerFile] };
+                        }
+
+                        manifestJson.permissions = [
+                            "activeTab",
+                            "scripting",
+                            "contextMenus",
+                            "storage",
+                            "tabs",
+                            "webNavigation",
+                            "webRequest",
+                        ];
+                        manifestJson.host_permissions = ["<all_urls>"];
+                        delete manifestJson.declarative_net_request;
+
+                        if (manifestJson.commands) {
+                            delete manifestJson.commands.translate_page;
+                            delete manifestJson.commands.cancel_page_translate;
+                            delete manifestJson.commands.toggle_page_translate_banner;
+                        }
+                    }
+
                     if (browser === "safari") {
-                        const manifestJson = JSON.parse(file.contents.toString(enc));
                         // Remove unsupported keys for Safari
                         if (manifestJson.background && manifestJson.background.type) {
                             delete manifestJson.background.type;
@@ -244,7 +281,9 @@ function manifest() {
                         if (manifestJson.declarative_net_request) {
                             delete manifestJson.declarative_net_request;
                         }
+                    }
 
+                    if (browser === "firefox" || browser === "safari") {
                         file.contents = Buffer.from(JSON.stringify(manifestJson));
                     }
                 } catch (e) {
