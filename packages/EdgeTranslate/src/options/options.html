@@ -183,8 +183,21 @@
                                 setting-path="LocalTranslatorConfig mode"
                                 id="local-translator-mode"
                             >
-                                <option value="endpoint" class="i18n" data-i18n-name="LocalTranslatorModeEndpoint"></option>
-                                <option value="chromeBuiltin" class="i18n" data-i18n-name="LocalTranslatorModeChromeBuiltin"></option>
+                                <option
+                                    value="endpoint"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeEndpoint"
+                                ></option>
+                                <option
+                                    value="geminiNano"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeGeminiNano"
+                                ></option>
+                                <option
+                                    value="chromeBuiltin"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeChromeBuiltin"
+                                ></option>
                             </select>
                         </label>
                     </div>
@@ -303,6 +316,23 @@
                                 class="radio"
                                 name="default-page-translator"
                                 id="google-page-translator"
+                            />
+                        </label>
+                    </div>
+                    <div class="column">
+                        <label
+                            for="gemini-nano-page-translator"
+                            class="checked-label i18n"
+                            data-i18n-name="GeminiNanoPageTranslate"
+                        >
+                            <input
+                                type="radio"
+                                value="GeminiNanoPageTranslate"
+                                setting-type="radio"
+                                setting-path="DefaultPageTranslator"
+                                class="radio"
+                                name="default-page-translator"
+                                id="gemini-nano-page-translator"
                             />
                         </label>
                     </div>
@@ -478,7 +508,6 @@
                             ></label>
                         </div>
                     </div>
-                    
                 </div>
             </div>
             <footer>

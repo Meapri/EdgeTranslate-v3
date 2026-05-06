@@ -11,7 +11,8 @@ function translatePage(channel) {
     getOrSetDefaultSettings(["DefaultPageTranslator", "languageSetting"], DEFAULT_SETTINGS).then(
         (result) => {
             const translator = result.DefaultPageTranslator;
-            // const targetLang = (result.languageSetting && result.languageSetting.tl) || "en";
+            const targetLang = (result.languageSetting && result.languageSetting.tl) || "en";
+            const sourceLang = (result.languageSetting && result.languageSetting.sl) || "auto";
 
             // Page translation is currently Chrome-only.
             if (!FEATURE_FLAGS.pageTranslate) return;
@@ -20,12 +21,25 @@ function translatePage(channel) {
                 case "GooglePageTranslate":
                     executeGoogleScript(channel);
                     break;
+                case "GeminiNanoPageTranslate":
+                    executeDomPageTranslate(channel, {
+                        engine: "geminiNano",
+                        sl: sourceLang,
+                        tl: targetLang,
+                    });
+                    break;
+                case "ChromeBuiltinPageTranslate":
+                    executeDomPageTranslate(channel, {
+                        engine: "chromeBuiltin",
+                        sl: sourceLang,
+                        tl: targetLang,
+                    });
+                    break;
                 case "DomPageTranslate":
-                    // Safari 외 브라우저에서만 사용
-                    promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
-                        if (tabs && tabs[0]) {
-                            channel.emitToTabs(tabs[0].id, "start_dom_page_translate", {});
-                        }
+                    executeDomPageTranslate(channel, {
+                        engine: "dom",
+                        sl: sourceLang,
+                        tl: targetLang,
                     });
                     break;
                 default:
@@ -34,6 +48,20 @@ function translatePage(channel) {
             }
         }
     );
+}
+
+/**
+ * Execute DOM-based page translation in the active tab.
+ *
+ * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
+ * @param {{ engine?: string, sl?: string, tl?: string }} detail Page translation options.
+ */
+function executeDomPageTranslate(channel, detail = {}) {
+    promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        if (tabs && tabs[0]) {
+            channel.emitToTabs(tabs[0].id, "start_dom_page_translate", detail);
+        }
+    });
 }
 
 /**
@@ -77,4 +105,4 @@ function executeGoogleScript(channel) {
     });
 }
 
-export { translatePage, executeGoogleScript };
+export { translatePage, executeGoogleScript, executeDomPageTranslate };

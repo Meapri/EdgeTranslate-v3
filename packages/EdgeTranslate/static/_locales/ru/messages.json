@@ -1322,5 +1322,14 @@
     "LocalTranslatorModeChromeBuiltin": {
         "message": "Chrome Built-in",
         "description": "Использовать встроенный Translator API настольного Chrome, если доступен."
+    },
+    "LocalTranslatorModeGeminiNano": {
+        "message": "Chrome Gemini Nano"
+    },
+    "GeminiNanoPageTranslate": {
+        "message": "Перевод страницы Chrome Gemini Nano"
+    },
+    "ChromeBuiltinPageTranslate": {
+        "message": "Перевод страницы встроенным переводчиком Chrome"
     }
 }

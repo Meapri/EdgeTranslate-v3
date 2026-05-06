@@ -2,6 +2,10 @@ import { HybridTranslator } from "@edge_translate/translators";
 // common.log는 현재 파일에서 직접 사용하지 않습니다.
 import { promiseTabs, delayPromise } from "common/scripts/promise.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import {
+    getChromeTranslatorSupportedLanguages,
+    getGeminiNanoSupportedLanguages,
+} from "common/scripts/chrome_builtin_translate.js";
 import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
@@ -34,6 +38,11 @@ class TranslatorManager {
                 channel,
                 configs.LocalTranslatorConfig
             );
+            this.localTranslatorProxy = this.createLocalTranslatorProxy(
+                this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate,
+                configs.LocalTranslatorConfig
+            );
+            this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate = this.localTranslatorProxy;
 
             // Supported translators.
             this.TRANSLATORS = {
@@ -67,12 +76,73 @@ class TranslatorManager {
         this.translationCache = new TtlCache({ maxEntries: this.cacheOptions.maxEntries });
         this.inflightDetect = new Map(); // key -> Promise
         this.inflightTranslate = new Map(); // key -> Promise
+        this.currentChromeBuiltinTabId = null;
 
         /**
          * Start to provide services and listen to event.
          */
         this.provideServices();
         this.listenToEvents();
+    }
+
+    /**
+     * Clear caches when configuration or language settings change
+     */
+    createLocalTranslatorProxy(endpointTranslator, initialConfig = {}) {
+        let config = initialConfig || {};
+        const manager = this;
+        return {
+            useConfig(nextConfig = {}) {
+                config = nextConfig || {};
+                endpointTranslator.useConfig(nextConfig);
+            },
+            supportedLanguages() {
+                if (!config.enabled) return new Set();
+                if (config.mode === "geminiNano") return getGeminiNanoSupportedLanguages();
+                if (config.mode === "chromeBuiltin") return getChromeTranslatorSupportedLanguages();
+                return endpointTranslator.supportedLanguages();
+            },
+            detect(text) {
+                if (["chromeBuiltin", "geminiNano"].includes(config.mode))
+                    return Promise.resolve("auto");
+                return endpointTranslator.detect(text);
+            },
+            async translate(text, from, to) {
+                if (!["chromeBuiltin", "geminiNano"].includes(config.mode)) {
+                    return endpointTranslator.translate(text, from, to);
+                }
+                const tabId = await manager.getChromeBuiltinTargetTabId();
+                const result = await manager.channel.requestToTab(
+                    tabId,
+                    "chrome_builtin_translate",
+                    {
+                        text,
+                        sl: from,
+                        tl: to,
+                        engine: config.mode,
+                    }
+                );
+                return {
+                    originalText: text,
+                    mainMeaning: result?.mainMeaning || result?.translatedText || "",
+                    translatedText: result?.translatedText || result?.mainMeaning || "",
+                    sourceLanguage: result?.sourceLanguage || from,
+                    targetLanguage: result?.targetLanguage || to,
+                };
+            },
+            pronounce(...args) {
+                return endpointTranslator.pronounce(...args);
+            },
+            stopPronounce(...args) {
+                return endpointTranslator.stopPronounce(...args);
+            },
+        };
+    }
+
+    async getChromeBuiltinTargetTabId() {
+        if (typeof this.currentChromeBuiltinTabId === "number")
+            return this.currentChromeBuiltinTabId;
+        return this.getCurrentTabId();
     }
 
     /**
@@ -155,14 +225,17 @@ class TranslatorManager {
         );
 
         // Quiet single-text translate service for DOM page translation (no UI events)
-        this.channel.provide("translate_text_quiet", async (params) => {
+        this.channel.provide("translate_text_quiet", async (params, sender) => {
             await this.config_loader;
             const text = params && params.text ? params.text : "";
             if (!text) return Promise.resolve({ originalText: "", translatedText: "" });
             let sl = (params && params.sl) || this.LANGUAGE_SETTING.sl || "auto";
             let tl = (params && params.tl) || this.LANGUAGE_SETTING.tl;
+            const translatorId = (params && params.translatorId) || this.DEFAULT_TRANSLATOR;
+            const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
+            this.currentChromeBuiltinTabId =
+                sender && sender.tab ? sender.tab.id : previousChromeBuiltinTabId;
             try {
-                const translatorId = this.DEFAULT_TRANSLATOR;
                 // cache first
                 let result = this.getTranslationFromCache(text, sl, tl, translatorId);
                 if (!result) {
@@ -172,6 +245,8 @@ class TranslatorManager {
                 return Promise.resolve(result || { originalText: text, translatedText: text });
             } catch (e) {
                 return Promise.resolve({ originalText: text, translatedText: text });
+            } finally {
+                this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
             }
         });
 
@@ -432,23 +507,30 @@ class TranslatorManager {
 
             const translatorId = this.DEFAULT_TRANSLATOR;
             const key = this.makeTranslateKey(text, sl, tl, translatorId);
+            const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
+            this.currentChromeBuiltinTabId = currentTabId;
 
-            // Try translation cache first
-            let result = this.getTranslationFromCache(text, sl, tl, translatorId);
-            if (!result) {
-                if (this.inflightTranslate.has(key)) {
-                    result = await this.inflightTranslate.get(key);
-                } else {
-                    const promise = this.TRANSLATORS[translatorId]
-                        .translate(text, sl, tl)
-                        .then((res) => {
-                            if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
-                            return res;
-                        })
-                        .finally(() => this.inflightTranslate.delete(key));
-                    this.inflightTranslate.set(key, promise);
-                    result = await promise;
+            let result;
+            try {
+                // Try translation cache first
+                result = this.getTranslationFromCache(text, sl, tl, translatorId);
+                if (!result) {
+                    if (this.inflightTranslate.has(key)) {
+                        result = await this.inflightTranslate.get(key);
+                    } else {
+                        const promise = this.TRANSLATORS[translatorId]
+                            .translate(text, sl, tl)
+                            .then((res) => {
+                                if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
+                                return res;
+                            })
+                            .finally(() => this.inflightTranslate.delete(key));
+                        this.inflightTranslate.set(key, promise);
+                        result = await promise;
+                    }
                 }
+            } finally {
+                this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
             }
 
             // Ensure language information is always set correctly for TTS
