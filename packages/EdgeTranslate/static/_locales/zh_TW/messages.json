@@ -1292,11 +1292,11 @@
         "description": "本機 API 翻譯簡稱"
     },
     "LocalTranslatorConfig": {
-        "message": "本機 API 翻譯",
+        "message": "本機翻譯",
         "description": "使用者提供的翻譯 API endpoint 設定"
     },
     "LocalTranslatorEnabled": {
-        "message": "啟用本機 API 翻譯",
+        "message": "啟用本機翻譯",
         "description": "啟用使用者設定的本機/API 翻譯服務"
     },
     "LocalTranslatorEndpoint": {
@@ -1308,7 +1308,19 @@
         "description": "可選，作為 X-API-Key 傳送"
     },
     "LocalTranslatorHelp": {
-        "message": "公開 Web Store 版本不會內建伺服器位址或金鑰。請只在信任該伺服器時自行輸入 endpoint 和 API 金鑰。",
+        "message": "公開 Web Store 版本不會內建伺服器位址或金鑰。Endpoint 模式使用你信任並自行輸入的伺服器；Chrome 內建模式會在支援的桌面版 Chrome 中使用本機 Translator API，首次使用可能下載語言包。",
         "description": "本機 API 說明"
+    },
+    "LocalTranslatorMode": {
+        "message": "模式",
+        "description": "本機翻譯提供者模式"
+    },
+    "LocalTranslatorModeEndpoint": {
+        "message": "Endpoint API",
+        "description": "使用使用者設定的 HTTP 翻譯 endpoint。"
+    },
+    "LocalTranslatorModeChromeBuiltin": {
+        "message": "Chrome 內建",
+        "description": "使用支援的桌面版 Chrome 內建 Translator API。"
     }
 }

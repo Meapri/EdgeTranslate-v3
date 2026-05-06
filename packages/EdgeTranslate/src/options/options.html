@@ -173,6 +173,25 @@
                 <div class="row">
                     <div class="column">
                         <label
+                            for="local-translator-mode"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorMode"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="LocalTranslatorConfig mode"
+                                id="local-translator-mode"
+                            >
+                                <option value="endpoint" class="i18n" data-i18n-name="LocalTranslatorModeEndpoint"></option>
+                                <option value="chromeBuiltin" class="i18n" data-i18n-name="LocalTranslatorModeChromeBuiltin"></option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="column">
+                        <label
                             for="local-translator-endpoint"
                             class="checked-label i18n"
                             data-i18n-name="LocalTranslatorEndpoint"

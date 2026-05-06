@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
     DefaultPageTranslator: "GooglePageTranslate",
     LocalTranslatorConfig: {
         enabled: false,
+        mode: "endpoint",
         endpoint: "",
         apiKey: "",
     },
