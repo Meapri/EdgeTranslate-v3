@@ -1,13 +1,13 @@
 import { shouldPreloadPdfAsBlob } from "../../web/edge-viewer-file.js";
 
 describe("edge PDF viewer file loading", () => {
-    it("does not preload local file PDFs as blob so PDF.js can load them with file-url permission", () => {
+    it("preloads local file PDFs as blob before PDF.js validates viewer/file origins", () => {
         expect(
             shouldPreloadPdfAsBlob({
                 rawUrl: "file:///Users/me/file.pdf",
                 viewerOrigin: "chrome-extension://extension-id",
             })
-        ).toBe(false);
+        ).toBe(true);
     });
 
     it("preloads http PDFs from other origins as blob", () => {

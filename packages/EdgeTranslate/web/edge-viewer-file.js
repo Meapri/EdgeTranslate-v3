@@ -6,6 +6,10 @@ function parsePdfTarget(rawUrl, baseUrl) {
   }
 }
 
+function isExtensionViewerOrigin(origin) {
+  return /^(chrome|moz|safari-web)-extension:\/\//.test(origin || '');
+}
+
 function shouldPreloadPdfAsBlob({ rawUrl, viewerOrigin, baseUrl }) {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   if (rawUrl.startsWith('blob:')) return false;
@@ -13,11 +17,13 @@ function shouldPreloadPdfAsBlob({ rawUrl, viewerOrigin, baseUrl }) {
   const target = parsePdfTarget(rawUrl, baseUrl || viewerOrigin);
   if (!target) return false;
 
-  // Local files should stay as file:// URLs. When the user enables
-  // "Allow access to file URLs", PDF.js can load them directly; trying to
-  // fetch-and-blob them from the extension page commonly fails and leaves a
-  // blank viewer.
-  if (target.protocol === 'file:') return false;
+  // PDF.js validates the ?file= URL before opening it. A file:// URL has a
+  // different origin from chrome-extension:// / moz-extension://, so passing it
+  // through directly throws "file origin does not match viewer's" and leaves the
+  // viewer blank. Preload local PDFs as same-origin blob: URLs when the viewer is
+  // running inside the extension; this still requires the browser's file-URL
+  // access permission to be enabled for local files.
+  if (target.protocol === 'file:') return isExtensionViewerOrigin(viewerOrigin);
 
   return target.origin !== viewerOrigin;
 }
