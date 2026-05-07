@@ -1,6 +1,9 @@
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
-import { translateWithChromeOnDevice } from "common/scripts/chrome_builtin_translate.js";
+import {
+    toChromeTranslatorLanguage,
+    translateWithChromeOnDevice,
+} from "common/scripts/chrome_builtin_translate.js";
 
 /**
  * Control the visibility of page translator banners.
@@ -26,6 +29,7 @@ class BannerController {
         this._scheduleBatch = null;
         this._pendingNodes = new Set();
         this._domPageTranslateOptions = { engine: "dom", sl: "auto", tl: "en" };
+        this._domResolvedSourceLanguage = null;
         this._domTranslationCache = new Map();
         this._domActiveTranslations = 0;
         this._domMaxConcurrentTranslations = 2;
@@ -79,18 +83,20 @@ class BannerController {
             const text = params && params.text ? params.text : "";
             const from = (params && params.sl) || (params && params.from) || "auto";
             const to = (params && params.tl) || (params && params.to) || "en";
-            const engine = (params && params.engine) || "geminiNano";
-            return this.translateWithOnDeviceEngine(text, from, to, engine);
+            return this.translateWithOnDeviceEngine(text, from, to);
         });
 
         // Kick off DOM fallback/on-device page translation on explicit request
         this.channel.on("start_dom_page_translate", (detail = {}) => {
             this._domPageTranslateOptions = {
-                engine: detail.engine || "dom",
+                engine: detail.engine === "dom" ? "dom" : "chromeBuiltin",
                 sl: detail.sl || "auto",
                 tl: detail.tl || "en",
             };
             this._domOnDeviceUnavailable = false;
+            this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
+                this._domPageTranslateOptions.sl
+            );
             this.startDomFallback();
             // initial scan to cover existing content
             const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -198,13 +204,18 @@ class BannerController {
         }
     }
 
-    async translateWithOnDeviceEngine(text, from, to, engine) {
+    async translateWithOnDeviceEngine(text, from, to) {
         try {
             await this.ensureOnDeviceBridge();
-            return await this.requestOnDeviceBridge({ text, sl: from, tl: to, engine });
+            return await this.requestOnDeviceBridge({
+                text,
+                sl: from,
+                tl: to,
+                engine: "chromeBuiltin",
+            });
         } catch (bridgeError) {
             try {
-                return await translateWithChromeOnDevice(text, from, to, engine);
+                return await translateWithChromeOnDevice(text, from, to);
             } catch (contentError) {
                 throw bridgeError || contentError;
             }
@@ -343,6 +354,23 @@ class BannerController {
         });
     }
 
+    resolveDomPageSourceLanguage(configuredSourceLanguage) {
+        if (configuredSourceLanguage && configuredSourceLanguage !== "auto") {
+            return toChromeTranslatorLanguage(configuredSourceLanguage);
+        }
+
+        const pageLanguage =
+            document.documentElement?.getAttribute("lang") ||
+            document.body?.getAttribute("lang") ||
+            document
+                .querySelector("meta[http-equiv='content-language']")
+                ?.getAttribute("content") ||
+            "";
+        const normalized = toChromeTranslatorLanguage(pageLanguage);
+        if (normalized && normalized !== "auto") return normalized;
+        return configuredSourceLanguage || "auto";
+    }
+
     /**
      * Start DOM fallback translation observer with aggressive filtering.
      */
@@ -356,7 +384,7 @@ class BannerController {
             if (!p) return false;
             const tn = p.tagName;
             if (/^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|SELECT|OPTION)$/i.test(tn)) return false;
-            if (p.hasAttribute("data-et-translated")) return false;
+            if (this._translatedSet.has(node)) return false;
             return true;
         };
         const enqueue = (node) => {
@@ -404,16 +432,15 @@ class BannerController {
         const items = [];
         for (const n of nodes) {
             const p = n.parentElement;
-            if (!p || this._translatedSet.has(p)) continue;
+            if (!p || this._translatedSet.has(n)) continue;
             const text = String(n.nodeValue || "").trim();
             if (text.length < 2) continue;
             items.push({ node: n, parent: p, text });
-            this._translatedSet.add(p);
-            p.setAttribute("data-et-translated", "1");
+            this._translatedSet.add(n);
         }
         if (!items.length) return;
 
-        if (!["chromeBuiltin", "geminiNano"].includes(this._domPageTranslateOptions.engine)) return;
+        if (this._domPageTranslateOptions.engine !== "chromeBuiltin") return;
         if (this._domOnDeviceUnavailable) return;
         items.forEach((item) => this.enqueueChromeBuiltinNodeTranslation(item));
     }
@@ -422,16 +449,12 @@ class BannerController {
         const run = async () => {
             this._domActiveTranslations += 1;
             try {
-                const { sl, tl } = this._domPageTranslateOptions;
-                const cacheKey = `${sl}|${tl}|${item.text}`;
+                const { tl } = this._domPageTranslateOptions;
+                const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                const cacheKey = `${this._domPageTranslateOptions.engine}|${sl}|${tl}|${item.text}`;
                 let translated = this._domTranslationCache.get(cacheKey);
                 if (!translated) {
-                    const result = await this.translateWithOnDeviceEngine(
-                        item.text,
-                        sl,
-                        tl,
-                        this._domPageTranslateOptions.engine
-                    );
+                    const result = await this.translateWithOnDeviceEngine(item.text, sl, tl);
                     translated = result.mainMeaning || result.translatedText;
                     if (translated) this._domTranslationCache.set(cacheKey, translated);
                 }
@@ -439,8 +462,7 @@ class BannerController {
                     item.node.nodeValue = translated;
                 }
             } catch (error) {
-                item.parent.removeAttribute("data-et-translated");
-                this._translatedSet.delete(item.parent);
+                this._translatedSet.delete(item.node);
                 if (this.isOnDeviceUnavailableError(error)) {
                     this._domOnDeviceUnavailable = true;
                     if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
@@ -469,7 +491,9 @@ class BannerController {
 
     isOnDeviceUnavailableError(error) {
         const message = error && error.message ? error.message : String(error || "");
-        return /not available|unavailable|did not become ready|Failed to inject/i.test(message);
+        return /network|not available|unavailable|did not become ready|Failed to inject|timed out/i.test(
+            message
+        );
     }
 }
 

@@ -4,12 +4,10 @@ describe("LocalTranslator", () => {
     const originalFetch = global.fetch;
 
     const originalTranslator = (globalThis as any).Translator;
-    const originalLanguageModel = (globalThis as any).LanguageModel;
 
     afterEach(() => {
         global.fetch = originalFetch;
         (globalThis as any).Translator = originalTranslator;
-        (globalThis as any).LanguageModel = originalLanguageModel;
         jest.restoreAllMocks();
     });
 
@@ -92,6 +90,7 @@ describe("LocalTranslator", () => {
         const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
         const result = await translator.translate("hello", "en", "ko");
 
+        expect(availabilityMock).toHaveBeenCalledTimes(1);
         expect(availabilityMock).toHaveBeenCalledWith({
             sourceLanguage: "en",
             targetLanguage: "ko",
@@ -106,31 +105,50 @@ describe("LocalTranslator", () => {
         });
     });
 
+    test("normalizes regional Chrome Translator language codes and reuses the translator", async () => {
+        const translateMock = jest.fn().mockResolvedValue("안녕");
+        const createMock = jest.fn().mockResolvedValue({ translate: translateMock });
+        const availabilityMock = jest.fn().mockResolvedValue("available");
+        (globalThis as any).Translator = {
+            availability: availabilityMock,
+            create: createMock,
+        };
+
+        const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
+        await translator.translate("hello", "en-US", "ko-KR");
+        await translator.translate("world", "en-US", "ko-KR");
+
+        expect(availabilityMock).toHaveBeenCalledTimes(1);
+        expect(availabilityMock).toHaveBeenCalledWith({
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        expect(createMock).toHaveBeenCalledTimes(1);
+        expect(createMock).toHaveBeenCalledWith({ sourceLanguage: "en", targetLanguage: "ko" });
+        expect(translateMock).toHaveBeenCalledTimes(2);
+    });
+
     test("advertises Chrome built-in support without endpoint", () => {
         const translator = new LocalTranslator({ enabled: true, mode: "chromeBuiltin" });
         expect(translator.supportedLanguages().has("ko")).toBe(true);
         expect(translator.supportedLanguages().has("en")).toBe(true);
     });
 
-    test("translates with Chrome Gemini Nano mode", async () => {
-        const promptMock = jest.fn().mockResolvedValue("안녕");
-        const createMock = jest.fn().mockResolvedValue({ prompt: promptMock });
-        const availabilityMock = jest.fn().mockResolvedValue("available");
-        (globalThis as any).LanguageModel = {
-            availability: availabilityMock,
-            create: createMock,
+    test("migrates legacy removed on-device mode to Chrome Translator API", async () => {
+        const chromeTranslateMock = jest.fn().mockResolvedValue("안녕");
+        const chromeCreateMock = jest.fn().mockResolvedValue({ translate: chromeTranslateMock });
+        (globalThis as any).Translator = {
+            availability: jest.fn().mockResolvedValue("available"),
+            create: chromeCreateMock,
         };
-
         const translator = new LocalTranslator({ enabled: true, mode: "geminiNano" });
         const result = await translator.translate("hello", "en", "ko");
 
-        expect(availabilityMock).toHaveBeenCalled();
-        expect(createMock).toHaveBeenCalledWith(
-            expect.objectContaining({
-                initialPrompts: expect.any(Array),
-            })
-        );
-        expect(promptMock).toHaveBeenCalledWith(expect.stringContaining("hello"));
+        expect(chromeCreateMock).toHaveBeenCalledWith({
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        expect(chromeTranslateMock).toHaveBeenCalledWith("hello");
         expect(result).toMatchObject({
             originalText: "hello",
             mainMeaning: "안녕",

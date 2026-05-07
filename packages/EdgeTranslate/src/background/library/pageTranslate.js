@@ -10,7 +10,10 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
 function translatePage(channel) {
     getOrSetDefaultSettings(["DefaultPageTranslator", "languageSetting"], DEFAULT_SETTINGS).then(
         (result) => {
-            const translator = result.DefaultPageTranslator;
+            const translator =
+                result.DefaultPageTranslator === "GeminiNanoPageTranslate"
+                    ? "ChromeBuiltinPageTranslate"
+                    : result.DefaultPageTranslator;
             const targetLang = (result.languageSetting && result.languageSetting.tl) || "en";
             const sourceLang = (result.languageSetting && result.languageSetting.sl) || "auto";
 
@@ -20,13 +23,6 @@ function translatePage(channel) {
             switch (translator) {
                 case "GooglePageTranslate":
                     executeGoogleScript(channel);
-                    break;
-                case "GeminiNanoPageTranslate":
-                    executeDomPageTranslate(channel, {
-                        engine: "geminiNano",
-                        sl: sourceLang,
-                        tl: targetLang,
-                    });
                     break;
                 case "ChromeBuiltinPageTranslate":
                     executeDomPageTranslate(channel, {

@@ -483,12 +483,6 @@
         "message": "Chrome 내장",
         "description": "지원되는 데스크톱 Chrome의 내장 Translator API를 사용합니다."
     },
-    "LocalTranslatorModeGeminiNano": {
-        "message": "Chrome Gemini Nano"
-    },
-    "GeminiNanoPageTranslate": {
-        "message": "Chrome Gemini Nano 페이지 번역"
-    },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome 내장 번역기 페이지 번역"
     }

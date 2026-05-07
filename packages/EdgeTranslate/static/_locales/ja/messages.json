@@ -1323,12 +1323,6 @@
         "message": "Chrome 内蔵",
         "description": "対応するデスクトップ版 Chrome の内蔵 Translator API を使用します。"
     },
-    "LocalTranslatorModeGeminiNano": {
-        "message": "Chrome Gemini Nano"
-    },
-    "GeminiNanoPageTranslate": {
-        "message": "Chrome Gemini Nano ページ翻訳"
-    },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome 組み込み翻訳ページ翻訳"
     }
