@@ -250,6 +250,13 @@ class TranslatorManager {
             }
         });
 
+        // Inject the on-device AI bridge into the page main world from the extension
+        // service worker. This avoids page CSP/network failures caused by DOM <script src>
+        // injection on stricter sites.
+        this.channel.provide("inject_on_device_bridge", async (params, sender) =>
+            this.injectOnDeviceBridge(sender)
+        );
+
         // Pronounce service.
         this.channel.provide("pronounce", (params) => {
             let speed = params.speed;
@@ -416,6 +423,32 @@ class TranslatorManager {
             return Promise.resolve(sender.tab.id);
         }
         return this.getCurrentTabId();
+    }
+
+    async injectOnDeviceBridge(sender) {
+        const tabId = sender && sender.tab && sender.tab.id;
+        if (typeof tabId !== "number") {
+            throw new Error("Cannot inject Chrome on-device bridge without a sender tab.");
+        }
+        if (
+            typeof chrome === "undefined" ||
+            !chrome.scripting ||
+            typeof chrome.scripting.executeScript !== "function"
+        ) {
+            throw new Error("Chrome scripting API is unavailable for on-device bridge injection.");
+        }
+
+        const target = { tabId };
+        if (typeof sender.frameId === "number") target.frameIds = [sender.frameId];
+
+        await chrome.scripting.executeScript({
+            target,
+            files: ["chrome_builtin/on_device_bridge.js"],
+            world: "MAIN",
+            injectImmediately: true,
+        });
+
+        return { injected: true };
     }
 
     /**

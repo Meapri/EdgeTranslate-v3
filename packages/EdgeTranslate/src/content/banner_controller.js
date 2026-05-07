@@ -113,7 +113,22 @@ class BannerController {
     async ensureOnDeviceBridge() {
         if (this._onDeviceBridgePromise) return this._onDeviceBridgePromise;
 
-        this._onDeviceBridgePromise = new Promise((resolve, reject) => {
+        this._onDeviceBridgePromise = this.injectOnDeviceBridgeViaBackground().catch(() =>
+            this.injectOnDeviceBridgeViaScriptTag()
+        );
+
+        return this._onDeviceBridgePromise;
+    }
+
+    async injectOnDeviceBridgeViaBackground() {
+        if (!this.channel || typeof this.channel.request !== "function") {
+            throw new Error("Extension background bridge injector is unavailable.");
+        }
+        await this.channel.request("inject_on_device_bridge");
+    }
+
+    injectOnDeviceBridgeViaScriptTag() {
+        return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 window.removeEventListener("message", readyHandler);
                 reject(new Error("Chrome on-device translation bridge did not become ready."));
@@ -130,12 +145,7 @@ class BannerController {
             window.addEventListener("message", readyHandler);
 
             const existing = document.getElementById("edge-translate-on-device-bridge");
-            if (existing) {
-                clearTimeout(timeout);
-                window.removeEventListener("message", readyHandler);
-                resolve();
-                return;
-            }
+            if (existing) existing.remove();
 
             const script = document.createElement("script");
             script.id = "edge-translate-on-device-bridge";
@@ -148,8 +158,6 @@ class BannerController {
             };
             (document.documentElement || document.head || document.body).appendChild(script);
         });
-
-        return this._onDeviceBridgePromise;
     }
 
     requestOnDeviceBridge(detail) {
