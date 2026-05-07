@@ -2,10 +2,7 @@ import { HybridTranslator } from "@edge_translate/translators";
 // common.log는 현재 파일에서 직접 사용하지 않습니다.
 import { promiseTabs, delayPromise } from "common/scripts/promise.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
-import {
-    getChromeTranslatorSupportedLanguages,
-    getGeminiNanoSupportedLanguages,
-} from "common/scripts/chrome_builtin_translate.js";
+import { getChromeTranslatorSupportedLanguages } from "common/scripts/chrome_builtin_translate.js";
 import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
@@ -96,19 +93,23 @@ class TranslatorManager {
                 config = nextConfig || {};
                 endpointTranslator.useConfig(nextConfig);
             },
+            getMode() {
+                return config.mode === "chromeBuiltin" || config.mode === "geminiNano"
+                    ? "chromeBuiltin"
+                    : "endpoint";
+            },
             supportedLanguages() {
                 if (!config.enabled) return new Set();
-                if (config.mode === "geminiNano") return getGeminiNanoSupportedLanguages();
-                if (config.mode === "chromeBuiltin") return getChromeTranslatorSupportedLanguages();
+                if (this.getMode() === "chromeBuiltin")
+                    return getChromeTranslatorSupportedLanguages();
                 return endpointTranslator.supportedLanguages();
             },
             detect(text) {
-                if (["chromeBuiltin", "geminiNano"].includes(config.mode))
-                    return Promise.resolve("auto");
+                if (this.getMode() === "chromeBuiltin") return Promise.resolve("auto");
                 return endpointTranslator.detect(text);
             },
             async translate(text, from, to) {
-                if (!["chromeBuiltin", "geminiNano"].includes(config.mode)) {
+                if (this.getMode() !== "chromeBuiltin") {
                     return endpointTranslator.translate(text, from, to);
                 }
                 const tabId = await manager.getChromeBuiltinTargetTabId();
@@ -119,7 +120,7 @@ class TranslatorManager {
                         text,
                         sl: from,
                         tl: to,
-                        engine: config.mode,
+                        engine: "chromeBuiltin",
                     }
                 );
                 return {

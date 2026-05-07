@@ -1323,12 +1323,6 @@
         "message": "Chrome Built-in",
         "description": "Use Chrome desktop built-in Translator API when available."
     },
-    "LocalTranslatorModeGeminiNano": {
-        "message": "Chrome Gemini Nano"
-    },
-    "GeminiNanoPageTranslate": {
-        "message": "Chrome Gemini Nano Page Translate"
-    },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome Built-in Translator Page Translate"
     }

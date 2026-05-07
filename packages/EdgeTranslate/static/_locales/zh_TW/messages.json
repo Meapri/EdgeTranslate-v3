@@ -1323,12 +1323,6 @@
         "message": "Chrome 內建",
         "description": "使用支援的桌面版 Chrome 內建 Translator API。"
     },
-    "LocalTranslatorModeGeminiNano": {
-        "message": "Chrome Gemini Nano"
-    },
-    "GeminiNanoPageTranslate": {
-        "message": "Chrome Gemini Nano 網頁翻譯"
-    },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome 內建翻譯器網頁翻譯"
     }

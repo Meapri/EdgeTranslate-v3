@@ -2,11 +2,11 @@ import { TranslationResult } from "../types";
 import { LRUCache } from "../utils/lru";
 import { fnv1a32 } from "../utils/hash";
 
-export type LocalTranslatorMode = "endpoint" | "chromeBuiltin" | "geminiNano";
+export type LocalTranslatorMode = "endpoint" | "chromeBuiltin";
 
 export type LocalTranslatorConfig = {
     enabled?: boolean;
-    mode?: LocalTranslatorMode;
+    mode?: LocalTranslatorMode | string;
     endpoint?: string;
     apiKey?: string;
     timeoutMs?: number;
@@ -87,7 +87,6 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
 );
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
-const GEMINI_NANO_MAX_INPUT_CHARS = 4000;
 
 class RequestLimiter {
     private active = 0;
@@ -116,8 +115,8 @@ function normalizeEndpoint(endpoint?: string) {
     return (endpoint || "").trim();
 }
 
-function normalizeMode(mode?: LocalTranslatorMode): LocalTranslatorMode {
-    if (mode === "chromeBuiltin" || mode === "geminiNano") return mode;
+function normalizeMode(mode?: string): LocalTranslatorMode {
+    if (mode === "chromeBuiltin" || mode === "geminiNano") return "chromeBuiltin";
     return "endpoint";
 }
 
@@ -126,7 +125,21 @@ function toLanguageName(language: string) {
 }
 
 function toChromeTranslatorLanguage(language: string) {
-    return CHROME_TRANSLATOR_LANGUAGE_MAP[language] || language;
+    if (!language) return language;
+    const raw = String(language).trim();
+    if (!raw) return raw;
+    if (CHROME_TRANSLATOR_LANGUAGE_MAP[raw]) return CHROME_TRANSLATOR_LANGUAGE_MAP[raw];
+
+    const normalized = raw.replace(/_/g, "-");
+    const lower = normalized.toLowerCase();
+    if (lower === "auto") return "auto";
+    if (/^zh(-|$)/.test(lower)) {
+        if (/tw|hk|mo|hant/.test(lower)) return "zh-Hant";
+        return "zh";
+    }
+
+    const base = lower.split("-")[0];
+    return CHROME_TRANSLATOR_LANGUAGE_MAP[base] || base || raw;
 }
 
 function parseTranslatedText(payload: any) {
@@ -148,6 +161,7 @@ class LocalTranslator {
     private timeoutMs = DEFAULT_TIMEOUT_MS;
     private cache = new LRUCache<string, TranslationResult>({ max: 200, ttl: 10 * 60 * 1000 });
     private inflight = new Map<string, Promise<TranslationResult>>();
+    private chromeTranslatorCache = new Map<string, any>();
 
     constructor(config: LocalTranslatorConfig = {}) {
         this.useConfig(config);
@@ -161,11 +175,12 @@ class LocalTranslator {
         this.timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT_MS;
         this.cache.clear();
         this.inflight.clear();
+        this.chromeTranslatorCache.clear();
     }
 
     supportedLanguages() {
         if (!this.enabled) return new Set<string>();
-        if (this.mode === "chromeBuiltin" || this.mode === "geminiNano") {
+        if (this.mode === "chromeBuiltin") {
             return new Set(CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES);
         }
         if (!this.endpoint) return new Set<string>();
@@ -220,67 +235,7 @@ class LocalTranslator {
         if (this.mode === "chromeBuiltin") {
             return this.requestChromeBuiltinTranslation(text, from, to);
         }
-        if (this.mode === "geminiNano") return this.requestGeminiNanoTranslation(text, from, to);
         return this.requestEndpointTranslation(text, from, to);
-    }
-
-    private async requestGeminiNanoTranslation(text: string, from: string, to: string) {
-        try {
-            const languageModelApi = (globalThis as any).LanguageModel;
-            if (!languageModelApi || typeof languageModelApi.create !== "function") {
-                throw new Error("Chrome Gemini Nano Prompt API is not available in this browser.");
-            }
-            if (typeof languageModelApi.availability === "function") {
-                const availability = await languageModelApi.availability();
-                if (availability === "unavailable") {
-                    throw new Error("Chrome Gemini Nano model is unavailable on this device.");
-                }
-            }
-            const sourceLanguage = toLanguageName(from);
-            const targetLanguage = toLanguageName(to);
-            const session = await languageModelApi.create({
-                initialPrompts: [
-                    {
-                        role: "system",
-                        content: [
-                            "You are a precise translation engine.",
-                            "Translate user-provided text only.",
-                            "Preserve meaning, tone, punctuation, line breaks, URLs, numbers, names, and HTML-like entities.",
-                            "Do not explain, summarize, romanize, add notes, or wrap the answer in quotes/code fences.",
-                            `Source language: ${sourceLanguage}.`,
-                            `Target language: ${targetLanguage}.`,
-                        ].join("\n"),
-                    },
-                ],
-            });
-            const prompt = [
-                `Translate the following text from ${sourceLanguage} to ${targetLanguage}.`,
-                "Return only the translated text.",
-                "<text>",
-                text.slice(0, GEMINI_NANO_MAX_INPUT_CHARS),
-                "</text>",
-            ].join("\n");
-            const translated = String((await session.prompt(prompt)) || "")
-                .trim()
-                .replace(/^```(?:text)?\s*/i, "")
-                .replace(/```$/i, "")
-                .replace(/^Translation:\s*/i, "")
-                .trim();
-            if (!translated) throw new Error("Chrome Gemini Nano returned an empty translation.");
-            return {
-                originalText: text,
-                mainMeaning: translated,
-                sourceLanguage: from,
-                targetLanguage: to,
-            } as TranslationResult;
-        } catch (error: any) {
-            throw {
-                errorType: "API_ERR",
-                errorCode: "CHROME_GEMINI_NANO_TRANSLATOR_ERROR",
-                errorMsg: error?.message || "Chrome Gemini Nano translation request failed.",
-                errorAct: { api: "local", mode: "geminiNano", action: "translate", text, from, to },
-            };
-        }
     }
 
     private async requestChromeBuiltinTranslation(text: string, from: string, to: string) {
@@ -296,19 +251,10 @@ class LocalTranslator {
                     ? await this.detectChromeBuiltinLanguage(text, targetLanguage)
                     : toChromeTranslatorLanguage(from);
 
-            if (typeof translatorApi.availability === "function") {
-                const availability = await translatorApi.availability({
-                    sourceLanguage,
-                    targetLanguage,
-                });
-                if (availability === "unavailable") {
-                    throw new Error(
-                        `Chrome built-in Translator API does not support ${sourceLanguage} to ${targetLanguage}.`
-                    );
-                }
-            }
-
-            const translator = await translatorApi.create({ sourceLanguage, targetLanguage });
+            const translator = await this.getChromeBuiltinTranslator(
+                sourceLanguage,
+                targetLanguage
+            );
             const translated = await translator.translate(text);
             if (!translated) {
                 throw new Error("Chrome built-in Translator API returned an empty translation.");
@@ -335,6 +281,28 @@ class LocalTranslator {
                 },
             };
         }
+    }
+
+    private async getChromeBuiltinTranslator(sourceLanguage: string, targetLanguage: string) {
+        const key = `${sourceLanguage}|${targetLanguage}`;
+        if (this.chromeTranslatorCache.has(key)) return this.chromeTranslatorCache.get(key);
+
+        const translatorApi = (globalThis as any).Translator;
+        if (typeof translatorApi.availability === "function") {
+            const availability = await translatorApi.availability({
+                sourceLanguage,
+                targetLanguage,
+            });
+            if (availability === "unavailable") {
+                throw new Error(
+                    `Chrome built-in Translator API does not support ${sourceLanguage} to ${targetLanguage}.`
+                );
+            }
+        }
+
+        const translator = await translatorApi.create({ sourceLanguage, targetLanguage });
+        this.chromeTranslatorCache.set(key, translator);
+        return translator;
     }
 
     private async detectChromeBuiltinLanguage(text: string, targetLanguage: string) {

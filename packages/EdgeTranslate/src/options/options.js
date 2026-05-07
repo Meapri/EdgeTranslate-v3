@@ -55,6 +55,20 @@ window.onload = () => {
         for (let element of [...inputElements]) {
             let settingItemPath = element.getAttribute("setting-path").split(/\s/g);
             let settingItemValue = getSetting(result, settingItemPath);
+            if (
+                settingItemPath.join(" ") === "LocalTranslatorConfig mode" &&
+                settingItemValue === "geminiNano"
+            ) {
+                settingItemValue = "chromeBuiltin";
+                saveOption(result, settingItemPath, settingItemValue);
+            }
+            if (
+                settingItemPath.join(" ") === "DefaultPageTranslator" &&
+                settingItemValue === "GeminiNanoPageTranslate"
+            ) {
+                settingItemValue = "ChromeBuiltinPageTranslate";
+                saveOption(result, settingItemPath, settingItemValue);
+            }
 
             switch (element.getAttribute("setting-type")) {
                 case "checkbox":
