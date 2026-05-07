@@ -6,6 +6,7 @@ import {
 } from "common/scripts/chrome_builtin_translate.js";
 import {
     buildContextTranslationGroups,
+    createReadableBlockReplacement,
     splitTranslatedContext,
 } from "./dom_page_translate_context.js";
 
@@ -30,6 +31,7 @@ class BannerController {
         // DOM fallback observer state
         this._mo = null;
         this._translatedSet = new WeakSet();
+        this._translatedBlocks = new WeakSet();
         this._scheduleBatch = null;
         this._pendingNodes = new Set();
         this._domPageTranslateOptions = { engine: "dom", sl: "auto", tl: "en" };
@@ -388,6 +390,11 @@ class BannerController {
             if (!p) return false;
             const tn = p.tagName;
             if (/^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|SELECT|OPTION)$/i.test(tn)) return false;
+            let ancestor = p;
+            while (ancestor && ancestor !== document.documentElement) {
+                if (this._translatedBlocks.has(ancestor)) return false;
+                ancestor = ancestor.parentElement;
+            }
             if (this._translatedSet.has(node)) return false;
             return true;
         };
@@ -437,6 +444,16 @@ class BannerController {
         for (const n of nodes) {
             const p = n.parentElement;
             if (!p || this._translatedSet.has(n)) continue;
+            let ancestor = p;
+            let insideTranslatedBlock = false;
+            while (ancestor && ancestor !== document.documentElement) {
+                if (this._translatedBlocks.has(ancestor)) {
+                    insideTranslatedBlock = true;
+                    break;
+                }
+                ancestor = ancestor.parentElement;
+            }
+            if (insideTranslatedBlock) continue;
             const text = String(n.nodeValue || "").trim();
             if (text.length < 2) continue;
             eligibleNodes.push(n);
@@ -457,12 +474,26 @@ class BannerController {
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
-                const cacheKey = `${this._domPageTranslateOptions.engine}|context|${sl}|${tl}|${group.sourceText}`;
+                const readableBlockReplacement = createReadableBlockReplacement(group);
+                const sourceText = readableBlockReplacement
+                    ? readableBlockReplacement.sourceText
+                    : group.sourceText;
+                const cacheMode = readableBlockReplacement ? "readable-block" : "context";
+                const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${sl}|${tl}|${sourceText}`;
                 let translated = this._domTranslationCache.get(cacheKey);
                 if (!translated) {
-                    const result = await this.translateWithOnDeviceEngine(group.sourceText, sl, tl);
+                    const result = await this.translateWithOnDeviceEngine(sourceText, sl, tl);
                     translated = result.mainMeaning || result.translatedText;
                     if (translated) this._domTranslationCache.set(cacheKey, translated);
+                }
+
+                if (readableBlockReplacement) {
+                    const block = readableBlockReplacement.block;
+                    if (translated && block && block.isConnected) {
+                        this._translatedBlocks.add(block);
+                        block.textContent = translated;
+                    }
+                    return;
                 }
 
                 const translatedParts = splitTranslatedContext(translated, group.nodes.length);

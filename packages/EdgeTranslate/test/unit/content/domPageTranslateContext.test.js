@@ -1,5 +1,6 @@
 import {
     buildContextTranslationGroups,
+    createReadableBlockReplacement,
     splitTranslatedContext,
 } from "../../../src/content/dom_page_translate_context.js";
 
@@ -46,5 +47,43 @@ describe("DOM page translation context grouping", () => {
             "아니, 두 가지죠.",
             "Amazon에서 책을 사고 거의 불편함 없이 읽게 해줍니다.",
         ]);
+    });
+
+    it("prefers replacing simple readable paragraphs as one full-context block", () => {
+        document.body.innerHTML = `
+            <article>
+                <p id="sample">
+                    <span>Out of the box, the Kindle is good at only one thing.</span>
+                    <span>Well, two.</span>
+                    <span>It lets me buy books from Amazon and read them with very little friction.</span>
+                </p>
+            </article>
+        `;
+        const nodes = Array.from(
+            document.querySelectorAll("#sample span"),
+            (span) => span.firstChild
+        );
+        const [group] = buildContextTranslationGroups(nodes);
+
+        expect(createReadableBlockReplacement(group)).toMatchObject({
+            block: document.getElementById("sample"),
+            sourceText:
+                "Out of the box, the Kindle is good at only one thing. Well, two. It lets me buy books from Amazon and read them with very little friction.",
+        });
+    });
+
+    it("does not whole-replace blocks that contain links or controls", () => {
+        document.body.innerHTML = `
+            <p id="sample">
+                Read the <a href="https://example.test">original article</a> before translating.
+            </p>
+        `;
+        const nodes = Array.from(
+            document.querySelectorAll("#sample, #sample *"),
+            (element) => element.firstChild
+        ).filter(Boolean);
+        const [group] = buildContextTranslationGroups(nodes);
+
+        expect(createReadableBlockReplacement(group)).toBeNull();
     });
 });
