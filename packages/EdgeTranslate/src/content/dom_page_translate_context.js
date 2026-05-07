@@ -36,10 +36,68 @@ const BLOCK_TAGS = new Set([
     "UL",
 ]);
 
+const READABLE_REPLACE_BLOCK_TAGS = new Set([
+    "BLOCKQUOTE",
+    "CAPTION",
+    "DD",
+    "DT",
+    "FIGCAPTION",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "LI",
+    "P",
+]);
+
+const UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR = [
+    "a",
+    "button",
+    "canvas",
+    "code",
+    "embed",
+    "iframe",
+    "img",
+    "input",
+    "kbd",
+    "math",
+    "object",
+    "option",
+    "picture",
+    "pre",
+    "samp",
+    "script",
+    "select",
+    "style",
+    "svg",
+    "textarea",
+    "video",
+    "audio",
+].join(",");
+
 function normalizeTextNodeValue(node) {
     return String((node && node.nodeValue) || "")
         .replace(/\s+/g, " ")
         .trim();
+}
+
+function normalizeBlockText(value) {
+    return String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function getMeaningfulTextNodes(element) {
+    if (!element) return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+        if (normalizeTextNodeValue(node)) nodes.push(node);
+    }
+    return nodes;
 }
 
 function getContextBlockElement(node) {
@@ -94,6 +152,32 @@ function createContextGroup(block, entries) {
     };
 }
 
+function createReadableBlockReplacement(group, options = {}) {
+    const minNodes = options.minNodes || 2;
+    const maxChars = options.maxChars || 3500;
+    const block = group && group.block;
+    if (!block || !READABLE_REPLACE_BLOCK_TAGS.has(block.tagName)) return null;
+    if (!group.nodes || group.nodes.length < minNodes) return null;
+    if (block.querySelector && block.querySelector(UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR)) {
+        return null;
+    }
+
+    const meaningfulNodes = getMeaningfulTextNodes(block);
+    const groupNodes = new Set(group.nodes);
+    if (!meaningfulNodes.length || meaningfulNodes.some((node) => !groupNodes.has(node))) {
+        return null;
+    }
+
+    const sourceText = normalizeBlockText(block.textContent);
+    if (!sourceText || sourceText.length > maxChars) return null;
+
+    return {
+        block,
+        nodes: group.nodes,
+        sourceText,
+    };
+}
+
 function splitTranslatedContext(translatedText, expectedCount) {
     const translated = String(translatedText || "").trim();
     if (!translated) return [];
@@ -114,4 +198,4 @@ function splitTranslatedContext(translatedText, expectedCount) {
     return null;
 }
 
-export { buildContextTranslationGroups, splitTranslatedContext };
+export { buildContextTranslationGroups, createReadableBlockReplacement, splitTranslatedContext };
