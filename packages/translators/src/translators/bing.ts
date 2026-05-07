@@ -58,6 +58,14 @@ class BingTranslator {
     TTS_AUTH = { region: "", token: "" };
 
     /**
+     * Thresholds for deciding whether Bing dictionary/example details are useful.
+     * Longer selections are usually sentence/paragraph translations, where extra
+     * lookup/example requests only slow down the result without improving mainMeaning.
+     */
+    DETAIL_LOOKUP_MAX_WORDS = 3;
+    DETAIL_LOOKUP_MAX_CHARS = 60;
+
+    /**
      * Request count.
      */
     count = 0;
@@ -904,6 +912,15 @@ class BingTranslator {
         return new Set(this.LAN_TO_CODE.keys());
     }
 
+    shouldFetchDetailedTranslation(text: string) {
+        const normalized = String(text || "").replace(/\s+/g, " ").trim();
+        if (!normalized) return false;
+        if (normalized.length > this.DETAIL_LOOKUP_MAX_CHARS) return false;
+        const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+        if (wordCount > this.DETAIL_LOOKUP_MAX_WORDS) return false;
+        return true;
+    }
+
     /**
      * Detect language of given text.
      *
@@ -1018,6 +1035,11 @@ class BingTranslator {
             // Add language information to translation result
             transResult.sourceLanguage = from;
             transResult.targetLanguage = to;
+
+            if (!this.shouldFetchDetailedTranslation(text)) {
+                this.cache.set(cacheKey, transResult);
+                return transResult;
+            }
             
             // Run lookup and examples in parallel for better performance
             const [lookupResponse, exampleResponse] = await Promise.allSettled([
