@@ -4,6 +4,10 @@ import {
     toChromeTranslatorLanguage,
     translateWithChromeOnDevice,
 } from "common/scripts/chrome_builtin_translate.js";
+import {
+    buildContextTranslationGroups,
+    splitTranslatedContext,
+} from "./dom_page_translate_context.js";
 
 /**
  * Control the visibility of page translator banners.
@@ -426,23 +430,73 @@ class BannerController {
     }
 
     /**
-     * Translate a batch of text nodes, marking parents to avoid duplicates.
+     * Translate a batch of text nodes with block-level context first.
      */
     translateBatchNodes(nodes) {
-        const items = [];
+        const eligibleNodes = [];
         for (const n of nodes) {
             const p = n.parentElement;
             if (!p || this._translatedSet.has(n)) continue;
             const text = String(n.nodeValue || "").trim();
             if (text.length < 2) continue;
-            items.push({ node: n, parent: p, text });
+            eligibleNodes.push(n);
             this._translatedSet.add(n);
         }
-        if (!items.length) return;
+        if (!eligibleNodes.length) return;
 
         if (this._domPageTranslateOptions.engine !== "chromeBuiltin") return;
         if (this._domOnDeviceUnavailable) return;
-        items.forEach((item) => this.enqueueChromeBuiltinNodeTranslation(item));
+
+        const groups = buildContextTranslationGroups(eligibleNodes);
+        groups.forEach((group) => this.enqueueChromeBuiltinGroupTranslation(group));
+    }
+
+    enqueueChromeBuiltinGroupTranslation(group) {
+        const run = async () => {
+            this._domActiveTranslations += 1;
+            try {
+                const { tl } = this._domPageTranslateOptions;
+                const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                const cacheKey = `${this._domPageTranslateOptions.engine}|context|${sl}|${tl}|${group.sourceText}`;
+                let translated = this._domTranslationCache.get(cacheKey);
+                if (!translated) {
+                    const result = await this.translateWithOnDeviceEngine(group.sourceText, sl, tl);
+                    translated = result.mainMeaning || result.translatedText;
+                    if (translated) this._domTranslationCache.set(cacheKey, translated);
+                }
+
+                const translatedParts = splitTranslatedContext(translated, group.nodes.length);
+                if (!translatedParts) {
+                    group.nodes.forEach((node, index) => {
+                        this.enqueueChromeBuiltinNodeTranslation({
+                            node,
+                            parent: node.parentElement,
+                            text: group.texts[index],
+                        });
+                    });
+                    return;
+                }
+
+                group.nodes.forEach((node, index) => {
+                    if (translatedParts[index] && node.parentElement) {
+                        node.nodeValue = translatedParts[index];
+                    }
+                });
+            } catch (error) {
+                group.nodes.forEach((node) => this._translatedSet.delete(node));
+                if (this.isOnDeviceUnavailableError(error)) {
+                    this._domOnDeviceUnavailable = true;
+                    if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
+                }
+            } finally {
+                this._domActiveTranslations -= 1;
+                this.flushDomTranslationQueue();
+            }
+        };
+
+        if (!this._domTranslationQueue) this._domTranslationQueue = [];
+        this._domTranslationQueue.push(run);
+        this.flushDomTranslationQueue();
     }
 
     enqueueChromeBuiltinNodeTranslation(item) {
