@@ -30,7 +30,8 @@
         "build:safari": "npm run build -w @edge_translate/translators && npm run build:safari -w edge_translate",
         "test": "turbo run test",
         "pack:firefox": "npm run build -w @edge_translate/translators && npm run pack:firefox -w edge_translate",
-        "lint:firefox": "npm run pack:firefox && npx --yes web-ext@8.9.0 lint -s packages/EdgeTranslate/build/firefox"
+        "lint:firefox": "npm run pack:firefox && npx --yes web-ext@8.9.0 lint -s packages/EdgeTranslate/build/firefox",
+        "local:translate-proxy": "node tools/local-llm-translate-proxy.mjs"
     },
     "devDependencies": {
         "@commitlint/cli": "^13.2.1",

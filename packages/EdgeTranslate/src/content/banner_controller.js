@@ -100,6 +100,8 @@ class BannerController {
                 tl: detail.tl || "en",
             };
             this._domOnDeviceUnavailable = false;
+            this._domMaxConcurrentTranslations =
+                this._domPageTranslateOptions.engine === "localEndpoint" ? 1 : 2;
             this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
                 this._domPageTranslateOptions.sl
             );
