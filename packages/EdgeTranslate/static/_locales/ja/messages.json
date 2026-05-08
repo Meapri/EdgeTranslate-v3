@@ -1325,5 +1325,11 @@
     },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome 組み込み翻訳ページ翻訳"
+    },
+    "LocalTranslatorTimeoutMs": {
+        "message": "ローカル翻訳タイムアウト(ms)"
+    },
+    "LocalPageTranslate": {
+        "message": "ローカル翻訳ページ翻訳"
     }
 }

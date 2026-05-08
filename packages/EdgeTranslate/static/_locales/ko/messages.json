@@ -485,5 +485,11 @@
     },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome 내장 번역기 페이지 번역"
+    },
+    "LocalTranslatorTimeoutMs": {
+        "message": "로컬 번역기 제한 시간(ms)"
+    },
+    "LocalPageTranslate": {
+        "message": "로컬 번역기 페이지 번역"
     }
 }

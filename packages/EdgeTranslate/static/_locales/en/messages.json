@@ -1325,5 +1325,11 @@
     },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome Built-in Translator Page Translate"
+    },
+    "LocalTranslatorTimeoutMs": {
+        "message": "Local translator timeout (ms)"
+    },
+    "LocalPageTranslate": {
+        "message": "Local Translator Page Translate"
     }
 }
