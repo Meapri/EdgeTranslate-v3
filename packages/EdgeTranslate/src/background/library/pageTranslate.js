@@ -31,6 +31,13 @@ function translatePage(channel) {
                         tl: targetLang,
                     });
                     break;
+                case "LocalPageTranslate":
+                    executeDomPageTranslate(channel, {
+                        engine: "localEndpoint",
+                        sl: sourceLang,
+                        tl: targetLang,
+                    });
+                    break;
                 case "DomPageTranslate":
                     executeDomPageTranslate(channel, {
                         engine: "dom",

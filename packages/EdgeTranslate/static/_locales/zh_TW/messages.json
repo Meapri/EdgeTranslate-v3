@@ -1325,5 +1325,11 @@
     },
     "ChromeBuiltinPageTranslate": {
         "message": "Chrome 內建翻譯器網頁翻譯"
+    },
+    "LocalTranslatorTimeoutMs": {
+        "message": "本機翻譯逾時（毫秒）"
+    },
+    "LocalPageTranslate": {
+        "message": "本機翻譯器網頁翻譯"
     }
 }

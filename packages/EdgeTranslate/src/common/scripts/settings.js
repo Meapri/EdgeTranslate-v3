@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
         mode: "endpoint",
         endpoint: "",
         apiKey: "",
+        timeoutMs: 120000,
     },
     HybridTranslatorConfig: {
         // The translators used in current hybrid translate.

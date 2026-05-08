@@ -95,7 +95,7 @@ class BannerController {
         // Kick off DOM fallback/on-device page translation on explicit request
         this.channel.on("start_dom_page_translate", (detail = {}) => {
             this._domPageTranslateOptions = {
-                engine: detail.engine === "dom" ? "dom" : "chromeBuiltin",
+                engine: this.normalizeDomPageTranslateEngine(detail.engine),
                 sl: detail.sl || "auto",
                 tl: detail.tl || "en",
             };
@@ -120,6 +120,11 @@ class BannerController {
         });
 
         window.addEventListener("message", this.handleOnDeviceBridgeResponse.bind(this));
+    }
+
+    normalizeDomPageTranslateEngine(engine) {
+        if (engine === "dom" || engine === "localEndpoint") return engine;
+        return "chromeBuiltin";
     }
 
     async ensureOnDeviceBridge() {
@@ -226,6 +231,25 @@ class BannerController {
                 throw bridgeError || contentError;
             }
         }
+    }
+
+    async translateWithDomPageEngine(text, from, to) {
+        if (this._domPageTranslateOptions.engine === "localEndpoint") {
+            return await this.channel.request("translate_text_quiet", {
+                text,
+                sl: from,
+                tl: to,
+                translatorId: "LocalTranslate",
+            });
+        }
+        return await this.translateWithOnDeviceEngine(text, from, to);
+    }
+
+    getReadableBlockReplacementOptions() {
+        if (this._domPageTranslateOptions.engine === "localEndpoint") {
+            return { maxChars: 1400 };
+        }
+        return undefined;
     }
 
     /**
@@ -461,20 +485,31 @@ class BannerController {
         }
         if (!eligibleNodes.length) return;
 
-        if (this._domPageTranslateOptions.engine !== "chromeBuiltin") return;
-        if (this._domOnDeviceUnavailable) return;
+        if (this._domPageTranslateOptions.engine === "dom") return;
+        if (
+            this._domPageTranslateOptions.engine === "chromeBuiltin" &&
+            this._domOnDeviceUnavailable
+        )
+            return;
 
-        const groups = buildContextTranslationGroups(eligibleNodes);
-        groups.forEach((group) => this.enqueueChromeBuiltinGroupTranslation(group));
+        const groupOptions =
+            this._domPageTranslateOptions.engine === "localEndpoint"
+                ? { maxChars: 1400 }
+                : undefined;
+        const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
+        groups.forEach((group) => this.enqueueDomPageGroupTranslation(group));
     }
 
-    enqueueChromeBuiltinGroupTranslation(group) {
+    enqueueDomPageGroupTranslation(group) {
         const run = async () => {
             this._domActiveTranslations += 1;
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
-                const readableBlockReplacement = createReadableBlockReplacement(group);
+                const readableBlockReplacement = createReadableBlockReplacement(
+                    group,
+                    this.getReadableBlockReplacementOptions()
+                );
                 const sourceText = readableBlockReplacement
                     ? readableBlockReplacement.sourceText
                     : group.sourceText;
@@ -482,7 +517,7 @@ class BannerController {
                 const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${sl}|${tl}|${sourceText}`;
                 let translated = this._domTranslationCache.get(cacheKey);
                 if (!translated) {
-                    const result = await this.translateWithOnDeviceEngine(sourceText, sl, tl);
+                    const result = await this.translateWithDomPageEngine(sourceText, sl, tl);
                     translated = result.mainMeaning || result.translatedText;
                     if (translated) this._domTranslationCache.set(cacheKey, translated);
                 }
@@ -499,7 +534,7 @@ class BannerController {
                 const translatedParts = splitTranslatedContext(translated, group.nodes.length);
                 if (!translatedParts) {
                     group.nodes.forEach((node, index) => {
-                        this.enqueueChromeBuiltinNodeTranslation({
+                        this.enqueueDomPageNodeTranslation({
                             node,
                             parent: node.parentElement,
                             text: group.texts[index],
@@ -515,7 +550,10 @@ class BannerController {
                 });
             } catch (error) {
                 group.nodes.forEach((node) => this._translatedSet.delete(node));
-                if (this.isOnDeviceUnavailableError(error)) {
+                if (
+                    this._domPageTranslateOptions.engine === "chromeBuiltin" &&
+                    this.isOnDeviceUnavailableError(error)
+                ) {
                     this._domOnDeviceUnavailable = true;
                     if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
                 }
@@ -530,7 +568,7 @@ class BannerController {
         this.flushDomTranslationQueue();
     }
 
-    enqueueChromeBuiltinNodeTranslation(item) {
+    enqueueDomPageNodeTranslation(item) {
         const run = async () => {
             this._domActiveTranslations += 1;
             try {
@@ -539,7 +577,7 @@ class BannerController {
                 const cacheKey = `${this._domPageTranslateOptions.engine}|${sl}|${tl}|${item.text}`;
                 let translated = this._domTranslationCache.get(cacheKey);
                 if (!translated) {
-                    const result = await this.translateWithOnDeviceEngine(item.text, sl, tl);
+                    const result = await this.translateWithDomPageEngine(item.text, sl, tl);
                     translated = result.mainMeaning || result.translatedText;
                     if (translated) this._domTranslationCache.set(cacheKey, translated);
                 }
@@ -548,7 +586,10 @@ class BannerController {
                 }
             } catch (error) {
                 this._translatedSet.delete(item.node);
-                if (this.isOnDeviceUnavailableError(error)) {
+                if (
+                    this._domPageTranslateOptions.engine === "chromeBuiltin" &&
+                    this.isOnDeviceUnavailableError(error)
+                ) {
                     this._domOnDeviceUnavailable = true;
                     if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
                 }

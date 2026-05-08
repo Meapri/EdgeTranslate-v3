@@ -230,6 +230,23 @@
                             />
                         </label>
                     </div>
+                    <div class="column">
+                        <label
+                            for="local-translator-timeout"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorTimeoutMs"
+                            data-insert-pos="afterBegin"
+                        >
+                            <input
+                                type="number"
+                                setting-type="text"
+                                setting-path="LocalTranslatorConfig timeoutMs"
+                                id="local-translator-timeout"
+                                min="1000"
+                                step="1000"
+                            />
+                        </label>
+                    </div>
                 </div>
                 <p class="i18n" data-i18n-name="LocalTranslatorHelp"></p>
 
@@ -328,6 +345,23 @@
                                 class="radio"
                                 name="default-page-translator"
                                 id="chrome-builtin-page-translator"
+                            />
+                        </label>
+                    </div>
+                    <div class="column">
+                        <label
+                            for="local-page-translator"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalPageTranslate"
+                        >
+                            <input
+                                type="radio"
+                                value="LocalPageTranslate"
+                                setting-type="radio"
+                                setting-path="DefaultPageTranslator"
+                                class="radio"
+                                name="default-page-translator"
+                                id="local-page-translator"
                             />
                         </label>
                     </div>

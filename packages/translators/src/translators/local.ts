@@ -9,7 +9,7 @@ export type LocalTranslatorConfig = {
     mode?: LocalTranslatorMode | string;
     endpoint?: string;
     apiKey?: string;
-    timeoutMs?: number;
+    timeoutMs?: number | string;
 };
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -172,7 +172,7 @@ class LocalTranslator {
         this.mode = normalizeMode(config.mode);
         this.endpoint = normalizeEndpoint(config.endpoint);
         this.apiKey = (config.apiKey || "").trim();
-        this.timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT_MS;
+        this.timeoutMs = Number(config.timeoutMs) || DEFAULT_TIMEOUT_MS;
         this.cache.clear();
         this.inflight.clear();
         this.chromeTranslatorCache.clear();
