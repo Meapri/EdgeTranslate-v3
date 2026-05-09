@@ -87,7 +87,7 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
     Object.keys(CHROME_TRANSLATOR_LANGUAGE_MAP)
 );
 const DEFAULT_TIMEOUT_MS = 60000;
-const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash";
+const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-3.1-flash-lite";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE =
     "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;

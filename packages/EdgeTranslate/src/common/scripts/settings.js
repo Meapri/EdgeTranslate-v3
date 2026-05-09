@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS = {
         mode: "endpoint",
         endpoint: "",
         apiKey: "",
-        model: "gemini-2.5-flash",
+        model: "gemini-3.1-flash-lite",
         timeoutMs: 120000,
     },
     HybridTranslatorConfig: {
