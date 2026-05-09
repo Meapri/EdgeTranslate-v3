@@ -6,7 +6,9 @@ import {
 } from "common/scripts/chrome_builtin_translate.js";
 import {
     buildContextTranslationGroups,
+    buildSegmentedTranslationText,
     createReadableBlockReplacement,
+    splitSegmentedTranslationText,
     splitTranslatedContext,
 } from "./dom_page_translate_context.js";
 
@@ -268,6 +270,76 @@ class BannerController {
         return undefined;
     }
 
+    getDomPageBatchOptions() {
+        if (this._domPageTranslateOptions.engine !== "googleAiStudio") return null;
+        return { maxChars: 24000, maxItems: 24 };
+    }
+
+    createDomPageTranslationEntry(group) {
+        const { tl } = this._domPageTranslateOptions;
+        const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+        const readableBlockReplacement = createReadableBlockReplacement(
+            group,
+            this.getReadableBlockReplacementOptions()
+        );
+        const sourceText = readableBlockReplacement
+            ? readableBlockReplacement.sourceText
+            : group.sourceText;
+        const cacheMode = readableBlockReplacement ? "readable-block" : "context";
+        const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${sl}|${tl}|${sourceText}`;
+        return { group, readableBlockReplacement, sourceText, cacheKey };
+    }
+
+    applyDomPageTranslatedEntry(entry, translated) {
+        if (!translated) return false;
+        const { group, readableBlockReplacement } = entry;
+
+        if (readableBlockReplacement) {
+            const block = readableBlockReplacement.block;
+            if (block && block.isConnected) {
+                this._translatedBlocks.add(block);
+                block.textContent = translated;
+                return true;
+            }
+            return false;
+        }
+
+        const translatedParts = splitTranslatedContext(translated, group.nodes.length);
+        if (!translatedParts) return false;
+
+        group.nodes.forEach((node, index) => {
+            if (translatedParts[index] && node.parentElement) {
+                node.nodeValue = translatedParts[index];
+            }
+        });
+        return true;
+    }
+
+    buildDomPageTranslationBatches(entries) {
+        const batchOptions = this.getDomPageBatchOptions();
+        if (!batchOptions) return [];
+        const batches = [];
+        let current = [];
+        let currentLength = 0;
+
+        for (const entry of entries) {
+            const projectedLength =
+                currentLength + entry.sourceText.length + (current.length ? 1 : 0);
+            if (
+                current.length &&
+                (current.length >= batchOptions.maxItems || projectedLength > batchOptions.maxChars)
+            ) {
+                batches.push(current);
+                current = [];
+                currentLength = 0;
+            }
+            current.push(entry);
+            currentLength += entry.sourceText.length + (current.length > 1 ? 1 : 0);
+        }
+        if (current.length) batches.push(current);
+        return batches;
+    }
+
     /**
      * Toggle the visibility of banner frame.
      *
@@ -510,7 +582,59 @@ class BannerController {
 
         const groupOptions = this.getDomPageTranslationGroupOptions();
         const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
+        if (this._domPageTranslateOptions.engine === "googleAiStudio") {
+            const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
+            const uncachedEntries = [];
+            entries.forEach((entry) => {
+                const cached = this._domTranslationCache.get(entry.cacheKey);
+                if (cached && this.applyDomPageTranslatedEntry(entry, cached)) return;
+                uncachedEntries.push(entry);
+            });
+            this.buildDomPageTranslationBatches(uncachedEntries).forEach((batch) =>
+                this.enqueueDomPageBatchTranslation(batch)
+            );
+            return;
+        }
         groups.forEach((group) => this.enqueueDomPageGroupTranslation(group));
+    }
+
+    enqueueDomPageBatchTranslation(entries) {
+        const run = async () => {
+            this._domActiveTranslations += 1;
+            try {
+                const { tl } = this._domPageTranslateOptions;
+                const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                const sourceTexts = entries.map((entry) => entry.sourceText);
+                const batchedSourceText = buildSegmentedTranslationText(sourceTexts);
+                const result = await this.translateWithDomPageEngine(batchedSourceText, sl, tl);
+                const translated = result.mainMeaning || result.translatedText;
+                const translatedParts = splitSegmentedTranslationText(translated, entries.length);
+
+                if (!translatedParts) {
+                    entries.forEach((entry) => this.enqueueDomPageGroupTranslation(entry.group));
+                    return;
+                }
+
+                entries.forEach((entry, index) => {
+                    const part = translatedParts[index];
+                    if (part) this._domTranslationCache.set(entry.cacheKey, part);
+                    if (!this.applyDomPageTranslatedEntry(entry, part)) {
+                        this.enqueueDomPageGroupTranslation(entry.group);
+                    }
+                });
+            } catch (error) {
+                entries.forEach((entry) => {
+                    entry.group.nodes.forEach((node) => this._translatedSet.delete(node));
+                });
+            } finally {
+                this._domActiveTranslations -= 1;
+                this.flushDomTranslationQueue();
+            }
+        };
+
+        if (!this._domTranslationQueue) this._domTranslationQueue = [];
+        this._domTranslationQueue.push(run);
+        this.flushDomTranslationQueue();
     }
 
     enqueueDomPageGroupTranslation(group) {

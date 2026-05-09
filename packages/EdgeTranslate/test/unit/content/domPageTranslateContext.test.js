@@ -1,6 +1,8 @@
 import {
     buildContextTranslationGroups,
+    buildSegmentedTranslationText,
     createReadableBlockReplacement,
+    splitSegmentedTranslationText,
     splitTranslatedContext,
 } from "../../../src/content/dom_page_translate_context.js";
 
@@ -104,5 +106,39 @@ describe("DOM page translation context grouping", () => {
 
         expect(buildContextTranslationGroups(nodes, { maxChars: 6000 })).toHaveLength(1);
         expect(buildContextTranslationGroups(nodes, { maxChars: 1400 })).toHaveLength(3);
+    });
+
+    it("builds and splits marker-preserving segmented translation batches", () => {
+        const source = buildSegmentedTranslationText([
+            "First paragraph.",
+            "Second paragraph with more text.",
+            "Third paragraph.",
+        ]);
+
+        expect(source).toBe(
+            [
+                "<<<EDGE_TRANSLATE_SEGMENT_1>>>",
+                "First paragraph.",
+                "<<<EDGE_TRANSLATE_SEGMENT_2>>>",
+                "Second paragraph with more text.",
+                "<<<EDGE_TRANSLATE_SEGMENT_3>>>",
+                "Third paragraph.",
+            ].join("\n")
+        );
+
+        const translated = [
+            "<<<EDGE_TRANSLATE_SEGMENT_1>>>",
+            "첫 번째 문단입니다.",
+            "<<<EDGE_TRANSLATE_SEGMENT_2>>>",
+            "두 번째 문단입니다.",
+            "<<<EDGE_TRANSLATE_SEGMENT_3>>>",
+            "세 번째 문단입니다.",
+        ].join("\n");
+
+        expect(splitSegmentedTranslationText(translated, 3)).toEqual([
+            "첫 번째 문단입니다.",
+            "두 번째 문단입니다.",
+            "세 번째 문단입니다.",
+        ]);
     });
 });

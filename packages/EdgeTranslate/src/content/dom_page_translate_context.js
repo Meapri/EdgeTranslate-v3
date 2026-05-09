@@ -198,4 +198,45 @@ function splitTranslatedContext(translatedText, expectedCount) {
     return null;
 }
 
-export { buildContextTranslationGroups, createReadableBlockReplacement, splitTranslatedContext };
+function getSegmentMarker(index) {
+    return `<<<EDGE_TRANSLATE_SEGMENT_${index + 1}>>>`;
+}
+
+function buildSegmentedTranslationText(texts) {
+    return (texts || [])
+        .map((text, index) => [getSegmentMarker(index), String(text || "").trim()].join("\n"))
+        .join("\n");
+}
+
+function splitSegmentedTranslationText(translatedText, expectedCount) {
+    const translated = String(translatedText || "").trim();
+    if (!translated || expectedCount <= 0) return null;
+
+    const markerPattern = /<<<EDGE_TRANSLATE_SEGMENT_(\d+)>>>/g;
+    const matches = Array.from(translated.matchAll(markerPattern));
+    if (matches.length !== expectedCount) return null;
+
+    const parts = new Array(expectedCount);
+    for (let i = 0; i < matches.length; i += 1) {
+        const markerIndex = Number(matches[i][1]) - 1;
+        if (markerIndex < 0 || markerIndex >= expectedCount || parts[markerIndex] !== undefined) {
+            return null;
+        }
+        const start = matches[i].index + matches[i][0].length;
+        const end = i + 1 < matches.length ? matches[i + 1].index : translated.length;
+        const value = translated.slice(start, end).trim();
+        if (!value) return null;
+        parts[markerIndex] = value;
+    }
+
+    if (parts.some((part) => part === undefined)) return null;
+    return parts;
+}
+
+export {
+    buildContextTranslationGroups,
+    buildSegmentedTranslationText,
+    createReadableBlockReplacement,
+    splitSegmentedTranslationText,
+    splitTranslatedContext,
+};

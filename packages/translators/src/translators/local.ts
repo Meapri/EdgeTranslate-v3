@@ -359,6 +359,7 @@ class LocalTranslator {
             `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
             "Return only the translated text. Do not add explanations, quotes, markdown, or alternatives.",
             "Preserve line breaks and formatting where possible.",
+            "If the text contains segment marker lines like <<<EDGE_TRANSLATE_SEGMENT_1>>>, keep those marker lines unchanged and translate only the text between them.",
             "",
             text,
         ].join("\n");

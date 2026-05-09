@@ -198,6 +198,9 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.temperature).toBe(0);
         expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
         expect(body.contents[0].parts[0].text).toContain("from English to Korean");
+        expect(body.contents[0].parts[0].text).toContain(
+            "keep those marker lines unchanged"
+        );
         expect(body.contents[0].parts[0].text).toContain("hello");
     });
 
