@@ -1305,11 +1305,11 @@
     },
     "LocalTranslatorApiKey": {
         "message": "API 金鑰",
-        "description": "可選，作為 X-API-Key 傳送"
+        "description": "Endpoint 模式或 Google AI Studio 模式使用的 API 金鑰"
     },
     "LocalTranslatorHelp": {
-        "message": "公開 Web Store 版本不會內建伺服器位址或金鑰。Endpoint 模式使用你信任並自行輸入的伺服器；Chrome 內建模式會在支援的桌面版 Chrome 中使用本機 Translator API，首次使用可能下載語言包。",
-        "description": "本機 API 說明"
+        "message": "公開 Web Store 版本不會內建伺服器位址或金鑰。Endpoint 模式使用你信任並自行填寫的伺服器；Chrome 內建模式會在支援的桌面版 Chrome 中使用本機 Translator API；Google AI Studio 模式使用你自己的 API 金鑰和所選 Gemini 模型。",
+        "description": "本機/API 翻譯說明"
     },
     "LocalTranslatorMode": {
         "message": "模式",
@@ -1331,5 +1331,13 @@
     },
     "LocalPageTranslate": {
         "message": "本機翻譯器網頁翻譯"
+    },
+    "LocalTranslatorModeGoogleAiStudio": {
+        "message": "Google AI Studio",
+        "description": "使用使用者提供的 Google AI Studio API 金鑰呼叫 Gemini API。"
+    },
+    "LocalTranslatorModel": {
+        "message": "AI 模型",
+        "description": "Google AI Studio 模型名稱"
     }
 }

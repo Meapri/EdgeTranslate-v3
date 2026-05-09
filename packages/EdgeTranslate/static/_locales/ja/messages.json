@@ -1305,11 +1305,11 @@
     },
     "LocalTranslatorApiKey": {
         "message": "APIキー",
-        "description": "X-API-Keyとして送信する任意のAPIキー"
+        "description": "Endpoint モードまたは Google AI Studio モードで使用する API キー"
     },
     "LocalTranslatorHelp": {
-        "message": "公開 Web Store ビルドにはサーバーやキーは含まれません。Endpoint モードでは信頼できるサーバーを自分で入力し、Chrome 内蔵モードでは対応するデスクトップ版 Chrome の Translator API を使用します。初回使用時に言語パックをダウンロードする場合があります。",
-        "description": "ローカルAPIヘルプ"
+        "message": "公開 Web Store ビルドにはサーバーやキーは含まれません。Endpoint モードでは信頼できるサーバーを自分で入力し、Chrome 内蔵モードでは対応するデスクトップ版 Chrome の Translator API を使用し、Google AI Studio モードでは自分の API キーと選択した Gemini モデルを使用します。",
+        "description": "ローカル/API 翻訳ヘルプ"
     },
     "LocalTranslatorMode": {
         "message": "モード",
@@ -1331,5 +1331,13 @@
     },
     "LocalPageTranslate": {
         "message": "ローカル翻訳ページ翻訳"
+    },
+    "LocalTranslatorModeGoogleAiStudio": {
+        "message": "Google AI Studio",
+        "description": "ユーザー入力の Google AI Studio API キーで Gemini API を使用します。"
+    },
+    "LocalTranslatorModel": {
+        "message": "AIモデル",
+        "description": "Google AI Studio モデル名"
     }
 }

@@ -94,9 +94,10 @@ class TranslatorManager {
                 endpointTranslator.useConfig(nextConfig);
             },
             getMode() {
-                return config.mode === "chromeBuiltin" || config.mode === "geminiNano"
-                    ? "chromeBuiltin"
-                    : "endpoint";
+                if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
+                    return "chromeBuiltin";
+                if (config.mode === "googleAiStudio") return "googleAiStudio";
+                return "endpoint";
             },
             supportedLanguages() {
                 if (!config.enabled) return new Set();

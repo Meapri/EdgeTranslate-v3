@@ -2,13 +2,14 @@ import { TranslationResult } from "../types";
 import { LRUCache } from "../utils/lru";
 import { fnv1a32 } from "../utils/hash";
 
-export type LocalTranslatorMode = "endpoint" | "chromeBuiltin";
+export type LocalTranslatorMode = "endpoint" | "chromeBuiltin" | "googleAiStudio";
 
 export type LocalTranslatorConfig = {
     enabled?: boolean;
     mode?: LocalTranslatorMode | string;
     endpoint?: string;
     apiKey?: string;
+    model?: string;
     timeoutMs?: number | string;
 };
 
@@ -86,6 +87,9 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
     Object.keys(CHROME_TRANSLATOR_LANGUAGE_MAP)
 );
 const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash";
+const GOOGLE_AI_STUDIO_ENDPOINT_BASE =
+    "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
 
 class RequestLimiter {
@@ -117,7 +121,12 @@ function normalizeEndpoint(endpoint?: string) {
 
 function normalizeMode(mode?: string): LocalTranslatorMode {
     if (mode === "chromeBuiltin" || mode === "geminiNano") return "chromeBuiltin";
+    if (mode === "googleAiStudio") return "googleAiStudio";
     return "endpoint";
+}
+
+function normalizeModel(model?: string) {
+    return (model || DEFAULT_GOOGLE_AI_STUDIO_MODEL).trim() || DEFAULT_GOOGLE_AI_STUDIO_MODEL;
 }
 
 function toLanguageName(language: string) {
@@ -158,6 +167,7 @@ class LocalTranslator {
     private mode: LocalTranslatorMode = "endpoint";
     private endpoint = "";
     private apiKey = "";
+    private model = DEFAULT_GOOGLE_AI_STUDIO_MODEL;
     private timeoutMs = DEFAULT_TIMEOUT_MS;
     private cache = new LRUCache<string, TranslationResult>({ max: 200, ttl: 10 * 60 * 1000 });
     private inflight = new Map<string, Promise<TranslationResult>>();
@@ -172,6 +182,7 @@ class LocalTranslator {
         this.mode = normalizeMode(config.mode);
         this.endpoint = normalizeEndpoint(config.endpoint);
         this.apiKey = (config.apiKey || "").trim();
+        this.model = normalizeModel(config.model);
         this.timeoutMs = Number(config.timeoutMs) || DEFAULT_TIMEOUT_MS;
         this.cache.clear();
         this.inflight.clear();
@@ -182,6 +193,10 @@ class LocalTranslator {
         if (!this.enabled) return new Set<string>();
         if (this.mode === "chromeBuiltin") {
             return new Set(CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES);
+        }
+        if (this.mode === "googleAiStudio") {
+            if (!this.apiKey || !this.model) return new Set<string>();
+            return new Set(SUPPORTED_LANGUAGE_CODES);
         }
         if (!this.endpoint) return new Set<string>();
         return new Set(SUPPORTED_LANGUAGE_CODES);
@@ -211,6 +226,14 @@ class LocalTranslator {
                 errorAct: { api: "local", action: "translate", text, from, to },
             };
         }
+        if (this.mode === "googleAiStudio" && !this.apiKey) {
+            throw {
+                errorType: "CONFIG_ERR",
+                errorCode: "GOOGLE_AI_STUDIO_API_KEY_MISSING",
+                errorMsg: "Google AI Studio API key is not configured.",
+                errorAct: { api: "local", mode: "googleAiStudio", action: "translate", text, from, to },
+            };
+        }
 
         const key = `L|${this.mode}|${from}|${to}|${fnv1a32(text)}`;
         const cached = this.cache.get(key);
@@ -234,6 +257,9 @@ class LocalTranslator {
     private async requestTranslation(text: string, from: string, to: string) {
         if (this.mode === "chromeBuiltin") {
             return this.requestChromeBuiltinTranslation(text, from, to);
+        }
+        if (this.mode === "googleAiStudio") {
+            return this.requestGoogleAiStudioTranslation(text, from, to);
         }
         return this.requestEndpointTranslation(text, from, to);
     }
@@ -323,6 +349,98 @@ class LocalTranslator {
             );
         }
         return sourceLanguage;
+    }
+
+    private buildGoogleAiStudioPrompt(text: string, from: string, to: string) {
+        const sourceLanguage = toLanguageName(from);
+        const targetLanguage = toLanguageName(to);
+        return [
+            "You are a translation engine.",
+            `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
+            "Return only the translated text. Do not add explanations, quotes, markdown, or alternatives.",
+            "Preserve line breaks and formatting where possible.",
+            "",
+            text,
+        ].join("\n");
+    }
+
+    private parseGoogleAiStudioResponse(payload: any) {
+        const parts = payload?.candidates?.[0]?.content?.parts;
+        if (Array.isArray(parts)) {
+            return parts
+                .map((part) => part?.text || "")
+                .join("")
+                .trim();
+        }
+        return (payload?.text || payload?.output || "").trim();
+    }
+
+    private async requestGoogleAiStudioTranslation(text: string, from: string, to: string) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const model = encodeURIComponent(this.model);
+            const response = await fetch(
+                `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(
+                    this.apiKey
+                )}`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [{ text: this.buildGoogleAiStudioPrompt(text, from, to) }],
+                            },
+                        ],
+                        generationConfig: {
+                            temperature: 0,
+                        },
+                    }),
+                    signal: controller.signal,
+                }
+            );
+
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(
+                    payload?.error?.message || `Google AI Studio request failed with ${response.status}`
+                );
+            }
+
+            const translated = this.parseGoogleAiStudioResponse(payload);
+            if (!translated) {
+                throw new Error("Google AI Studio returned an empty translation.");
+            }
+
+            return {
+                originalText: text,
+                mainMeaning: translated,
+                sourceLanguage: from,
+                targetLanguage: to,
+            } as TranslationResult;
+        } catch (error: any) {
+            throw {
+                errorType: "API_ERR",
+                errorCode:
+                    error?.name === "AbortError" ? "TIMEOUT" : "GOOGLE_AI_STUDIO_ERROR",
+                errorMsg: error?.message || "Google AI Studio request failed.",
+                errorAct: {
+                    api: "local",
+                    mode: "googleAiStudio",
+                    model: this.model,
+                    action: "translate",
+                    text,
+                    from,
+                    to,
+                },
+            };
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
     private async requestEndpointTranslation(text: string, from: string, to: string) {

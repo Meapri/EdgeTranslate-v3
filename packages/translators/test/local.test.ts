@@ -156,4 +156,52 @@ describe("LocalTranslator", () => {
             targetLanguage: "ko",
         });
     });
+
+    test("translates with Google AI Studio mode and selected model", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [
+                    {
+                        content: {
+                            parts: [{ text: "안녕" }],
+                        },
+                    },
+                ],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.0-flash",
+        });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(result).toMatchObject({
+            originalText: "hello",
+            mainMeaning: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        expect(fetchMock.mock.calls[0][0]).toBe(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=studio-test-key"
+        );
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+        });
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.temperature).toBe(0);
+        expect(body.contents[0].parts[0].text).toContain("from English to Korean");
+        expect(body.contents[0].parts[0].text).toContain("hello");
+    });
+
+    test("does not advertise Google AI Studio support when API key is missing", () => {
+        const translator = new LocalTranslator({ enabled: true, mode: "googleAiStudio" });
+        expect(translator.supportedLanguages().size).toBe(0);
+    });
 });

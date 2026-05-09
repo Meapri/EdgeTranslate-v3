@@ -465,11 +465,11 @@
     },
     "LocalTranslatorApiKey": {
         "message": "API 키",
-        "description": "X-API-Key로 전송할 선택 API 키"
+        "description": "Endpoint 모드 또는 Google AI Studio 모드에 사용할 API 키"
     },
     "LocalTranslatorHelp": {
-        "message": "웹스토어 공개 빌드에는 서버 주소나 키가 포함되지 않습니다. Endpoint 모드는 신뢰하는 서버를 직접 입력해 사용하고, Chrome 내장 모드는 지원되는 데스크톱 Chrome에서 온디바이스 Translator API를 사용합니다. Chrome 내장 번역은 최초 사용 시 언어팩을 다운로드할 수 있습니다.",
-        "description": "로컬 API 안내"
+        "message": "공개 Web Store 빌드에는 서버 주소나 키가 포함되지 않습니다. Endpoint 모드는 신뢰하는 서버를 직접 입력하고, Chrome 내장 모드는 지원되는 데스크톱 Chrome의 Translator API를 사용하며, Google AI Studio 모드는 직접 입력한 API 키와 선택한 Gemini 모델을 사용합니다.",
+        "description": "로컬/API 번역 도움말"
     },
     "LocalTranslatorMode": {
         "message": "모드",
@@ -491,5 +491,13 @@
     },
     "LocalPageTranslate": {
         "message": "로컬 번역기 페이지 번역"
+    },
+    "LocalTranslatorModeGoogleAiStudio": {
+        "message": "Google AI Studio",
+        "description": "사용자가 입력한 Google AI Studio API 키로 Gemini API를 사용합니다."
+    },
+    "LocalTranslatorModel": {
+        "message": "AI 모델",
+        "description": "Google AI Studio 모델 이름"
     }
 }

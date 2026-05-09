@@ -1305,10 +1305,10 @@
     },
     "LocalTranslatorApiKey": {
         "message": "API key",
-        "description": "Optional API key sent as X-API-Key."
+        "description": "API key for Endpoint mode or Google AI Studio mode."
     },
     "LocalTranslatorHelp": {
-        "message": "For public Web Store builds, no server or key is bundled. Use Endpoint mode with your own trusted server, or Chrome Built-in mode on supported desktop Chrome versions. Chrome Built-in Translate may download language packs on first use.",
+        "message": "For public Web Store builds, no server or key is bundled. Use Endpoint mode with your own trusted server, Chrome Built-in mode on supported desktop Chrome versions, or Google AI Studio mode with your own API key and selected Gemini model.",
         "description": "Local API help text."
     },
     "LocalTranslatorMode": {
@@ -1331,5 +1331,13 @@
     },
     "LocalPageTranslate": {
         "message": "Local Translator Page Translate"
+    },
+    "LocalTranslatorModeGoogleAiStudio": {
+        "message": "Google AI Studio",
+        "description": "Use the Gemini API with a user-provided Google AI Studio API key."
+    },
+    "LocalTranslatorModel": {
+        "message": "AI model",
+        "description": "Google AI Studio model name."
     }
 }

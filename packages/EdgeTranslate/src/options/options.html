@@ -193,6 +193,11 @@
                                     class="i18n"
                                     data-i18n-name="LocalTranslatorModeChromeBuiltin"
                                 ></option>
+                                <option
+                                    value="googleAiStudio"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeGoogleAiStudio"
+                                ></option>
                             </select>
                         </label>
                     </div>
@@ -228,6 +233,25 @@
                                 id="local-translator-api-key"
                                 autocomplete="off"
                             />
+                        </label>
+                    </div>
+                    <div class="column">
+                        <label
+                            for="local-translator-model"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorModel"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="LocalTranslatorConfig model"
+                                id="local-translator-model"
+                            >
+                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                                <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                            </select>
                         </label>
                     </div>
                     <div class="column">
