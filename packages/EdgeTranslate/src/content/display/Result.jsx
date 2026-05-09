@@ -534,10 +534,20 @@ export default function Result(props) {
  * STYLE FOR THE COMPONENT START
  */
 
-const BlockPadding = "10px";
-const BlockMargin = "8px";
-const LightPrimary = "rgba(74, 140, 247, 0.7)";
-const Gray = "#919191";
+const BlockPadding = "12px";
+const BlockMargin = "10px";
+const LightPrimary = "#0b57d0";
+const DarkPrimary = "#a8c7fa";
+const DarkOnSurface = "#e8eaed";
+const DarkOnSurfaceVariant = "#bdc1c6";
+const DarkSurfaceContainer = "#20262d";
+const DarkSurfaceContainerHigh = "#242a31";
+const DarkOutline = "#3d4651";
+const MotionFast = "120ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
+const Gray = "#5f6368";
+const SurfaceContainer = "#f1f4f8";
+const OutlineVariant = "#e1e3e1";
 const BlockContentDrawerHeight = 150; // drawer height for blocks
 const TextContentDrawerHeight = 50; // drawer height for texts
 
@@ -545,30 +555,54 @@ const TextContentDrawerHeight = 50; // drawer height for texts
  * basic style for a block used to display content
  */
 export const Block = styled.div`
-    width: calc(100% - 2 * ${BlockMargin});
+    width: 100%;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
     align-items: center;
     padding: ${BlockPadding};
-    margin: ${BlockMargin};
-    margin-top: 0;
-    background-color: rgb(250, 250, 250);
-    border-radius: 10px;
-    /* box-shadow: 0px 3px 6px rgba(127, 127, 127, 0.25); */
-    line-height: 120%;
-    letter-spacing: 0.02em;
+    margin: 0 0 ${BlockMargin};
+    background-color: #fff;
+    border: 1px solid ${OutlineVariant};
+    border-radius: 8px;
+    line-height: 1.45;
+    letter-spacing: 0;
+    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.08);
+    transition: background-color ${MotionStandard}, border-color ${MotionStandard},
+        box-shadow ${MotionStandard}, color ${MotionStandard};
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurface};
+        background-color: ${DarkSurfaceContainer};
+        border-color: ${DarkOutline};
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
+    }
 `;
 
 const Source = styled(Block)`
     font-weight: normal;
     white-space: pre-wrap;
+    color: #5f6368;
+    background: ${SurfaceContainer};
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+        background: ${DarkSurfaceContainerHigh};
+    }
 `;
 
 const Target = styled(Block)`
     font-weight: normal;
     white-space: pre-wrap;
+    color: #202124;
+    font-size: 16px;
+    background: #ffffff;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurface};
+        background: ${DarkSurfaceContainer};
+    }
 `;
 
 const Detail = styled(Block)`
@@ -578,39 +612,74 @@ const Detail = styled(Block)`
 const TextLine = styled.div`
     width: 100%;
     display: flex;
-    margin: 5px 0;
+    margin: 4px 0;
     flex-direction: ${(props) => (props.theme.textDirection === "ltr" ? "row" : "row-reverse")};
     justify-content: space-between;
     align-items: center;
+
+    > div {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
 `;
 
 const StyledEditIcon = styled(EditIcon)`
-    width: 18px;
-    height: 18px;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
     fill: ${Gray};
-    flex-shrink: 0;
-    margin-left: 2px;
-    transition: fill 0.2s linear;
+    flex: 0 0 36px;
+    margin-left: 4px;
+    padding: 8px;
+    display: block;
+    overflow: visible;
+    border-radius: 999px;
+    transition: fill ${MotionFast}, background-color ${MotionFast};
     &:hover {
-        fill: dimgray;
+        fill: ${LightPrimary};
+        background: rgba(11, 87, 208, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        fill: ${DarkOnSurfaceVariant};
+
+        &:hover {
+            fill: ${DarkPrimary};
+            background: rgba(168, 199, 250, 0.14);
+        }
     }
 `;
 
 const StyledEditDoneIcon = styled(EditDoneIcon)`
-    width: 18px;
-    height: 18px;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
     fill: ${Gray};
-    flex-shrink: 0;
-    margin-left: 2px;
-    transition: fill 0.2s linear;
+    flex: 0 0 36px;
+    margin-left: 4px;
+    padding: 8px;
+    display: block;
+    overflow: visible;
+    border-radius: 999px;
+    transition: fill ${MotionFast}, background-color ${MotionFast};
     &:hover {
-        fill: dimgray;
+        fill: ${LightPrimary};
+        background: rgba(11, 87, 208, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        fill: ${DarkOnSurfaceVariant};
+
+        &:hover {
+            fill: ${DarkPrimary};
+            background: rgba(168, 199, 250, 0.14);
+        }
     }
 `;
 
 const PronounceLine = styled.div`
     width: 100%;
-    margin: 5px 0;
+    margin: 6px 0 2px;
     display: flex;
     flex-direction: ${(props) => (props.theme.textDirection === "ltr" ? "row" : "row-reverse")};
     justify-content: flex-start;
@@ -619,64 +688,119 @@ const PronounceLine = styled.div`
 
 const PronounceText = styled(DrawerBlock)`
     color: ${Gray};
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+    }
 `;
 
 const StyledCopyIcon = styled(CopyIcon)`
-    width: 20px;
-    height: 20px;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
     fill: ${Gray};
-    flex-shrink: 0;
-    margin-left: 2px;
-    transition: fill 0.2s linear;
+    flex: 0 0 36px;
+    margin-left: 4px;
+    padding: 8px;
+    display: block;
+    overflow: visible;
+    border-radius: 999px;
+    transition: fill ${MotionFast}, background-color ${MotionFast};
     &:hover {
-        fill: dimgray;
+        fill: ${LightPrimary};
+        background: rgba(11, 87, 208, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        fill: ${DarkOnSurfaceVariant};
+
+        &:hover {
+            fill: ${DarkPrimary};
+            background: rgba(168, 199, 250, 0.14);
+        }
     }
 `;
 
 const StyledPronounceIcon = styled(PronounceIcon)`
-    width: 20px;
-    height: 20px;
-    padding: 2px;
-    margin-right: 10px;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
+    padding: 8px;
+    margin-right: 8px;
     fill: ${LightPrimary};
-    flex-shrink: 0;
-    transition: fill 0.2s linear;
+    flex: 0 0 36px;
+    display: block;
+    overflow: visible;
+    border-radius: 999px;
+    transition: fill ${MotionFast}, background-color ${MotionFast};
     ${(props) =>
         props.theme.textDirection === "ltr"
             ? `
-                margin-right: 10px;
+                margin-right: 8px;
             `
             : `
-                margin-left: 10px;
+                margin-left: 8px;
                 transform: rotate(180deg);
             `}
 
     &:hover {
-        fill: orange !important;
+        fill: ${LightPrimary} !important;
+        background: rgba(11, 87, 208, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        fill: ${DarkPrimary};
+
+        &:hover {
+            fill: ${DarkPrimary} !important;
+            background: rgba(168, 199, 250, 0.14);
+        }
     }
 `;
 
 const StyledPronounceLoadingIcon = styled(PronounceLoadingIcon)`
-    width: 24px;
-    height: 24px;
-    margin-right: 10px;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
+    margin-right: 8px;
     fill: ${LightPrimary};
-    padding: 0;
-    flex-shrink: 0;
+    padding: 6px;
+    flex: 0 0 36px;
+    display: block;
+    overflow: visible;
     cursor: pointer;
-    transition: fill 0.2s linear;
+    border-radius: 999px;
+    transition: fill ${MotionFast}, background-color ${MotionFast};
 
     circle {
         fill: none;
         stroke: ${LightPrimary} !important;
-        transition: stroke 0.2s linear;
+        transition: stroke ${MotionFast};
     }
 
     &:hover {
-        fill: orange !important;
+        fill: ${LightPrimary} !important;
+        background: rgba(11, 87, 208, 0.08);
 
         circle {
-            stroke: orange !important;
+            stroke: ${LightPrimary} !important;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        fill: ${DarkPrimary};
+
+        circle {
+            stroke: ${DarkPrimary} !important;
+        }
+
+        &:hover {
+            fill: ${DarkPrimary} !important;
+            background: rgba(168, 199, 250, 0.14);
+
+            circle {
+                stroke: ${DarkPrimary} !important;
+            }
         }
     }
 `;
@@ -691,27 +815,37 @@ const BlockHead = styled.div`
 `;
 
 const BlockHeadTitle = styled.span`
-    font-size: small;
+    color: #202124;
+    font-size: 13px;
+    font-weight: 500;
     ${(props) =>
-        `${props.theme.textDirection === "ltr" ? "margin-left" : "margin-right"}:${BlockPadding}`}
+        `${props.theme.textDirection === "ltr" ? "margin-left" : "margin-right"}:${BlockPadding};`}
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurface};
+    }
 `;
 
 /**
  * common style for the spot of block head
  */
 const BlockHeadSpot = styled.span`
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
 `;
 
 const BlockSplitLine = styled.div`
     width: 100%;
     height: 1px;
-    margin: 5px 0;
+    margin: 6px 0;
     flex-shrink: 0;
     border: none;
-    background: rgba(0, 0, 0, 0.25);
+    background: ${OutlineVariant};
+
+    @media (prefers-color-scheme: dark) {
+        background: ${DarkOutline};
+    }
 `;
 
 const BlockContent = styled(DrawerBlock)`
@@ -724,23 +858,36 @@ const BlockContent = styled(DrawerBlock)`
 `;
 
 const DetailHeadSpot = styled(BlockHeadSpot)`
-    background-color: #00bfa5;
+    background-color: #146c43;
 `;
 
 const Position = styled.div`
     color: ${Gray};
-    font-size: smaller;
+    font-size: 12px;
+    font-weight: 500;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+    }
 `;
 
 const DetailMeaning = styled.div`
     padding: 5px 0;
     ${(props) => (props.theme.textDirection === "ltr" ? "margin-left" : "margin-right")}: 10px;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurface};
+    }
 `;
 
 const SynonymTitle = styled.div`
     color: ${Gray};
     font-size: small;
     ${(props) => (props.theme.textDirection === "ltr" ? "margin-left" : "margin-right")}: 10px;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+    }
 `;
 
 const SynonymLine = styled.div`
@@ -760,28 +907,42 @@ const SynonymLine = styled.div`
 `;
 
 const SynonymWord = styled.span`
-    padding: 2px 10px;
+    padding: 4px 10px;
     margin: 0 2px 3px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 32px;
+    color: ${LightPrimary};
+    background: #d3e3fd;
+    border: 1px solid rgba(11, 87, 208, 0.16);
+    border-radius: 999px;
     cursor: pointer;
-    font-size: small;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background-color ${MotionFast}, border-color ${MotionFast}, color ${MotionFast};
+
+    @media (prefers-color-scheme: dark) {
+        color: #d3e3fd;
+        background: #1f3b68;
+        border-color: rgba(168, 199, 250, 0.24);
+    }
 `;
 
 const Definition = styled(Block)``;
 
 const DefinitionHeadSpot = styled(BlockHeadSpot)`
-    background-color: #ff4081;
+    background-color: #d93025;
 `;
 
 const DefinitionExample = styled(DetailMeaning)`
     color: #5f6368;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+    }
 `;
 
 const Example = styled(Block)``;
 
 const ExampleHeadSpot = styled(BlockHeadSpot)`
-    background-color: #3d5afe;
+    background-color: ${LightPrimary};
 `;
 
 const ExampleList = styled.ol`
@@ -797,11 +958,19 @@ const ExampleItem = styled.li`
 
 const ExampleSource = styled.div`
     font-size: medium;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurface};
+    }
 `;
 
 const ExampleTarget = styled.div`
     padding-top: 5px;
     font-size: medium;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+    }
 `;
 
 /**

@@ -95,8 +95,23 @@ class HybridTranslator {
             return;
         }
 
-        this.CONFIG = config;
+        this.CONFIG = this.normalizeConfig(config);
         this.MAIN_TRANSLATOR = config.selections.mainMeaning;
+    }
+
+    private normalizeConfig(config: HybridConfig): HybridConfig {
+        const translators = new Set<HybridSupportedTranslators>();
+        for (const item in config.selections) {
+            const translator = config.selections[item as keyof Selections];
+            if (translator && this.REAL_TRANSLATORS[translator]) {
+                translators.add(translator);
+            }
+        }
+
+        return {
+            ...config,
+            translators: Array.from(translators),
+        };
     }
 
     /**

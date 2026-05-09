@@ -57,16 +57,18 @@ window.onload = () => {
             let settingItemValue = getSetting(result, settingItemPath);
             if (
                 settingItemPath.join(" ") === "LocalTranslatorConfig mode" &&
-                settingItemValue === "geminiNano"
+                (settingItemValue === "geminiNano" || settingItemValue === "endpoint")
             ) {
                 settingItemValue = "chromeBuiltin";
                 saveOption(result, settingItemPath, settingItemValue);
             }
             if (
                 settingItemPath.join(" ") === "DefaultPageTranslator" &&
-                settingItemValue === "GeminiNanoPageTranslate"
+                (settingItemValue === "GeminiNanoPageTranslate" ||
+                    settingItemValue === "LocalPageTranslate" ||
+                    settingItemValue === "ChromeBuiltinPageTranslate")
             ) {
-                settingItemValue = "ChromeBuiltinPageTranslate";
+                settingItemValue = "GooglePageTranslate";
                 saveOption(result, settingItemPath, settingItemValue);
             }
 
@@ -118,6 +120,9 @@ window.onload = () => {
                             settingItemPath,
                             target.options[target.selectedIndex].value
                         );
+                        if (target.id === "local-translator-mode") {
+                            syncLocalTranslatorFields(target.value);
+                        }
                     };
                     break;
                 case "text":
@@ -132,8 +137,18 @@ window.onload = () => {
                     break;
             }
         }
+        syncLocalTranslatorFields(result.LocalTranslatorConfig?.mode || "chromeBuiltin");
     });
 };
+
+function syncLocalTranslatorFields(mode) {
+    const googleAiStudioFields = document.querySelectorAll("[data-local-mode='googleAiStudio']");
+    const googleAiStudioRow = document.getElementById("local-translator-google-settings");
+    if (googleAiStudioRow) googleAiStudioRow.hidden = mode !== "googleAiStudio";
+    googleAiStudioFields.forEach((element) => {
+        element.hidden = mode !== "googleAiStudio";
+    });
+}
 
 /**
  * Set up hybrid translate config.
@@ -183,7 +198,10 @@ function setUpTranslateConfig(config, availableTranslators) {
                 }
             }
 
-            chrome.storage.sync.set({ HybridTranslatorConfig: config });
+            chrome.storage.sync.set({
+                HybridTranslatorConfig: config,
+                DefaultTranslator: "HybridTranslate",
+            });
         };
     }
 }

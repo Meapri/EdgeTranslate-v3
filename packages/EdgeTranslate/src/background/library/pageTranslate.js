@@ -8,52 +8,35 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
  * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
  */
 function translatePage(channel) {
-    getOrSetDefaultSettings(
-        ["DefaultPageTranslator", "languageSetting", "LocalTranslatorConfig"],
-        DEFAULT_SETTINGS
-    ).then((result) => {
-        const translator =
-            result.DefaultPageTranslator === "GeminiNanoPageTranslate"
-                ? "ChromeBuiltinPageTranslate"
-                : result.DefaultPageTranslator;
-        const targetLang = (result.languageSetting && result.languageSetting.tl) || "en";
-        const sourceLang = (result.languageSetting && result.languageSetting.sl) || "auto";
+    getOrSetDefaultSettings(["DefaultPageTranslator", "languageSetting"], DEFAULT_SETTINGS).then(
+        (result) => {
+            const translator =
+                result.DefaultPageTranslator === "GeminiNanoPageTranslate" ||
+                result.DefaultPageTranslator === "LocalPageTranslate" ||
+                result.DefaultPageTranslator === "ChromeBuiltinPageTranslate"
+                    ? "GooglePageTranslate"
+                    : result.DefaultPageTranslator;
 
-        // Page translation is currently Chrome-only.
-        if (!FEATURE_FLAGS.pageTranslate) return;
+            // Page translation is currently Chrome-only.
+            if (!FEATURE_FLAGS.pageTranslate) return;
 
-        switch (translator) {
-            case "GooglePageTranslate":
-                executeGoogleScript(channel);
-                break;
-            case "ChromeBuiltinPageTranslate":
-                executeDomPageTranslate(channel, {
-                    engine: "geminiNano",
-                    sl: sourceLang,
-                    tl: targetLang,
-                });
-                break;
-            case "LocalPageTranslate": {
-                const localMode = result.LocalTranslatorConfig && result.LocalTranslatorConfig.mode;
-                executeDomPageTranslate(channel, {
-                    engine: localMode === "googleAiStudio" ? "googleAiStudio" : "localEndpoint",
-                    sl: sourceLang,
-                    tl: targetLang,
-                });
-                break;
+            switch (translator) {
+                case "GooglePageTranslate":
+                    executeGoogleScript(channel);
+                    break;
+                case "DomPageTranslate":
+                    executeDomPageTranslate(channel, {
+                        engine: "dom",
+                        sl: (result.languageSetting && result.languageSetting.sl) || "auto",
+                        tl: (result.languageSetting && result.languageSetting.tl) || "en",
+                    });
+                    break;
+                default:
+                    executeGoogleScript(channel);
+                    break;
             }
-            case "DomPageTranslate":
-                executeDomPageTranslate(channel, {
-                    engine: "dom",
-                    sl: sourceLang,
-                    tl: targetLang,
-                });
-                break;
-            default:
-                executeGoogleScript(channel);
-                break;
         }
-    });
+    );
 }
 
 /**
@@ -98,11 +81,6 @@ function executeGoogleScript(channel) {
                 channel.emitToTabs(tabId, "start_page_translate", {
                     translator: "google",
                 });
-                setTimeout(() => {
-                    try {
-                        channel.emitToTabs(tabId, "start_dom_page_translate", {});
-                    } catch {}
-                }, 800);
             })
             .catch((error) => {
                 logWarn(`Chrome scripting error: ${error}`);

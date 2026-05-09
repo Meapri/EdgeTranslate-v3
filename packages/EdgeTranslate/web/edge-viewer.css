@@ -1,784 +1,1213 @@
-/* EdgeTranslate PDF 뷰어 커스텀 오버레이 스타일
-   유지보수 전략:
-   - pdf.js 기본 CSS(viewer.css)는 가능한 수정하지 않고, 본 파일에서 오버라이드합니다.
-   - PDF.js 업그레이드 시 viewer.css 교체만으로 대다수 변경을 흡수할 수 있게 유지합니다.
-*/
+/* EdgeTranslate PDF viewer Material skin.
+   Keep PDF.js vendor CSS untouched; all extension-specific styling lives here. */
 
 :root {
-  --et-accent: #4f8cff;
-  --et-bg: #101317;
-  --et-elev: #171b21;
-  --et-text: #e6ebf1;
-  --et-muted: #9aa6b2;
-  --et-border: #2a2f37;
-  --et-radius: 10px;
-  /* Aesthetic tweaks: One UI-like taller toolbar and larger icons */
-  --toolbar-height: 44px;
-  --toolbar-vertical-padding: 6px;
+  color-scheme: light dark;
+
+  --et-primary: #0b57d0;
+  --et-primary-hover: #0842a0;
+  --et-primary-container: #d3e3fd;
+  --et-on-primary: #ffffff;
+  --et-secondary: #146c43;
+  --et-secondary-container: #c8ead4;
+  --et-tertiary: #7a4d00;
+  --et-tertiary-container: #ffddb0;
+
+  --et-bg: #f7f9fc;
+  --et-surface: #ffffff;
+  --et-surface-dim: #dde3ea;
+  --et-surface-container-low: #f1f4f8;
+  --et-surface-container: #edf2f7;
+  --et-surface-container-high: #e6edf4;
+  --et-surface-container-highest: #dde6ef;
+  --et-text: #1f1f1f;
+  --et-muted: #5f6368;
+  --et-outline: #c4c7c5;
+  --et-outline-variant: #e1e3e1;
+
+  --et-radius: 8px;
+  --et-menu-item-radius: 8px;
+  --et-state-hover: rgba(11, 87, 208, 0.08);
+  --et-state-pressed: rgba(11, 87, 208, 0.12);
+  --et-focus-ring: rgba(11, 87, 208, 0.38);
+  --et-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
+  --et-shadow-low: 0 1px 2px rgba(60, 64, 67, 0.18), 0 1px 3px rgba(60, 64, 67, 0.12);
+  --et-motion-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --et-motion-standard: 180ms cubic-bezier(0.2, 0, 0, 1);
+  --et-motion-emphasized: 260ms cubic-bezier(0.2, 0, 0, 1);
+
+  --toolbar-height: 56px;
+  --toolbar-vertical-padding: 8px;
+  --toolbar-button-hpad: 10px;
   --icon-size: 18px;
-  --menu-item-height: 36px;
-  /* Common toolbar button horizontal padding to prevent icon clipping in all browsers */
-  --toolbar-button-hpad: 8px;
-  /* Align custom controls to PDF.js toolbar height */
+  --menu-item-height: 40px;
+  --menu-width: 280px;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --et-bg: #f6f8fb;
-    --et-elev: #ffffff;
-    --et-text: #1a1f24;
-    --et-muted: #5b6672;
-    --et-border: #e6e9ef;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --et-primary: #a8c7fa;
+    --et-primary-hover: #d3e3fd;
+    --et-primary-container: #062e6f;
+    --et-on-primary: #062e6f;
+    --et-secondary: #9bd4ad;
+    --et-secondary-container: #0f3f28;
+    --et-tertiary: #f6bd61;
+    --et-tertiary-container: #442b00;
+
+    --et-bg: #111418;
+    --et-surface: #1b1f23;
+    --et-surface-dim: #111418;
+    --et-surface-container-low: #1a1f24;
+    --et-surface-container: #20262b;
+    --et-surface-container-high: #293037;
+    --et-surface-container-highest: #343c43;
+    --et-text: #e3e3e3;
+    --et-muted: #bdc1c6;
+    --et-outline: #8e918f;
+    --et-outline-variant: #3c4043;
+
+    --et-state-hover: rgba(168, 199, 250, 0.12);
+    --et-state-pressed: rgba(168, 199, 250, 0.18);
+    --et-focus-ring: rgba(168, 199, 250, 0.44);
+    --et-shadow: 0 10px 28px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
+    --et-shadow-low: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
   }
 }
 
-html, body {
+html[data-theme="light"] {
+  color-scheme: light;
+  --et-primary: #0b57d0;
+  --et-primary-hover: #0842a0;
+  --et-primary-container: #d3e3fd;
+  --et-on-primary: #ffffff;
+  --et-bg: #f8fafd;
+  --et-surface: #ffffff;
+  --et-surface-container: #eef3f8;
+  --et-surface-container-high: #e8eef5;
+  --et-text: #1f1f1f;
+  --et-muted: #5f6368;
+  --et-outline: #c4c7c5;
+  --et-outline-variant: #e1e3e1;
+  --et-state-hover: rgba(11, 87, 208, 0.08);
+  --et-state-pressed: rgba(11, 87, 208, 0.12);
+  --et-focus-ring: rgba(11, 87, 208, 0.38);
+  --et-shadow: 0 8px 24px rgba(60, 64, 67, 0.18), 0 2px 6px rgba(60, 64, 67, 0.12);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --et-primary: #a8c7fa;
+  --et-primary-hover: #d3e3fd;
+  --et-primary-container: #062e6f;
+  --et-on-primary: #062e6f;
+  --et-bg: #101418;
+  --et-surface: #1b1f23;
+  --et-surface-container: #22272b;
+  --et-surface-container-high: #2a3035;
+  --et-text: #e3e3e3;
+  --et-muted: #bdc1c6;
+  --et-outline: #8e918f;
+  --et-outline-variant: #3c4043;
+  --et-state-hover: rgba(168, 199, 250, 0.12);
+  --et-state-pressed: rgba(168, 199, 250, 0.18);
+  --et-focus-ring: rgba(168, 199, 250, 0.44);
+  --et-shadow: 0 10px 28px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme],
+:root {
+  --main-color: var(--et-text);
+  --body-bg-color: var(--et-bg);
+  --text-color: var(--et-text);
+  --text-primary-color: var(--et-text);
+  --text-secondary-color: var(--et-muted);
+
+  --toolbar-bg-color: var(--et-surface);
+  --toolbar-border-color: var(--et-outline-variant);
+  --toolbar-box-shadow: none;
+  --toolbar-icon-bg-color: var(--et-muted);
+  --toolbar-icon-hover-bg-color: var(--et-primary);
+
+  --doorhanger-bg-color: var(--et-surface);
+  --doorhanger-border-color: var(--et-outline-variant);
+  --doorhanger-separator-color: var(--et-outline-variant);
+  --doorhanger-hover-color: var(--et-state-hover);
+
+  --menu-bg: var(--et-surface);
+  --menu-bg-color: var(--et-surface);
+  --menu-text-color: var(--et-text);
+  --menu-border-color: var(--et-outline-variant);
+  --menu-box-shadow: var(--et-shadow);
+  --menuitem-fg-color: var(--et-text);
+  --menuitem-hover-bg-color: var(--et-state-hover);
+  --menuitem-hover-bg: var(--et-state-hover);
+  --menuitem-active-bg: var(--et-state-pressed);
+  --menuitem-focus-bg: var(--et-state-hover);
+  --menuitem-focus-outline-color: var(--et-focus-ring);
+  --menu-button-border-color: var(--et-outline-variant);
+  --menu-button-focus-outline-color: var(--et-focus-ring);
+  --menu-group-bg: transparent;
+  --menu-group-border-color: transparent;
+
+  --separator-color: var(--et-outline-variant);
+  --sidebar-bg-color: var(--et-surface);
+  --sidebar-toolbar-bg-color: var(--et-surface-container);
+  --sidebar-border-color: var(--et-outline-variant);
+  --sidebar-box-shadow: var(--et-shadow);
+
+  --dialog-bg-color: var(--et-surface);
+  --dialog-border-color: var(--et-outline-variant);
+  --dialog-button-bg-color: var(--et-surface-container);
+  --button-primary-bg-color: var(--et-primary);
+  --button-primary-fg-color: var(--et-on-primary);
+  --button-primary-hover-bg-color: var(--et-primary-hover);
+  --button-secondary-bg-color: var(--et-surface-container);
+  --button-secondary-fg-color: var(--et-text);
+  --button-secondary-hover-bg-color: var(--et-state-hover);
+
+  --field-bg-color: var(--et-surface-container);
+  --field-color: var(--et-text);
+  --field-border-color: var(--et-outline-variant);
+  --textarea-bg-color: var(--et-surface-container);
+  --textarea-fg-color: var(--et-text);
+  --textarea-border-color: var(--et-outline-variant);
+  --input-text-bg-color: var(--et-surface-container);
+  --input-text-fg-color: var(--et-text);
+
+  --progressBar-color: var(--et-primary);
+  --progressBar-bg-color: var(--et-primary-container);
+  --toggled-btn-color: var(--et-primary);
+  --toggled-btn-bg-color: var(--et-primary-container);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --et-motion-fast: 1ms linear;
+    --et-motion-standard: 1ms linear;
+    --et-motion-emphasized: 1ms linear;
+    --sidebar-transition-duration: 0ms !important;
+  }
+}
+
+html,
+body {
   background: var(--et-bg) !important;
   color: var(--et-text) !important;
 }
 
-/* Page inversion (PDF content only, toolbar 제외) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--et-outline) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--et-outline);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--et-muted);
+}
+
+/* PDF page theme */
 html[data-page-theme="dark"] .pdfViewer .page {
-  /* From original EdgeTranslate */
-  filter: brightness(0.85) grayscale(0.15) invert(1.0) hue-rotate(0.5turn);
+  filter: brightness(0.85) grayscale(0.15) invert(1) hue-rotate(0.5turn);
   border-image: none;
   box-shadow: none;
 }
 
-/* Revert inversion for common overlay assets (annotations/icons), keep natural colors */
 html[data-page-theme="dark"] .annotationLayer img,
 html[data-page-theme="dark"] .annotationLayer canvas,
 html[data-page-theme="dark"] .annotationLayer svg {
   filter: invert(1) hue-rotate(180deg) saturate(1) contrast(1) brightness(1);
 }
 
-/* Improve text selection/readability under inversion */
+#viewer .textLayer span::selection,
 html[data-page-theme="dark"] #viewer .textLayer span::selection {
-  background: rgba(79, 140, 255, 0.35) !important;
+  background: var(--et-focus-ring) !important;
 }
 
-#outerContainer .toolbar,
-#secondaryToolbar,
-#findbar,
-#editorUndoBar,
-#dialogContainer dialog {
-  background: var(--et-elev) !important;
-  color: var(--et-text) !important;
-  border-color: var(--et-border) !important;
+/* Viewer shell */
+#mainContainer,
+#viewerContainer {
+  background: var(--et-bg) !important;
+  scrollbar-gutter: stable;
 }
 
-.toolbar button.toolbarButton,
-#secondaryToolbar .toolbarButton,
-.dialogButtonsGroup button,
-.primaryButton,
-.secondaryButton {
-  background: transparent;
-  color: var(--et-text);
-  border: 1px solid var(--et-border);
-  border-radius: var(--et-radius);
-  padding: 0 10px;
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
-  box-sizing: border-box;
+#toolbarContainer {
+  background: var(--et-surface) !important;
+  border-bottom: 1px solid var(--et-outline-variant) !important;
+  box-shadow: none !important;
 }
 
-.toolbar button.toolbarButton:hover,
-#secondaryToolbar .toolbarButton:hover,
-.dialogButtonsGroup button:hover {
-  border-color: var(--et-accent);
+#toolbarViewer {
+  gap: 8px;
+  padding-inline: 8px;
 }
 
-.primaryButton {
-  background: var(--et-accent);
-  border-color: var(--et-accent);
-  color: white;
-}
-
-.toolbarField, input[type="number"], input[type="text"], textarea, select {
-  background: transparent !important;
-  border: 1px solid var(--et-border) !important;
-  color: var(--et-text) !important;
-  border-radius: 10px !important;
-}
-
-#sidebarContainer {
-  border-right: 1px solid var(--et-border) !important;
+.toolbarHorizontalGroup {
+  gap: 4px;
 }
 
 .verticalToolbarSeparator,
 .horizontalToolbarSeparator {
-  background: var(--et-border) !important;
+  background: var(--et-outline-variant) !important;
 }
 
 .progress .glimmer {
-  background: linear-gradient(90deg, transparent, rgba(79,140,255,0.35), transparent) !important;
+  background: linear-gradient(90deg, transparent, var(--et-state-pressed), transparent) !important;
 }
 
-#viewer .textLayer span::selection {
-  background: rgba(79,140,255,0.35) !important;
+.pdfViewer .page {
+  border-color: var(--et-outline-variant) !important;
+  box-shadow: 0 2px 8px rgba(60, 64, 67, 0.18) !important;
 }
 
-/* 스크롤바 */
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb { background: var(--et-border); border-radius: 8px; }
-*::-webkit-scrollbar-thumb:hover { background: #3a4150; }
-
-/* Explicit theme overrides via attribute */
-html[data-theme="dark"] {
-  --et-bg: #101317;
-  --et-elev: #171b21;
-  --et-text: #e6ebf1;
-  --et-muted: #9aa6b2;
-  --et-border: #2a2f37;
-
-  /* Bridge PDF.js variables to our palette */
-  --toolbar-bg-color: var(--et-elev);
-  --doorhanger-bg-color: var(--et-elev);
-  --doorhanger-separator-color: var(--et-border);
-  --menu-bg-color: var(--et-elev);
-  --menuitem-fg-color: var(--et-text);
-  --menuitem-hover-bg-color: rgba(79, 140, 255, 0.15);
-  --menu-button-border-color: var(--et-border);
-  --menu-button-focus-outline-color: var(--et-accent);
-  --separator-color: var(--et-border);
-  --dialog-button-bg-color: rgba(255, 255, 255, 0.06);
-  --textarea-bg-color: var(--et-elev);
+html[data-theme="dark"] .pdfViewer .page {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.42) !important;
 }
 
-html[data-theme="light"] {
-  --et-bg: #f6f8fb;
-  --et-elev: #ffffff;
-  --et-text: #1a1f24;
-  --et-muted: #5b6672;
-  --et-border: #e6e9ef;
-
-  /* Bridge PDF.js variables to our palette */
-  --toolbar-bg-color: var(--et-elev);
-  --doorhanger-bg-color: var(--et-elev);
-  --doorhanger-separator-color: var(--et-border);
-  --menu-bg-color: var(--et-elev);
-  --menuitem-fg-color: var(--et-text);
-  --menuitem-hover-bg-color: rgba(79, 140, 255, 0.08);
-  --menu-button-border-color: var(--et-border);
-  --menu-button-focus-outline-color: var(--et-accent);
-  --separator-color: var(--et-border);
-  --dialog-button-bg-color: rgba(0, 0, 0, 0.04);
-  --textarea-bg-color: var(--et-elev);
+#loadingBar .progress,
+.loadingBar .progress {
+  background: var(--et-primary) !important;
+  border-radius: 999px !important;
 }
 
-/* Optional: visual hint for toggled state */
-#etThemeToggle.toggled {
-  border-color: var(--et-accent) !important;
+#loadingBar,
+.loadingBar {
+  background: var(--et-primary-container) !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
 }
 
-/* Theme toggle icons */
-#etThemeToggle .icon-sun,
-#etThemeToggle .icon-moon {
-  display: inline-flex;
-  align-items: center;
-}
-
-html[data-theme="dark"] #etThemeToggle .icon-sun { display: none; }
-html[data-theme="dark"] #etThemeToggle .icon-moon { display: inline-flex; }
-html[data-theme="light"] #etThemeToggle .icon-sun { display: inline-flex; }
-html[data-theme="light"] #etThemeToggle .icon-moon { display: none; }
-
-/* Remove PDF.js default masked pseudo icon on our custom button to avoid black square */
-#etThemeToggle::before {
-  content: none !important;
-  display: none !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-  background: none !important;
-}
-
-/* Ensure proper sizing and color for inline SVG */
-#etThemeToggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--et-text);
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
-  padding: 0 10px;
-  box-sizing: border-box;
-}
-
-#etThemeToggle svg {
-  width: var(--icon-size) !important;
-  height: var(--icon-size) !important;
-  display: block;
-}
-
-/* Override PDF.js rule that hides button spans */
-#etThemeToggle > span {
-  width: auto !important;
-  height: auto !important;
-  overflow: visible !important;
-}
-
-#etThemeToggle {
-  gap: 6px;
-}
-
-/* Theme dropdown menu tweaks */
-#etTheme .menuContainer button.toolbarButton.labeled.toggled {
-  background: var(--menuitem-hover-bg-color) !important;
-}
-#etThemeMenu.menu {
-  min-width: 140px;
-  width: 172px;
-}
-
-/* Prevent toggle stretching and ensure dropdown doesn't affect layout */
-#etTheme { display: inline-block; position: relative; vertical-align: middle; }
-#etTheme .menu { position: absolute; right: 0; }
-
-/* Left-align theme menu like other menus; avoid centered labels */
-#etThemeMenu .menuContainer { text-align: left !important; width: auto !important; min-width: 140px !important; padding: 6px 8px !important; }
-#etThemeMenu .menuContainer button.toolbarButton:not(#etThemeLightIcon):not(#etThemeDarkIcon):not(#etThemeAutoIcon):not(#etPageLightIcon):not(#etPageDarkIcon):not(#etPageAutoIcon) { 
-  display: flex !important; 
-  justify-content: flex-start !important; 
-  align-items: center !important; 
-  width: 100% !important; 
-  box-sizing: border-box !important; 
-  min-height: var(--menu-item-height) !important; 
-  border: none !important; 
-  border-radius: 0 !important;
-}
-#etThemeMenu .menuContainer button.toolbarButton > span { 
-  flex: 1 1 auto !important; 
-  min-width: 0 !important; 
-  text-align: left !important; 
-  white-space: nowrap !important; 
-}
-
-/* icon-only buttons inside theme menu */
-#etThemeMenu .menuContainer button.toolbarButton .icon-sun,
-#etThemeMenu .menuContainer button.toolbarButton .icon-moon,
-#etThemeMenu .menuContainer button.toolbarButton .icon-auto { display: inline-flex; align-items: center; justify-content: center; }
-#etThemeMenu .menuContainer button.toolbarButton .icon-sun svg,
-#etThemeMenu .menuContainer button.toolbarButton .icon-moon svg,
-#etThemeMenu .menuContainer button.toolbarButton .icon-auto svg { width: var(--icon-size); height: var(--icon-size); }
-
-/* make icon-only buttons square and compact */
-#etThemeMenu .menuContainer #etThemeAutoIcon,
-#etThemeMenu .menuContainer #etThemeLightIcon,
-#etThemeMenu .menuContainer #etThemeDarkIcon,
-#etThemeMenu .menuContainer #etPageAutoIcon,
-#etThemeMenu .menuContainer #etPageLightIcon,
-#etThemeMenu .menuContainer #etPageDarkIcon {
+/* Toolbar controls */
+.toolbar button.toolbarButton,
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+#outerContainer #secondaryToolbar .toolbarButton,
+.dialogButtonsGroup button,
+.primaryButton,
+.secondaryButton {
   display: inline-flex !important;
-  width: calc(var(--menu-item-height) + 4px) !important;
-  height: calc(var(--menu-item-height) + 4px) !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  justify-content: center !important;
   align-items: center !important;
-  box-sizing: border-box !important;
-}
-#etThemeMenu .menuContainer #etThemeAutoIcon > span,
-#etThemeMenu .menuContainer #etThemeLightIcon > span,
-#etThemeMenu .menuContainer #etThemeDarkIcon > span,
-#etThemeMenu .menuContainer #etPageAutoIcon > span,
-#etThemeMenu .menuContainer #etPageLightIcon > span,
-#etThemeMenu .menuContainer #etPageDarkIcon > span {
-  flex: 0 0 auto !important;
-}
-
-/* compact visual for icon-only items */
-#etThemeMenu .menuContainer button#etThemeLightIcon,
-#etThemeMenu .menuContainer button#etThemeDarkIcon {
-  padding: 8px !important;
-}
-
-/* toggler row spacing */
-#etThemeMenu .menuContainer .toggler {
-  display: flex;
-  align-items: center; /* vertical center */
-  justify-content: space-between; /* label left, switch right */
-  gap: 8px;
-  padding: 4px 2px;
-  min-height: var(--menu-item-height);
-  width: 100%;
+  justify-content: center;
+  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
+  min-width: calc(var(--icon-size) + (var(--toolbar-button-hpad) * 2) + 4px);
+  padding: 0 var(--toolbar-button-hpad) !important;
   box-sizing: border-box;
-}
-#etThemeMenu .menuContainer .toggler .editorParamsLabel {
-  flex: 1 1 auto;
-}
-#etThemeMenu .menuContainer .toggler .toggle-button {
-  margin-left: auto;
+  border: 1px solid transparent;
+  border-radius: var(--et-radius);
+  background: transparent;
+  color: var(--et-text);
+  line-height: normal;
+  overflow: visible !important;
+  transition:
+    background-color var(--et-motion-fast),
+    border-color var(--et-motion-fast),
+    box-shadow var(--et-motion-fast),
+    color var(--et-motion-fast),
+    opacity var(--et-motion-fast);
 }
 
-/* icon row: horizontal layout for light/dark */
-#etThemeMenu .menuContainer .et-theme-row { display: flex; gap: 8px; padding: 8px 6px; justify-content: space-between; }
-#etThemeMenu .menuContainer .et-theme-row > .toolbarButton { flex: 0 0 auto; }
+.toolbar button.toolbarButton:hover,
+#toolbarContainer .toolbarButton:hover,
+#secondaryToolbar .toolbarButton:hover,
+.dialogButtonsGroup button:hover {
+  background: var(--et-state-hover) !important;
+  border-color: transparent;
+}
 
-/* active state highlight for selected theme icon */
-#etThemeMenu .menuContainer .et-theme-row > .toolbarButton.toggled {
-  background-color: var(--menuitem-hover-bg-color) !important;
-  border-radius: var(--et-radius) !important;
+.toolbar button.toolbarButton:active,
+#toolbarContainer .toolbarButton:active,
+#secondaryToolbar .toolbarButton:active {
+  background: var(--et-state-pressed) !important;
 }
-/* Auto icon highlight uses same toggled class */
-#etThemeMenu .menuContainer #etThemeAutoIcon.toggled { background-color: var(--menuitem-hover-bg-color) !important; }
 
-/* Match secondary menu button bg/hover/focus exactly */
-#etThemeMenu .menuContainer .toolbarButton {
-  background-color: transparent !important;
-  border: none !important;
-}
-#etThemeMenu .menuContainer .toolbarButton:hover {
-  background-color: var(--menuitem-hover-bg-color) !important;
-  border-radius: var(--et-radius) !important;
-}
-#etThemeMenu .menuContainer .toolbarButton:focus-visible {
-  outline: 2px solid var(--menu-button-focus-outline-color) !important;
+.toolbarButton:focus-visible,
+.dialogButtonsGroup button:focus-visible,
+.popupMenu > button:focus-visible {
+  outline: 2px solid var(--et-focus-ring) !important;
   outline-offset: 2px !important;
 }
 
-/* Ensure our icon span renders (PDF.js may hide button > span) */
-#etThemeMenu .menuContainer .toolbarButton > span {
-  display: inline-flex !important;
-  width: auto !important;
-  height: auto !important;
-  overflow: visible !important;
+#outerContainer .toolbar .toolbarButton::before,
+#outerContainer #secondaryToolbar .toolbarButton::before {
+  display: inline-block !important;
+  width: var(--icon-size) !important;
+  height: var(--icon-size) !important;
+  margin-inline: 0;
+  background-color: currentColor;
+  vertical-align: middle !important;
 }
 
-/* Remove PDF.js masked pseudo icons for our icon-only buttons to avoid square blocks */
-#etThemeMenu .menuContainer #etThemeAutoIcon::before,
-#etThemeMenu .menuContainer #etThemeLightIcon::before,
-#etThemeMenu .menuContainer #etThemeDarkIcon::before,
-#etThemeMenu .menuContainer #etPageAutoIcon::before,
-#etThemeMenu .menuContainer #etPageLightIcon::before,
-#etThemeMenu .menuContainer #etPageDarkIcon::before {
-  content: none !important;
-  display: none !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-  background: none !important;
+.primaryButton {
+  background: var(--et-primary) !important;
+  border-color: var(--et-primary) !important;
+  color: var(--et-on-primary) !important;
 }
 
-/* PDF.js menus and doorhangers (공통 톤) */
-html[data-theme] .doorHanger,
-html[data-theme] .doorHangerRight,
-html[data-theme] #secondaryToolbar,
-html[data-theme] #secondaryToolbar .menuContainer,
-html[data-theme] #secondaryToolbar.menu,
-html[data-theme] #secondaryToolbar menu,
-html[data-theme] #secondaryToolbar .toolbarButton.labeled,
-html[data-theme] .dialogButtonsGroup button,
-html[data-theme] .menuContainer button,
-html[data-theme] .menuContainer .menu,
-html[data-theme] #findbar {
-  background: var(--doorhanger-bg-color) !important;
-  color: var(--et-text) !important;
-  border-color: var(--doorhanger-separator-color) !important;
+.secondaryButton {
+  background: var(--et-surface-container) !important;
+}
+
+/* Fields */
+.toolbarField,
+input[type="number"],
+input[type="text"],
+textarea,
+select {
+  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding)) !important;
+  box-sizing: border-box !important;
+  background: var(--et-surface-container) !important;
+  border: 1px solid var(--et-outline) !important;
   border-radius: var(--et-radius) !important;
+  color: var(--et-text) !important;
+}
+
+#scaleSelectContainer {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
+  box-sizing: border-box;
+  overflow: hidden !important;
+  background: var(--et-surface) !important;
+  border: 1px solid var(--et-outline) !important;
+  border-radius: var(--et-radius) !important;
+}
+
+#scaleSelectContainer select#scaleSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 100% !important;
+  padding: 6px 28px 6px 10px !important;
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  color: var(--et-text) !important;
+}
+
+#scaleSelectContainer select#scaleSelect option {
+  background: var(--et-surface);
+  color: var(--et-text);
+}
+
+#toolbarViewerMiddle .toolbarHorizontalGroup > .toolbarButton,
+#toolbarViewerMiddle #scaleSelectContainer {
+  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
+}
+
+/* Shared menu surfaces */
+.doorHanger,
+.doorHangerRight,
+.popupMenu,
+.editorParamsToolbar,
+#secondaryToolbar,
+#findbar,
+#editorUndoBar,
+#dialogContainer dialog {
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+  border-color: var(--et-outline-variant) !important;
+}
+
+.doorHanger::after,
+.doorHangerRight::after {
+  border-bottom-color: var(--et-surface) !important;
+}
+
+.popupMenu,
+#viewsManager .popupMenu,
+.editorParamsToolbar .menuContainer,
+#addSignatureDoorHanger,
+#editorStampParamsToolbar .menuContainer,
+#findbar,
+#dialogContainer dialog {
+  padding: 8px !important;
+  background: var(--et-surface) !important;
+  border: 1px solid var(--et-outline-variant) !important;
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow) !important;
+  color: var(--et-text) !important;
   overflow: hidden;
 }
 
-/* Menu button aesthetics - unified */
-html[data-theme] #secondaryToolbar .menuContainer button:not(.toggle-button),
-html[data-theme] .menuContainer button:not(.toggle-button) {
-  background-color: transparent !important;
-  color: var(--menuitem-fg-color) !important;
-  border: none !important;
-  border-radius: 0 !important;
+.doorHanger:not(.hidden),
+.doorHangerRight:not(.hidden),
+.popupMenu:not([hidden]),
+#secondaryToolbar:not(.hidden) .menuContainer,
+.editorParamsToolbar:not(.hidden),
+#dialogContainer dialog[open] {
+  animation: et-surface-enter var(--et-motion-standard) both;
+  transform-origin: top right;
 }
 
-/* Secondary toolbar menu: left-align items (undo accidental centering) */
+@keyframes et-surface-enter {
+  from {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+.popupMenu > button,
+#viewsManager .viewsManagerButton,
+.editorParamsToolbar button,
+#addSignatureDoorHanger button {
+  min-height: 36px !important;
+  border-radius: var(--et-menu-item-radius) !important;
+  background: transparent !important;
+  color: var(--et-text) !important;
+}
+
+.popupMenu > button:not(:disabled):hover,
+#viewsManager .viewsManagerButton:hover,
+.editorParamsToolbar button:hover,
+#addSignatureDoorHanger button:hover {
+  background: var(--et-state-hover) !important;
+}
+
+/* Secondary toolbar / More menu */
+#secondaryToolbar {
+  inset-inline-end: 8px !important;
+  inset-inline-start: auto !important;
+  width: min(336px, calc(100vw - 16px)) !important;
+  min-width: min(336px, calc(100vw - 16px)) !important;
+  max-width: calc(100vw - 16px) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+#secondaryToolbar .menuContainer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+  align-items: stretch !important;
+  justify-items: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-height: min(620px, calc(100vh - var(--toolbar-height) - 20px)) !important;
+  padding: 10px !important;
+  box-sizing: border-box !important;
+  background: var(--et-surface) !important;
+  border: 1px solid var(--et-outline-variant) !important;
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+#secondaryToolbarButtonContainer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+  align-items: stretch !important;
+  justify-items: stretch !important;
+}
+
+#secondaryToolbarButtonContainer > * {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+#secondaryToolbarButtonContainer > .visibleMediumView {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  #secondaryToolbarButtonContainer > .visibleMediumView {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+#secondaryToolbar .visibleMediumView,
+#secondaryToolbar .hiddenMediumView,
+#secondaryToolbar #cursorToolButtons,
+#secondaryToolbar #scrollModeButtons,
+#secondaryToolbar #spreadModeButtons {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  align-items: stretch !important;
+  gap: 2px !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#secondaryToolbarButtonContainer > .visibleMediumView,
+#secondaryToolbarButtonContainer > .hiddenMediumView,
+#secondaryToolbarButtonContainer > #cursorToolButtons,
+#secondaryToolbarButtonContainer > #scrollModeButtons,
+#secondaryToolbarButtonContainer > #spreadModeButtons {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100% !important;
+}
+
 #secondaryToolbar .menuContainer,
 #secondaryToolbar.menu,
 #secondaryToolbar menu {
   text-align: left !important;
 }
 
-#secondaryToolbar .menuContainer .toolbarButton {
+#secondaryToolbar .menuContainer .toolbarButton,
+#secondaryToolbar .menuContainer a.toolbarButton,
+#secondaryToolbar #viewBookmark,
+#secondaryToolbar #currentOutlineItem {
   display: flex !important;
-  justify-content: flex-start !important;
   align-items: center !important;
-  text-align: left !important;
+  justify-content: flex-start !important;
   width: 100% !important;
   max-width: 100% !important;
-  box-sizing: border-box !important;
   min-height: var(--menu-item-height) !important;
-}
-
-/* Make secondary toolbar menu a bit wider and visually grouped */
-#secondaryToolbar .menuContainer {
-  width: 100% !important; /* 배경 직사각형 폭과 일치시켜 좌우 잘림 방지 */
-  min-width: 240px !important;
-  box-sizing: border-box !important;
-  padding: 6px 8px !important;
-  border: none !important;
-  border-radius: var(--et-radius) !important;
-  background: var(--doorhanger-bg-color) !important;
-  max-height: calc(100vh - var(--toolbar-height) - 16px) !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important; /* clip hover bg to container width */
-  overscroll-behavior: contain !important;
-  touch-action: pan-y !important;
-  scrollbar-gutter: stable both-edges;
-  -webkit-overflow-scrolling: touch;
-  scroll-padding-block: 16px;
-  scrollbar-width: thin;
-}
-
-/* Remove group card layering; restore normal stacking for items */
-
-/* (reverted) Do not force width or flatten wrappers; use PDF.js defaults for stability */
-
-/* Disable wheel/touch scrolling on ancestors while pointer is over the menu to avoid double scroll */
-#secondaryToolbar:hover,
-#secondaryToolbar:focus-within {
-  overscroll-behavior: contain !important;
-}
-
-/* Add consistent breathing space at top/bottom for both states */
-#secondaryToolbar .menuContainer::before,
-#secondaryToolbar .menuContainer::after {
-  content: "";
-  display: block;
-  height: 0; /* avoid extra edge spacing differences */
-}
-
-/* Hide scrollbar visually for the More menu while keeping it scrollable */
-#secondaryToolbar .menuContainer::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-}
-#secondaryToolbar .menuContainer {
-  scrollbar-width: none !important; /* Firefox */
-  scrollbar-color: transparent transparent !important; /* hide track/thumb in FF */
-}
-
-/* Merge adjacent menu buttons into a single visual group */
-#secondaryToolbar .menuContainer button,
-#secondaryToolbar .menuContainer a.toolbarButton {
-  /* 공통 레이아웃/모양 */
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  width: 100% !important; /* hard cap to container width */
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-  background: transparent !important;
-
-  /* 공통 모양/간격 */
-  border-radius: 0 !important;
-  border: none !important;
-  padding: 8px 12px !important; /* symmetric left/right to match container */
-  gap: 8px !important;
+  height: var(--menu-item-height) !important;
   margin: 0 !important;
-  overflow: visible !important; /* prevent icon masks from being clipped */
-}
-
-#secondaryToolbar .menuContainer .toolbarButton + .toolbarButton,
-#secondaryToolbar .menuContainer a.toolbarButton + a.toolbarButton,
-#secondaryToolbar .menuContainer .toolbarButton + a.toolbarButton,
-#secondaryToolbar .menuContainer a.toolbarButton + .toolbarButton {
-  border-top-width: 0 !important; /* avoid double borders between neighbors */
-}
-
-#secondaryToolbar .menuContainer .toolbarButton:first-child,
-#secondaryToolbar .menuContainer a.toolbarButton:first-child {
-  border-top-left-radius: var(--et-radius) !important;
-  border-top-right-radius: var(--et-radius) !important;
-}
-
-#secondaryToolbar .menuContainer .toolbarButton:last-child,
-#secondaryToolbar .menuContainer a.toolbarButton:last-child {
-  border-bottom-left-radius: var(--et-radius) !important;
-  border-bottom-right-radius: var(--et-radius) !important;
-}
-
-/* Secondary toolbar separators: no visible line, spacing only (prevents flicker on resize) */
-#secondaryToolbar .horizontalToolbarSeparator {
-  display: block !important;
-  height: 0 !important;
-  width: auto !important;
-  margin: 4px auto !important; /* slightly tighter group spacing */
-  background: transparent !important;
-  border: none !important;
-  transition: none !important;
-}
-
-/* One UI group cards via explicit group classes (assigned in JS) */
-#secondaryToolbar .menuContainer .et-group-first,
-#secondaryToolbar .menuContainer .et-group-mid,
-#secondaryToolbar .menuContainer .et-group-last {
-  background: var(--menu-group-bg) !important;
-}
-
-#secondaryToolbar .menuContainer .et-group-first {
-  border: 1px solid var(--menu-group-border-color) !important;
-  border-bottom: none !important;
-  border-top-left-radius: var(--et-radius) !important;
-  border-top-right-radius: var(--et-radius) !important;
-}
-
-#secondaryToolbar .menuContainer .et-group-mid {
-  border-left: 1px solid var(--menu-group-border-color) !important;
-  border-right: 1px solid var(--menu-group-border-color) !important;
-}
-
-#secondaryToolbar .menuContainer .et-group-last {
-  border: 1px solid var(--menu-group-border-color) !important;
-  border-top: none !important;
-  border-bottom-left-radius: var(--et-radius) !important;
-  border-bottom-right-radius: var(--et-radius) !important;
-}
-
-/* Remove icon-column indentation; keep centered line */
-#secondaryToolbar .menuContainer .horizontalToolbarSeparator {
-  margin-inline-start: auto !important;
-  margin-inline-end: auto !important;
-}
-
-/* Anchor the doorhanger to the right edge; let inner container scroll */
-#secondaryToolbar {
-  inset-inline-end: 8px !important;
-  inset-inline-start: auto !important;
-  /* Allow vertical overflow for the doorhanger, but prevent horizontal overflow causing page scroll */
-  overflow-y: visible !important;
-  overflow-x: hidden !important;
-  max-width: 100vw !important;
-  max-height: none !important; /* prevent outer container from creating its own scroll */
-  overscroll-behavior: contain !important; /* avoid scroll chaining to page */
-  width: auto !important; /* let JS compute exact width based on content */
+  padding: 0 12px !important;
+  gap: 12px !important;
   box-sizing: border-box !important;
+  border: 0 !important;
+  border-radius: var(--et-menu-item-radius) !important;
+  background: transparent !important;
+  color: var(--et-text) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.35 !important;
+  text-align: left !important;
+  text-decoration: none !important;
+  transition:
+    background-color var(--et-motion-fast),
+    color var(--et-motion-fast),
+    box-shadow var(--et-motion-fast);
 }
 
-/* One UI-like icon + label layout inside menu buttons */
-#secondaryToolbar .menuContainer .toolbarButton.labeled::before,
-#secondaryToolbar .menuContainer a.toolbarButton.labeled::before {
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton,
+#outerContainer #secondaryToolbar #viewBookmark,
+#outerContainer #secondaryToolbar #currentOutlineItem {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  aspect-ratio: auto !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton::before,
+#secondaryToolbar .menuContainer a.toolbarButton::before,
+#secondaryToolbar #viewBookmark::before,
+#secondaryToolbar #currentOutlineItem::before {
+  flex: 0 0 var(--icon-size) !important;
   width: var(--icon-size) !important;
   height: var(--icon-size) !important;
-  margin-inline: 2px 8px !important; /* 좌측 여백 추가로 아이콘 잘림 방지 */
+  margin-inline: 0 !important;
+  background-color: var(--et-muted) !important;
+  opacity: 1 !important;
 }
 
-#secondaryToolbar .menuContainer .toolbarButton.labeled > span,
-#secondaryToolbar .menuContainer a.toolbarButton.labeled > span {
-  width: auto !important; /* revert to natural width but prevent overflow via flex */
+#secondaryToolbar .menuContainer .toolbarButton > span,
+#secondaryToolbar .menuContainer a.toolbarButton > span,
+#secondaryToolbar #viewBookmark > span,
+#secondaryToolbar #currentOutlineItem > span {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
   height: auto !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
-  flex: 1 1 auto !important;
-  min-width: 0 !important; /* allow flex shrink for ellipsis */
-  font-size: 13px !important;
-  line-height: 1.25 !important;
-  padding-inline: 0; /* 기본과 동일 유지 */
 }
 
-/* Symmetric horizontal padding for labeled buttons to keep hover bg inside container */
-#secondaryToolbar .menuContainer .toolbarButton.labeled,
-#secondaryToolbar .menuContainer a.toolbarButton.labeled {
-  padding-inline-end: 12px !important;
+/* Final layout repair pass: keep top-bar buttons, menu rows, and drawer headers distinct. */
+#toolbarContainer {
+  height: 56px !important;
+  padding: 0 12px !important;
 }
 
-/* (중복 제거) a.toolbarButton 레이아웃 규칙은 위 공통 블록으로 통합 */
+#toolbarViewer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-height: 56px !important;
+  width: 100% !important;
+}
 
-/* Ensure any wrappers/sections inside the menu take the same width as the background */
-#secondaryToolbar .menuContainer .visibleMediumView,
-#secondaryToolbar .menuContainer #cursorToolButtons,
-#secondaryToolbar .menuContainer #scrollModeButtons,
-#secondaryToolbar .menuContainer #spreadModeButtons {
-  display: block !important;
+#toolbarViewerLeft,
+#toolbarViewerMiddle,
+#toolbarViewerRight {
+  display: flex !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  gap: 8px !important;
+}
+
+#toolbarViewerLeft {
+  justify-self: start !important;
+}
+
+#toolbarViewerMiddle {
+  justify-self: center !important;
+}
+
+#toolbarViewerRight {
+  justify-self: end !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup,
+#toolbarViewerMiddle > .toolbarHorizontalGroup,
+#toolbarViewerLeft > .loadingInput,
+#toolbarViewerMiddle,
+#editorModeButtons {
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  gap: 2px !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+}
+
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+.toolbar button.toolbarButton {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  overflow: visible !important;
+}
+
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+#outerContainer #secondaryToolbar .toolbarButton,
+#viewsManager .viewsManagerButton,
+.editorParamsToolbar button,
+.dialogButtonsGroup button,
+.popupMenu > button,
+#etThemeMenu .et-theme-row > .toolbarButton,
+#documentPropertiesDialog .dialogButtonsGroup button {
+  transition:
+    background-color var(--et-motion-fast),
+    box-shadow var(--et-motion-fast),
+    color var(--et-motion-fast),
+    opacity var(--et-motion-fast) !important;
+}
+
+#toolbarContainer .toolbarButton::before,
+.toolbar button.toolbarButton::before {
+  width: 22px !important;
+  height: 22px !important;
+  margin: 0 !important;
+}
+
+#pageNumber {
+  width: 48px !important;
+  min-width: 48px !important;
+}
+
+#numPages {
+  min-width: max-content !important;
+  padding-inline: 8px !important;
+}
+
+#scaleSelectContainer {
+  width: 210px !important;
+  min-width: 210px !important;
+  height: 40px !important;
+}
+
+#scaleSelectContainer select#scaleSelect {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton,
+#outerContainer #secondaryToolbar #viewBookmark,
+#outerContainer #secondaryToolbar #currentOutlineItem {
+  display: grid !important;
+  grid-template-columns: 32px minmax(0, 1fr) !important;
+  column-gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  padding: 0 12px !important;
+  aspect-ratio: auto !important;
+  overflow: visible !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton::before,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton::before,
+#outerContainer #secondaryToolbar #viewBookmark::before,
+#outerContainer #secondaryToolbar #currentOutlineItem::before {
+  width: 28px !important;
+  height: 28px !important;
+  grid-column: 1 !important;
+  justify-self: center !important;
+  align-self: center !important;
+  overflow: visible !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton > span,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton > span,
+#outerContainer #secondaryToolbar #viewBookmark > span,
+#outerContainer #secondaryToolbar #currentOutlineItem > span {
+  grid-column: 2 !important;
+  align-self: center !important;
+}
+
+#viewsManager #viewsManagerHeader,
+#editorCommentsSidebar #editorCommentsSidebarHeader {
+  overflow: hidden !important;
+}
+
+#viewsManagerTitle {
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
+  grid-template-columns: 40px 18px minmax(0, 1fr) 40px 40px !important;
+  gap: 6px !important;
 }
 
-/* Normalize the "현재 페이지"-related items (e.g., viewBookmark/current item) to match others */
-#secondaryToolbar #viewBookmark,
-#secondaryToolbar #currentOutlineItem {
-  /* 상단 공통 블록에서 이미 레이아웃 규칙을 지정했으므로 여기선 차별 요소만 */
-  min-height: var(--menu-item-height) !important;
-  padding: 8px 12px !important;
-  text-decoration: none !important;
-  border: none !important;
-  border-radius: 0 !important;
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  overflow: visible !important;
 }
 
-#secondaryToolbar #viewBookmark::before,
-#secondaryToolbar #currentOutlineItem::before {
-  width: var(--icon-size) !important;
-  height: var(--icon-size) !important;
-  margin-inline-end: 8px !important;
+/* Final Material document-properties pass. */
+#documentPropertiesDialog[open],
+#documentPropertiesDialog {
+  width: min(720px, calc(100vw - 40px)) !important;
+  max-width: min(720px, calc(100vw - 40px)) !important;
+  max-height: min(760px, calc(100vh - 40px)) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  border-spacing: 0 !important;
+  overflow: auto !important;
+  background: var(--et-surface) !important;
+  box-shadow: 0 24px 56px rgba(60, 64, 67, 0.24), 0 8px 16px rgba(60, 64, 67, 0.16) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  color: var(--et-text) !important;
 }
 
-#secondaryToolbar #viewBookmark > span,
-#secondaryToolbar #currentOutlineItem > span {
+#documentPropertiesDialog > .et-document-properties-header {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  min-height: 72px !important;
+  margin: 0 !important;
+  padding: 0 28px !important;
+  box-sizing: border-box !important;
+  border-bottom: 1px solid var(--et-outline-variant) !important;
+  background: linear-gradient(180deg, var(--et-surface-container-low), var(--et-surface)) !important;
+  color: var(--et-text) !important;
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+#documentPropertiesDialog > .et-document-properties-header > span {
+  display: inline !important;
+  width: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+#documentPropertiesDialog > .et-document-properties-header::before {
+  content: "";
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  margin-inline-end: 14px;
+  border-radius: 8px;
+  background: var(--et-primary-container);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 18%, transparent);
+}
+
+#documentPropertiesDialog > .et-document-properties-header::after {
+  content: "";
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  inset-block-start: 26px;
+  inset-inline-start: 38px;
+  background: var(--et-primary);
+  -webkit-mask: url(images/secondaryToolbarButton-documentProperties.svg) center / contain no-repeat;
+  mask: url(images/secondaryToolbarButton-documentProperties.svg) center / contain no-repeat;
+}
+
+#documentPropertiesDialog > .row {
+  display: grid !important;
+  grid-template-columns: minmax(136px, 0.36fr) minmax(0, 1fr) !important;
+  gap: 18px !important;
+  align-items: start !important;
+  margin: 0 20px !important;
+  padding: 10px 8px !important;
+  border-radius: 8px !important;
+  box-sizing: border-box !important;
+}
+
+#documentPropertiesDialog > .row:first-of-type {
+  margin-top: 16px !important;
+}
+
+#documentPropertiesDialog > .row:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#documentPropertiesDialog > .row > * {
+  display: block !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  text-align: start !important;
+}
+
+#documentPropertiesDialog > .row > span {
+  color: var(--et-muted) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.45 !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+}
+
+#documentPropertiesDialog > .row > p {
+  margin: 0 !important;
+  color: var(--et-text) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+  overflow-wrap: anywhere !important;
+  word-break: keep-all !important;
+}
+
+#documentPropertiesDialog > .separator {
+  display: block !important;
+  height: 1px !important;
+  width: auto !important;
+  margin: 8px 28px !important;
+  border: 0 !important;
+  background: var(--et-outline-variant) !important;
+}
+
+#documentPropertiesDialog > .buttonRow {
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 1 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  min-height: 64px !important;
+  margin: 8px 0 0 !important;
+  padding: 12px 24px 20px !important;
+  border-top: 1px solid var(--et-outline-variant) !important;
+  background: var(--et-surface-container-low) !important;
+}
+
+/* Material document properties dialog */
+#documentPropertiesDialog {
+  width: min(720px, calc(100vw - 40px)) !important;
+  max-width: min(720px, calc(100vw - 40px)) !important;
+  max-height: min(760px, calc(100vh - 40px)) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  background:
+    linear-gradient(180deg, var(--et-surface-container-low), var(--et-surface) 136px),
+    var(--et-surface) !important;
+  box-shadow: 0 24px 56px rgba(60, 64, 67, 0.24), 0 8px 16px rgba(60, 64, 67, 0.16) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  color: var(--et-text) !important;
+}
+
+#documentPropertiesDialog::backdrop {
+  background: color-mix(in srgb, #000000 38%, transparent) !important;
+  backdrop-filter: blur(1px);
+}
+
+#documentPropertiesDialog .et-document-properties-header {
+  display: flex !important;
+  align-items: center !important;
+  min-height: 72px !important;
+  padding: 0 28px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 76%, transparent) !important;
+  color: var(--et-text) !important;
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+#documentPropertiesDialog .et-document-properties-header::before {
+  content: "";
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  margin-inline-end: 14px;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--et-primary) 15%, transparent), transparent),
+    var(--et-primary-container);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 18%, transparent);
+}
+
+#documentPropertiesDialog .et-document-properties-header::after {
+  content: "";
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  inset-block-start: 26px;
+  inset-inline-start: 38px;
+  background: var(--et-primary);
+  -webkit-mask: url(images/secondaryToolbarButton-documentProperties.svg) center / contain no-repeat;
+  mask: url(images/secondaryToolbarButton-documentProperties.svg) center / contain no-repeat;
+}
+
+#documentPropertiesDialog .row {
+  display: grid !important;
+  grid-template-columns: minmax(136px, 0.36fr) minmax(0, 1fr) !important;
+  gap: 18px !important;
+  align-items: start !important;
+  margin: 0 20px !important;
+  padding: 10px 8px !important;
+  border-radius: 8px !important;
+  line-height: 1.42 !important;
+  transition: background-color var(--et-motion-fast), color var(--et-motion-fast);
+}
+
+#documentPropertiesDialog .row:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#documentPropertiesDialog .row > span:first-child {
+  min-width: 0 !important;
+  color: var(--et-muted) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.45 !important;
+  white-space: nowrap !important;
+}
+
+#documentPropertiesDialog .row > span:first-child::after {
+  content: "";
+}
+
+#documentPropertiesDialog .row > p {
+  min-width: 0 !important;
+  margin: 0 !important;
+  color: var(--et-text) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+  overflow-wrap: anywhere !important;
+  word-break: keep-all !important;
+}
+
+#documentPropertiesDialog .separator {
+  height: 1px !important;
+  margin: 8px 28px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+}
+
+#documentPropertiesDialog .buttonRow {
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  min-height: 64px !important;
+  margin: 6px 0 0 !important;
+  padding: 12px 24px 20px !important;
+  border-top: 1px solid color-mix(in srgb, var(--et-outline-variant) 76%, transparent) !important;
+  background: color-mix(in srgb, var(--et-surface) 86%, var(--et-surface-container-low)) !important;
+}
+
+#documentPropertiesDialog .dialogButton,
+#documentPropertiesClose {
+  min-width: 80px !important;
+  height: 40px !important;
+  padding: 0 20px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--et-primary) !important;
+  color: var(--et-on-primary) !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  box-shadow: none !important;
+}
+
+#documentPropertiesDialog .dialogButton:hover,
+#documentPropertiesClose:hover {
+  background: var(--et-primary-hover) !important;
+}
+
+#documentPropertiesDialog .dialogButton > span,
+#documentPropertiesClose > span {
+  display: inline !important;
+  width: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+@media (max-width: 560px) {
+  #documentPropertiesDialog {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  #documentPropertiesDialog .et-document-properties-header {
+    padding-inline: 20px !important;
+  }
+
+  #documentPropertiesDialog .et-document-properties-header::after {
+    inset-inline-start: 30px;
+  }
+
+  #documentPropertiesDialog .row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px !important;
+    margin-inline: 12px !important;
+  }
+
+  #documentPropertiesDialog .row > span:first-child {
+    white-space: normal !important;
+  }
+}
+
+#secondaryToolbar .menuContainer .toolbarButton.labeled,
+#secondaryToolbar .menuContainer a.toolbarButton.labeled,
+#secondaryToolbar .menuContainer .toolbarButton[role="radio"] {
+  display: flex !important;
+  flex-direction: row !important;
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  min-width: 100% !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton > span,
+#secondaryToolbar .menuContainer a.toolbarButton > span {
+  display: block !important;
   flex: 1 1 auto !important;
   min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
-  font-size: 13px !important;
-  line-height: 1.25 !important;
+  word-break: keep-all !important;
 }
 
-/* Hover state unify for anchors too */
-#secondaryToolbar .menuContainer a.toolbarButton:hover,
 #secondaryToolbar .menuContainer .toolbarButton:hover,
+#secondaryToolbar .menuContainer a.toolbarButton:hover,
 #secondaryToolbar #viewBookmark:hover,
 #secondaryToolbar #currentOutlineItem:hover {
-  background-color: var(--menuitem-hover-bg-color) !important;
-  border-radius: var(--et-radius) !important;
-  background-clip: padding-box !important; /* clip to own padding box */
+  background: var(--et-state-hover) !important;
 }
 
-/* Add spacing after the "Open file" item to mimic a transparent separator below it */
-#secondaryToolbar #secondaryOpenFile {
-  margin-bottom: 4px !important;
+#secondaryToolbar .menuContainer .toolbarButton:active,
+#secondaryToolbar .menuContainer a.toolbarButton:active,
+#secondaryToolbar #viewBookmark:active,
+#secondaryToolbar #currentOutlineItem:active {
+  background: var(--et-state-pressed) !important;
 }
 
-html[data-theme] #secondaryToolbar .menuContainer .toolbarButton:hover,
-html[data-theme] .menuContainer button:hover,
-#secondaryToolbar #viewBookmark:hover,
-#secondaryToolbar #currentOutlineItem:hover {
-  background-color: rgba(127, 127, 127, 0.08) !important; /* subtler hover */
+#secondaryToolbar .menuContainer .toolbarButton.toggled,
+#secondaryToolbar .menuContainer .toolbarButton[aria-checked="true"],
+#secondaryToolbar .menuContainer .toolbarButton[aria-pressed="true"],
+#secondaryToolbar .menuContainer a.toolbarButton.toggled {
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
 }
 
-/* Hide stray separators at menu edges so they don't reappear when no scroll is needed */
-#secondaryToolbar .menuContainer .horizontalToolbarSeparator:first-of-type,
-#secondaryToolbar .menuContainer .horizontalToolbarSeparator:last-of-type {
-  height: 0 !important;
-  background: transparent !important;
-  margin: 0 !important;
-  display: none !important;
+#secondaryToolbar .menuContainer .toolbarButton.toggled::before,
+#secondaryToolbar .menuContainer .toolbarButton[aria-checked="true"]::before,
+#secondaryToolbar .menuContainer .toolbarButton[aria-pressed="true"]::before {
+  background-color: var(--et-primary) !important;
 }
 
-/* When menu doesn't need scrolling, keep group spacing but hide separator line */
-#secondaryToolbar .menuContainer.no-scroll .horizontalToolbarSeparator {
-  display: block !important;
-  height: 0 !important; /* no visible line */
-  margin: 4px auto !important; /* match spacing with scroll state */
-  background: transparent !important;
-  border: none !important;
+#secondaryToolbar .menuContainer .toolbarButton:disabled,
+#secondaryToolbar .menuContainer .toolbarButton[disabled],
+#secondaryToolbar .menuContainer a.toolbarButton[disabled] {
+  color: var(--et-muted) !important;
+  opacity: 0.42 !important;
 }
 
-/* Ensure bottom spacing is consistent regardless of scroll presence */
+#secondaryToolbar .menuContainer .horizontalToolbarSeparator,
+#secondaryToolbar .menuContainer.no-scroll .horizontalToolbarSeparator,
 #secondaryToolbar .menuContainer .horizontalToolbarSeparator:last-of-type {
   display: block !important;
-  height: 0 !important;
-  margin: 4px auto !important;
-  background: transparent !important;
-  border: none !important;
+  width: auto !important;
+  height: 1px !important;
+  margin: 6px 4px !important;
+  border: 0 !important;
+  background: var(--et-outline-variant) !important;
 }
 
-/* Separators and outlines */
-html[data-theme] .verticalToolbarSeparator,
-html[data-theme] .horizontalToolbarSeparator,
-html[data-theme] #secondaryToolbar .horizontalToolbarSeparator {
-  background: var(--separator-color) !important;
-}
-
-/* Inputs inside dialogs/menus */
-html[data-theme] .toolbarField,
-html[data-theme] input[type="number"],
-html[data-theme] input[type="text"],
-html[data-theme] textarea,
-html[data-theme] select {
-  background: var(--textarea-bg-color) !important;
-  border: 1px solid var(--et-border) !important;
-  color: var(--et-text) !important;
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding)) !important;
+#secondaryToolbar .menuContainer #cursorToolButtons,
+#secondaryToolbar .menuContainer #scrollModeButtons,
+#secondaryToolbar .menuContainer #spreadModeButtons {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 2px !important;
+  width: 100% !important;
+  max-width: 100% !important;
   box-sizing: border-box !important;
 }
 
-/* Doorhanger arrow should match bg */
-html[data-theme] .doorHangerRight::after,
-html[data-theme] .doorHanger::after {
-  border-bottom-color: var(--doorhanger-bg-color) !important;
-}
-
-/* Findbar fine-tune */
-html[data-theme] #findbar .toolbarButton,
-html[data-theme] #findbar .toggle-button,
-html[data-theme] #findbar label,
-html[data-theme] #findbar span,
-html[data-theme] #findbar input {
-  color: var(--et-text) !important;
-}
-
-/* Center scale select: unify curvature and prevent overflow */
-#scaleSelectContainer {
-  border: 1px solid var(--et-border) !important;
-  border-radius: var(--et-radius) !important;
-  overflow: hidden !important;
+#secondaryToolbar .menuContainer .et-group-first,
+#secondaryToolbar .menuContainer .et-group-mid,
+#secondaryToolbar .menuContainer .et-group-last {
+  border: 0 !important;
+  border-radius: var(--et-menu-item-radius) !important;
   background: transparent !important;
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
-  display: inline-flex;
-  align-items: center;
-  box-sizing: border-box;
 }
 
-#scaleSelectContainer select#scaleSelect {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent !important;
-  color: var(--et-text) !important;
-  border: none !important;
-  outline: none !important;
-  padding: 6px 28px 6px 10px !important;
-  height: 100% !important;
-}
-
-#scaleSelectContainer select#scaleSelect option {
-  background: var(--et-elev);
-  color: var(--et-text);
-}
-
-/* Ensure zoom buttons and select align visually */
-#toolbarViewerMiddle .toolbarHorizontalGroup > .toolbarButton,
-#toolbarViewerMiddle #scaleSelectContainer {
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
-}
-
-/* Center masked SVG icons vertically in toolbar buttons */
-#outerContainer .toolbar .toolbarButton,
-#outerContainer #secondaryToolbar .toolbarButton {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center;
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
-  box-sizing: border-box;
-  line-height: normal;
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
-  padding-inline: var(--toolbar-button-hpad);
-  min-width: calc(var(--icon-size) + (var(--toolbar-button-hpad) * 2) + 4px);
-  overflow: visible !important; /* 마스크 아이콘이 컨테이너를 넘어가도 잘리지 않도록 */
-}
-
-/* Ensure theme toggle inherits the same font-size and vertical metrics as other buttons */
-#etThemeToggle span { line-height: 1; font-size: inherit; }
-
-#outerContainer .toolbar .toolbarButton::before,
-#outerContainer #secondaryToolbar .toolbarButton::before {
-  vertical-align: middle !important;
-  display: inline-block !important;
-  width: var(--icon-size) !important;
-  height: var(--icon-size) !important;
-  margin-inline: 0; /* 기본과 동일 유지, 잘림은 컨테이너 폭/패딩으로 해결 */
-}
-
-/* Ensure all top toolbar controls share identical height/vertical alignment */
-#toolbarContainer .toolbarButton,
-#toolbarContainer .toolbarButtonWithContainer > .toolbarButton {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center;
-  height: calc(var(--toolbar-height) - 2 * var(--toolbar-vertical-padding));
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
-  box-sizing: border-box;
-  padding-inline: var(--toolbar-button-hpad);
-  min-width: calc(var(--icon-size) + (var(--toolbar-button-hpad) * 2) + 4px);
-  overflow: visible !important;
-}
-
-/* Restore native switch sizing/flow inside menus (avoid icon-size forcing) */
 #secondaryToolbar .toggle-button,
 #toolbarContainer .toggle-button {
   display: inline-block !important;
@@ -787,6 +1216,355 @@ html[data-theme] #findbar input {
   vertical-align: middle !important;
 }
 
+/* Theme menu */
+#etTheme {
+  display: inline-block;
+  position: relative;
+  vertical-align: middle;
+}
+
+#etTheme .menu {
+  position: absolute;
+  right: 0;
+}
+
+#etThemeToggle {
+  gap: 6px;
+  color: var(--et-text);
+}
+
+#etThemeToggle.toggled {
+  border-color: var(--et-primary) !important;
+}
+
+#etThemeToggle::before,
+#etThemeMenu .toolbarButton::before {
+  content: none !important;
+  display: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  background: none !important;
+}
+
+#etThemeToggle .icon-sun,
+#etThemeToggle .icon-moon,
+#etThemeToggle > span,
+#etThemeMenu .toolbarButton > span {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+html[data-theme="dark"] #etThemeToggle .icon-sun {
+  display: none !important;
+}
+
+html[data-theme="dark"] #etThemeToggle .icon-moon {
+  display: inline-flex !important;
+}
+
+html[data-theme="light"] #etThemeToggle .icon-sun {
+  display: inline-flex !important;
+}
+
+html[data-theme="light"] #etThemeToggle .icon-moon {
+  display: none !important;
+}
+
+#etThemeToggle svg,
+#etThemeMenu svg {
+  width: var(--icon-size) !important;
+  height: var(--icon-size) !important;
+  display: block;
+}
+
+#etThemeMenu.menu {
+  width: 172px;
+  min-width: 172px;
+  background: var(--et-surface) !important;
+  border: 1px solid var(--et-outline-variant) !important;
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow) !important;
+  overflow: hidden;
+}
+
+#etThemeMenu .menuContainer {
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 8px !important;
+  text-align: left !important;
+}
+
+#etThemeMenu .menuSectionLabel {
+  margin: 4px 6px 6px !important;
+  color: var(--et-muted) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+}
+
+#etThemeMenu .et-theme-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+
+#etThemeMenu .horizontalToolbarSeparator {
+  height: 1px !important;
+  margin: 4px 0 8px !important;
+  background: var(--et-outline-variant) !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton {
+  display: inline-flex !important;
+  flex: 0 0 auto;
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: var(--et-menu-item-radius) !important;
+  background: var(--et-surface-container) !important;
+  color: var(--et-text) !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton.toggled {
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+  outline: 2px solid var(--et-focus-ring) !important;
+  outline-offset: -2px !important;
+}
+
+/* PDF.js 5.7 panels */
+#viewsManager,
+#editorCommentsSidebar {
+  background: var(--et-surface) !important;
+  border-color: var(--et-outline-variant) !important;
+  color: var(--et-text) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+#viewsManager {
+  border-right: 1px solid var(--et-outline-variant) !important;
+}
+
+#viewsManager #viewsManagerHeader,
+#editorCommentsSidebar #editorCommentsSidebarHeader {
+  background: var(--et-surface-container) !important;
+  border-bottom: 1px solid var(--et-outline-variant) !important;
+  color: var(--et-text) !important;
+  min-height: 48px !important;
+  padding-inline: 12px !important;
+}
+
+#viewsManagerContent,
+#editorCommentsSidebarListContainer {
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+}
+
+#viewsManager #viewsManagerSelectorButton,
+#viewsManager #viewsManagerCurrentOutlineButton,
+#viewsManager #viewsManagerAddFileButton,
+#viewsManager #viewsManagerStatusAction button,
+#viewsManager #viewsManagerStatusUndo button,
+#editorCommentsSidebar button {
+  border-radius: var(--et-radius) !important;
+  color: var(--et-text) !important;
+}
+
+#viewsManager #viewsManagerSelectorButton:hover,
+#viewsManager #viewsManagerCurrentOutlineButton:hover,
+#viewsManager #viewsManagerAddFileButton:hover,
+#viewsManager #viewsManagerStatusAction button:hover,
+#viewsManager #viewsManagerStatusUndo button:hover,
+#editorCommentsSidebar button:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#viewsManagerStatus,
+#viewsManagerStatusAction,
+#viewsManagerStatusUndo,
+#viewsManagerWaiting {
+  background: var(--et-surface-container) !important;
+  border-top: 1px solid var(--et-outline-variant) !important;
+  color: var(--et-text) !important;
+}
+
+#viewsManagerStatusActionLabel,
+#viewsManagerStatusUndoLabel,
+#viewsManagerWaitingLabel,
+#editorCommentsSidebarCount,
+#editorCommentsSidebarTitle,
+#viewsManagerHeaderLabel {
+  color: var(--et-text) !important;
+  letter-spacing: 0 !important;
+}
+
+#thumbnailsView {
+  padding: 12px !important;
+}
+
+#thumbnailsView .thumbnail {
+  border-radius: var(--et-radius) !important;
+}
+
+#thumbnailsView .thumbnailImageContainer,
+#thumbnailsView .thumbnailSelectionRing,
+#thumbnailsView .thumbnailImage {
+  border-radius: var(--et-radius) !important;
+}
+
+#thumbnailsView .thumbnailImageContainer {
+  background: var(--et-surface-container) !important;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.18) !important;
+}
+
+#thumbnailsView .thumbnail:hover .thumbnailImageContainer {
+  background: var(--et-state-hover) !important;
+}
+
+#thumbnailsView .thumbnail.selected .thumbnailSelectionRing,
+#thumbnailsView .thumbnail[aria-selected="true"] .thumbnailSelectionRing {
+  outline: 2px solid var(--et-primary) !important;
+  outline-offset: 2px !important;
+}
+
+#thumbnailsView .thumbnailPageNumber,
+#thumbnailsView .pageNumber {
+  color: var(--et-muted) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+}
+
+#viewsManager .dragMarker {
+  background: var(--et-primary) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 0 0 3px var(--et-focus-ring) !important;
+}
+
+#editorCommentsSidebar .sidebarComment:not(.noComments):hover {
+  background: var(--et-state-hover) !important;
+}
+
+#editorCommentsSidebar .sidebarComment,
+.commentPopup {
+  border: 1px solid var(--et-outline-variant) !important;
+  border-radius: var(--et-radius) !important;
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+.commentPopup textarea,
+#editorCommentsSidebar textarea {
+  min-height: 96px !important;
+  padding: 10px 12px !important;
+  line-height: 1.45 !important;
+}
+
+/* Findbar and dialogs */
+#findbar .toolbarButton,
+#findbar .toggle-button,
+#findbar label,
+#findbar span,
+#findbar input {
+  color: var(--et-text) !important;
+}
+
+#findbar {
+  border: 1px solid var(--et-outline-variant) !important;
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+#findInput {
+  min-width: 220px !important;
+  padding-inline: 12px !important;
+}
+
+#dialogContainer dialog::backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+#dialogContainer dialog,
+.dialog {
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+#dialogContainer dialog h2,
+#dialogContainer dialog h3,
+#dialogContainer dialog label,
+#dialogContainer dialog p,
+#dialogContainer dialog span {
+  color: var(--et-text) !important;
+  letter-spacing: 0 !important;
+}
+
+#dialogContainer .dialogButtonsGroup {
+  gap: 8px !important;
+}
+
+#dialogContainer input[type="checkbox"],
+#dialogContainer input[type="radio"] {
+  accent-color: var(--et-primary);
+}
+
+#passwordOverlay .container,
+#printServiceDialog,
+#documentPropertiesDialog,
+#altTextSettingsDialog,
+#newAltTextDialog,
+#addSignatureDialog,
+#editSignatureDialog,
+#editCommentDialog {
+  background: var(--et-surface) !important;
+  border: 1px solid var(--et-outline-variant) !important;
+  border-radius: var(--et-radius) !important;
+  color: var(--et-text) !important;
+}
+
+.editorParamsToolbar,
+.editToolbar,
+.colorPicker .dropdown,
+#editorStampParamsToolbar .menuContainer,
+#editorFreeTextParamsToolbar,
+#editorInkParamsToolbar,
+#editorHighlightParamsToolbar,
+#editorSignatureParamsToolbar,
+#editorCommentParamsToolbar {
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+.editorParamsToolbar input[type="range"],
+#dialogContainer input[type="range"] {
+  accent-color: var(--et-primary);
+}
+
+.editorParamsToolbar .dropdown button,
+.colorPicker .dropdown button,
+.editToolbar button {
+  border-radius: var(--et-menu-item-radius) !important;
+}
+
+.editorParamsToolbar .dropdown button:hover,
+.colorPicker .dropdown button:hover,
+.editToolbar button:hover {
+  background: var(--et-state-hover) !important;
+}
+
+/* EdgeTranslate close button */
 #edgeTranslateClosePdfReaderButton::before {
   content: "×";
   mask-image: none !important;
@@ -809,3 +1587,3250 @@ html[data-theme] #findbar input {
   border: 0;
 }
 
+/* Material 3 full-surface pass */
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  letter-spacing: 0 !important;
+}
+
+body {
+  background:
+    linear-gradient(180deg, var(--et-surface-container-low) 0, var(--et-bg) 148px),
+    var(--et-bg) !important;
+}
+
+#outerContainer {
+  background: transparent !important;
+}
+
+#toolbarContainer {
+  height: var(--toolbar-height) !important;
+  padding: 0 10px !important;
+  background: color-mix(in srgb, var(--et-surface) 94%, var(--et-primary-container)) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 78%, transparent) !important;
+  box-shadow: var(--et-shadow-low) !important;
+}
+
+#toolbarViewer {
+  min-height: var(--toolbar-height) !important;
+  padding-inline: 0 !important;
+  gap: 10px !important;
+}
+
+#toolbarViewerLeft,
+#toolbarViewerMiddle,
+#toolbarViewerRight,
+#editorModeButtons,
+.toolbarHorizontalGroup {
+  align-items: center !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup,
+#toolbarViewerMiddle > .toolbarHorizontalGroup,
+#toolbarViewerLeft > .loadingInput,
+#toolbarViewerMiddle,
+#editorModeButtons {
+  min-height: 40px !important;
+  padding: 2px !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 70%, transparent);
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous),
+#toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton),
+#editorModeButtons {
+  gap: 0 !important;
+}
+
+.toolbar button.toolbarButton,
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+#outerContainer #secondaryToolbar .toolbarButton,
+#findbar .toolbarButton,
+#viewsManager .viewsManagerButton,
+#editorCommentsSidebar button,
+.editorParamsToolbar button,
+.dialogButtonsGroup button {
+  position: relative;
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--et-muted) !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+.toolbar button.toolbarButton:hover,
+#toolbarContainer .toolbarButton:hover,
+#findbar .toolbarButton:hover,
+#viewsManager .viewsManagerButton:hover,
+#editorCommentsSidebar button:hover,
+.editorParamsToolbar button:hover,
+.dialogButtonsGroup button:hover {
+  background: var(--et-state-hover) !important;
+  color: var(--et-primary) !important;
+}
+
+.toolbar button.toolbarButton:active,
+#toolbarContainer .toolbarButton:active,
+#findbar .toolbarButton:active,
+#viewsManager .viewsManagerButton:active,
+#editorCommentsSidebar button:active,
+.editorParamsToolbar button:active,
+.dialogButtonsGroup button:active {
+  background: var(--et-state-pressed) !important;
+  color: var(--et-primary) !important;
+}
+
+.toolbarButton.toggled,
+.toolbarButton[aria-pressed="true"],
+.toolbarButton[aria-expanded="true"],
+#editorModeButtons .toolbarButton.toggled,
+#editorModeButtons .toolbarButton[aria-pressed="true"] {
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+}
+
+.toolbarButton:disabled,
+.toolbarButton[disabled],
+#viewsManager .viewsManagerButton:disabled,
+.editorParamsToolbar button:disabled {
+  color: color-mix(in srgb, var(--et-muted) 58%, transparent) !important;
+  opacity: 1 !important;
+}
+
+#outerContainer .toolbar .toolbarButton::before,
+#outerContainer #secondaryToolbar .toolbarButton::before {
+  width: 20px !important;
+  height: 20px !important;
+  background-color: currentColor !important;
+}
+
+.splitToolbarButtonSeparator,
+.verticalToolbarSeparator,
+.horizontalToolbarSeparator {
+  opacity: 0 !important;
+}
+
+#pageNumber {
+  width: 56px !important;
+  height: 40px !important;
+  padding: 0 8px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 18%, transparent) !important;
+}
+
+#numPages {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 999px !important;
+  color: var(--et-muted) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+#scaleSelectContainer {
+  height: 40px !important;
+  min-width: 150px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-high) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 80%, transparent) !important;
+}
+
+#scaleSelectContainer:hover {
+  background: var(--et-surface-container-highest) !important;
+}
+
+#scaleSelectContainer select#scaleSelect {
+  min-width: 148px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--et-text) !important;
+}
+
+#mainContainer,
+#viewerContainer {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--et-surface-container-low) 85%, transparent), transparent 140px),
+    var(--et-bg) !important;
+}
+
+.pdfViewer {
+  padding-block: 18px 32px !important;
+}
+
+.pdfViewer .page {
+  border: 0 !important;
+  border-radius: 3px !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 72%, transparent),
+    0 10px 28px rgba(60, 64, 67, 0.16) !important;
+}
+
+html[data-theme="dark"] .pdfViewer .page {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 82%, transparent),
+    0 14px 34px rgba(0, 0, 0, 0.46) !important;
+}
+
+#loadingBar,
+.loadingBar {
+  height: 4px !important;
+  inset-inline: 0 !important;
+  border-radius: 0 !important;
+  background: var(--et-primary-container) !important;
+}
+
+#loadingBar .progress,
+.loadingBar .progress {
+  border-radius: 0 999px 999px 0 !important;
+  background: linear-gradient(90deg, var(--et-primary), color-mix(in srgb, var(--et-primary) 60%, var(--et-secondary))) !important;
+}
+
+.doorHanger,
+.doorHangerRight,
+.popupMenu,
+#secondaryToolbar .menuContainer,
+#etThemeMenu.menu,
+#findbar,
+.editorParamsToolbar,
+.editorParamsToolbar .menuContainer,
+.colorPicker .dropdown,
+#dialogContainer dialog {
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-surface) !important;
+  box-shadow: var(--et-shadow) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 72%, transparent) !important;
+}
+
+.doorHanger::before,
+.doorHanger::after,
+.doorHangerRight::before,
+.doorHangerRight::after {
+  display: none !important;
+}
+
+.popupMenu > button,
+#secondaryToolbar .menuContainer .toolbarButton,
+#secondaryToolbar .menuContainer a.toolbarButton,
+#secondaryToolbar #viewBookmark,
+#secondaryToolbar #currentOutlineItem,
+#viewsManager .popupMenu > button,
+.editorParamsToolbar .menuContainer button,
+#addSignatureDoorHanger button {
+  width: 100% !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  min-width: 0 !important;
+  justify-content: flex-start !important;
+  padding: 0 12px !important;
+  gap: 12px !important;
+  border-radius: 8px !important;
+  color: var(--et-text) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+
+.popupMenu > button:not(:disabled):hover,
+#secondaryToolbar .menuContainer .toolbarButton:hover,
+#secondaryToolbar .menuContainer a.toolbarButton:hover,
+#secondaryToolbar #viewBookmark:hover,
+#secondaryToolbar #currentOutlineItem:hover,
+#viewsManager .popupMenu > button:not(:disabled):hover,
+.editorParamsToolbar .menuContainer button:hover,
+#addSignatureDoorHanger button:hover {
+  background: var(--et-state-hover) !important;
+  color: var(--et-primary) !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton.toggled,
+#secondaryToolbar .menuContainer .toolbarButton[aria-checked="true"],
+#secondaryToolbar .menuContainer .toolbarButton[aria-pressed="true"],
+#secondaryToolbar .menuContainer a.toolbarButton.toggled,
+.popupMenu > button[aria-selected="true"],
+.popupMenu > button[aria-checked="true"] {
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+}
+
+#secondaryToolbar .menuContainer .horizontalToolbarSeparator,
+.popupMenu .horizontalToolbarSeparator,
+#etThemeMenu .horizontalToolbarSeparator {
+  opacity: 1 !important;
+  margin: 8px 4px !important;
+  background: var(--et-outline-variant) !important;
+}
+
+#etThemeMenu.menu {
+  width: 208px !important;
+  min-width: 208px !important;
+  padding: 4px !important;
+}
+
+#etThemeMenu .menuSectionLabel {
+  margin: 8px 10px 6px !important;
+  color: var(--et-muted) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase;
+}
+
+#etThemeMenu .et-theme-row {
+  gap: 6px !important;
+  padding: 4px 4px 8px !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  height: 42px !important;
+  min-width: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton.toggled {
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+  outline: 0 !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--et-primary) 35%, transparent) !important;
+}
+
+#viewsManager,
+#editorCommentsSidebar {
+  background: var(--et-surface) !important;
+  border: 0 !important;
+  border-radius: 0 8px 8px 0 !important;
+  box-shadow: var(--et-shadow) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 70%, transparent) !important;
+}
+
+#viewsManager #viewsManagerHeader,
+#editorCommentsSidebar #editorCommentsSidebarHeader {
+  min-height: 64px !important;
+  padding: 10px 12px !important;
+  background: var(--et-surface-container-low) !important;
+  border-bottom: 1px solid var(--et-outline-variant) !important;
+}
+
+#viewsManagerTitle,
+#editorCommentsSidebarHeader {
+  gap: 8px !important;
+}
+
+#viewsManagerTitle {
+  display: grid !important;
+  grid-template-columns: 40px minmax(0, 1fr) 40px 40px !important;
+  align-items: center !important;
+}
+
+#viewsManagerHeaderLabel,
+#editorCommentsSidebarTitle {
+  min-width: 0 !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  color: var(--et-text) !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton,
+#editorCommentsSidebarCloseButton {
+  background: var(--et-surface-container) !important;
+}
+
+#viewsManagerContent,
+#editorCommentsSidebarListContainer {
+  background: var(--et-surface) !important;
+}
+
+#viewsManagerResizer,
+#editorCommentsSidebarResizer {
+  background: transparent !important;
+}
+
+#viewsManagerResizer:hover,
+#editorCommentsSidebarResizer:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#viewsManagerStatus,
+#viewsManagerStatusAction,
+#viewsManagerStatusUndo,
+#viewsManagerStatusWarning,
+#viewsManagerStatusWaiting {
+  background: var(--et-surface-container-low) !important;
+  border-top: 1px solid var(--et-outline-variant) !important;
+}
+
+#viewsManagerStatusActionButton,
+#viewsManagerStatusUndoButton {
+  width: auto !important;
+  min-width: 76px !important;
+  padding-inline: 16px !important;
+  border-radius: 999px !important;
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+  font-weight: 700 !important;
+}
+
+#viewsManagerStatusActionDeselectButton {
+  background: var(--et-primary) !important;
+  color: var(--et-on-primary) !important;
+}
+
+#thumbnailsView {
+  display: grid !important;
+  gap: 14px !important;
+  padding: 16px !important;
+}
+
+#thumbnailsView .thumbnail {
+  padding: 8px !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  transition: background-color var(--et-motion-fast), box-shadow var(--et-motion-fast);
+}
+
+#thumbnailsView .thumbnail:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#thumbnailsView .thumbnail.selected,
+#thumbnailsView .thumbnail[aria-selected="true"] {
+  background: var(--et-primary-container) !important;
+  box-shadow: inset 4px 0 0 var(--et-primary) !important;
+}
+
+#thumbnailsView .thumbnailImageContainer {
+  overflow: hidden !important;
+  border-radius: 6px !important;
+  background: var(--et-surface-container) !important;
+  box-shadow: var(--et-shadow-low) !important;
+}
+
+#thumbnailsView .thumbnailPageNumber,
+#thumbnailsView .pageNumber {
+  margin-top: 8px !important;
+  color: var(--et-muted) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+#outlinesView,
+#attachmentsView,
+#layersView {
+  padding: 12px !important;
+}
+
+#outlinesView .treeItem,
+#attachmentsView .treeItem,
+#layersView .treeItem {
+  min-height: 40px !important;
+  border-radius: 8px !important;
+  color: var(--et-text) !important;
+}
+
+#outlinesView .treeItem:hover,
+#attachmentsView .treeItem:hover,
+#layersView .treeItem:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#findbar {
+  top: calc(var(--toolbar-height) + 8px) !important;
+  padding: 10px !important;
+  gap: 8px !important;
+  border-radius: 8px !important;
+}
+
+#findInput {
+  height: 44px !important;
+  min-width: 260px !important;
+  padding: 0 16px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--et-surface-container-high) !important;
+  font-size: 14px !important;
+}
+
+#findbar .toggleButton {
+  min-height: 34px !important;
+  padding: 0 10px !important;
+  border-radius: 999px !important;
+  background: var(--et-surface-container-low) !important;
+}
+
+#findbar input[type="checkbox"] {
+  accent-color: var(--et-primary);
+}
+
+.commentPopup,
+#editorCommentsSidebar .sidebarComment {
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: var(--et-shadow-low) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 80%, transparent) !important;
+}
+
+.editorParamsToolbar,
+.editToolbar,
+.colorPicker .dropdown {
+  padding: 8px !important;
+  background: var(--et-surface) !important;
+}
+
+.editorParamsLabel {
+  color: var(--et-muted) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.editorParamsSlider,
+input[type="range"] {
+  accent-color: var(--et-primary);
+}
+
+#dialogContainer dialog,
+#passwordOverlay .container,
+#printServiceDialog,
+#documentPropertiesDialog,
+#altTextSettingsDialog,
+#newAltTextDialog,
+#addSignatureDialog,
+#editSignatureDialog,
+#editCommentDialog {
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-surface) !important;
+  box-shadow: var(--et-shadow) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 72%, transparent) !important;
+}
+
+#dialogContainer dialog::backdrop {
+  background: color-mix(in srgb, #000000 34%, transparent) !important;
+}
+
+.dialogButtonsGroup button,
+#dialogContainer .primaryButton,
+#dialogContainer .secondaryButton,
+.primaryButton,
+.secondaryButton {
+  width: auto !important;
+  min-width: 78px !important;
+  height: 40px !important;
+  padding: 0 18px !important;
+  border-radius: 999px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+#dialogContainer .primaryButton,
+.primaryButton {
+  background: var(--et-primary) !important;
+  color: var(--et-on-primary) !important;
+}
+
+#dialogContainer .secondaryButton,
+.secondaryButton {
+  background: var(--et-surface-container-high) !important;
+  color: var(--et-primary) !important;
+}
+
+@media (max-width: 760px) {
+  #toolbarContainer {
+    padding-inline: 6px !important;
+  }
+
+  #toolbarViewer {
+    gap: 6px !important;
+  }
+
+  #scaleSelectContainer {
+    min-width: 112px !important;
+  }
+
+  #scaleSelectContainer select#scaleSelect {
+    min-width: 110px !important;
+    font-size: 12px !important;
+  }
+
+  #findInput {
+    min-width: 180px !important;
+  }
+}
+
+/* Final Material overrides for nested PDF.js menu groups. Keep this last. */
+#secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  #secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 2px !important;
+  }
+}
+
+#secondaryToolbar #secondaryToolbarButtonContainer > #cursorToolButtons,
+#secondaryToolbar #secondaryToolbarButtonContainer > #scrollModeButtons,
+#secondaryToolbar #secondaryToolbarButtonContainer > #spreadModeButtons {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+  gap: 2px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+#secondaryToolbar #secondaryToolbarButtonContainer > #cursorToolButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > #scrollModeButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > #spreadModeButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView > .toolbarButton {
+  display: grid !important;
+  grid-template-columns: 24px minmax(0, 1fr) !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton,
+#secondaryToolbar .menuContainer a.toolbarButton,
+#secondaryToolbar #viewBookmark,
+#secondaryToolbar #currentOutlineItem {
+  display: grid !important;
+  grid-template-columns: 24px minmax(0, 1fr) !important;
+  align-items: center !important;
+  justify-content: stretch !important;
+  column-gap: 12px !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton::before,
+#secondaryToolbar .menuContainer a.toolbarButton::before,
+#secondaryToolbar #viewBookmark::before,
+#secondaryToolbar #currentOutlineItem::before {
+  position: static !important;
+  grid-column: 1 !important;
+  justify-self: center !important;
+  align-self: center !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton > span,
+#secondaryToolbar .menuContainer a.toolbarButton > span,
+#secondaryToolbar #viewBookmark > span,
+#secondaryToolbar #currentOutlineItem > span {
+  position: static !important;
+  grid-column: 2 !important;
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  clip: auto !important;
+  clip-path: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  overflow: hidden !important;
+  text-indent: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Compact Material density pass. Keep this last so the PDF UI stays polished
+   without becoming bulky on wide or dense screens. */
+:root {
+  --toolbar-height: 48px;
+  --toolbar-vertical-padding: 6px;
+  --toolbar-button-hpad: 8px;
+  --icon-size: 18px;
+  --menu-item-height: 36px;
+}
+
+#toolbarContainer {
+  height: 48px !important;
+  min-height: 48px !important;
+  padding: 0 8px !important;
+  box-shadow: none !important;
+}
+
+#toolbarViewer {
+  min-height: 48px !important;
+  gap: 8px !important;
+}
+
+#toolbarViewerLeft,
+#toolbarViewerMiddle,
+#toolbarViewerRight {
+  gap: 6px !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup,
+#toolbarViewerMiddle > .toolbarHorizontalGroup,
+#toolbarViewerLeft > .loadingInput,
+#toolbarViewerMiddle,
+#editorModeButtons {
+  height: 36px !important;
+  min-height: 36px !important;
+  border-radius: 8px !important;
+}
+
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+.toolbar button.toolbarButton {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+
+#toolbarContainer .toolbarButton::before,
+.toolbar button.toolbarButton::before {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+#pageNumber {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 36px !important;
+  font-size: 14px !important;
+}
+
+#numPages {
+  min-height: 28px !important;
+  padding-inline: 6px !important;
+  font-size: 12px !important;
+}
+
+#scaleSelectContainer {
+  width: 180px !important;
+  min-width: 180px !important;
+  height: 36px !important;
+}
+
+#scaleSelectContainer select#scaleSelect {
+  min-height: 36px !important;
+  padding-block: 0 !important;
+  font-size: 13px !important;
+}
+
+#findbar {
+  top: calc(var(--toolbar-height) + 6px) !important;
+  padding: 8px !important;
+  gap: 6px !important;
+}
+
+#findInput {
+  height: 38px !important;
+  min-width: 220px !important;
+  padding: 0 12px !important;
+}
+
+#findbar .toolbarButton {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+}
+
+#secondaryToolbar {
+  width: min(308px, calc(100vw - 16px)) !important;
+  min-width: min(308px, calc(100vw - 16px)) !important;
+}
+
+#secondaryToolbar .menuContainer {
+  padding: 8px !important;
+  max-height: min(560px, calc(100vh - var(--toolbar-height) - 16px)) !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton,
+#outerContainer #secondaryToolbar #viewBookmark,
+#outerContainer #secondaryToolbar #currentOutlineItem,
+#secondaryToolbar #secondaryToolbarButtonContainer > #cursorToolButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > #scrollModeButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > #spreadModeButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView > .toolbarButton {
+  grid-template-columns: 28px minmax(0, 1fr) !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  padding: 0 10px !important;
+  column-gap: 10px !important;
+  border-radius: 8px !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton::before,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton::before,
+#outerContainer #secondaryToolbar #viewBookmark::before,
+#outerContainer #secondaryToolbar #currentOutlineItem::before {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+#secondaryToolbar .menuContainer .horizontalToolbarSeparator,
+#secondaryToolbar .menuContainer.no-scroll .horizontalToolbarSeparator {
+  margin: 5px 4px !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  min-height: 54px !important;
+  padding: 8px 10px !important;
+}
+
+#viewsManagerTitle {
+  grid-template-columns: 36px 16px minmax(0, 1fr) 36px 36px !important;
+  column-gap: 6px !important;
+}
+
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+}
+
+#viewsManagerHeaderLabel {
+  font-size: 15px !important;
+}
+
+#thumbnailsView {
+  gap: 10px !important;
+  padding: 12px !important;
+}
+
+#thumbnailsView .thumbnail {
+  padding: 6px !important;
+}
+
+#documentPropertiesDialog {
+  max-width: min(720px, calc(100vw - 32px)) !important;
+}
+
+#documentPropertiesDialog > .et-document-properties-header,
+#documentPropertiesDialog .et-document-properties-header {
+  min-height: 60px !important;
+  padding: 0 22px !important;
+  font-size: 20px !important;
+}
+
+#documentPropertiesDialog > .et-document-properties-header::before,
+#documentPropertiesDialog .et-document-properties-header::before {
+  width: 36px !important;
+  height: 36px !important;
+  flex-basis: 36px !important;
+  margin-inline-end: 12px !important;
+}
+
+#documentPropertiesDialog > .et-document-properties-header::after,
+#documentPropertiesDialog .et-document-properties-header::after {
+  inset-block-start: 21px !important;
+  inset-inline-start: 31px !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+#documentPropertiesDialog > .row,
+#documentPropertiesDialog .row {
+  min-height: 34px !important;
+  margin: 0 18px !important;
+  padding: 8px 6px !important;
+  gap: 14px !important;
+}
+
+#documentPropertiesDialog > .row:first-of-type,
+#documentPropertiesDialog .row:first-of-type {
+  margin-top: 12px !important;
+}
+
+#documentPropertiesDialog > .row > span,
+#documentPropertiesDialog .row > span:first-child {
+  font-size: 13px !important;
+}
+
+#documentPropertiesDialog > .row > p,
+#documentPropertiesDialog .row > p {
+  font-size: 14px !important;
+}
+
+#documentPropertiesDialog > .separator,
+#documentPropertiesDialog .separator {
+  margin: 6px 24px !important;
+}
+
+#documentPropertiesDialog > .buttonRow,
+#documentPropertiesDialog .buttonRow {
+  min-height: 56px !important;
+  padding: 10px 22px 14px !important;
+}
+
+#documentPropertiesDialog .dialogButton,
+#documentPropertiesClose,
+.dialogButtonsGroup button,
+#dialogContainer .primaryButton,
+#dialogContainer .secondaryButton,
+.primaryButton,
+.secondaryButton {
+  min-width: 72px !important;
+  height: 36px !important;
+  padding: 0 16px !important;
+  font-size: 13px !important;
+}
+
+.pdfViewer {
+  padding-block: 12px 24px !important;
+}
+
+@media (max-width: 760px) {
+  #toolbarContainer {
+    padding-inline: 6px !important;
+  }
+
+  #toolbarViewer {
+    gap: 5px !important;
+  }
+
+  #toolbarViewerLeft,
+  #toolbarViewerMiddle,
+  #toolbarViewerRight {
+    gap: 4px !important;
+  }
+
+  #scaleSelectContainer {
+    width: 132px !important;
+    min-width: 132px !important;
+  }
+
+  #findInput {
+    min-width: 170px !important;
+  }
+
+  #documentPropertiesDialog > .row,
+  #documentPropertiesDialog .row {
+    margin-inline: 14px !important;
+  }
+}
+
+/* PDF viewer source reset: compact groups, no protruding focus rings, no merged
+   zoom/select slab. This intentionally overrides the earlier broad Material pass. */
+:root {
+  --toolbar-height: 44px;
+  --et-toolbar-control-size: 32px;
+  --et-toolbar-group-height: 34px;
+}
+
+#toolbarContainer,
+.toolbar {
+  overflow: visible !important;
+}
+
+#toolbarContainer {
+  height: var(--toolbar-height) !important;
+  min-height: var(--toolbar-height) !important;
+  padding: 0 8px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 70%, transparent) !important;
+  background: color-mix(in srgb, var(--et-surface) 97%, var(--et-surface-container-low)) !important;
+}
+
+#toolbarViewer {
+  min-height: var(--toolbar-height) !important;
+  height: var(--toolbar-height) !important;
+  gap: 10px !important;
+  align-items: center !important;
+}
+
+#toolbarViewerLeft,
+#toolbarViewerMiddle,
+#toolbarViewerRight {
+  height: var(--toolbar-height) !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup,
+#toolbarViewerMiddle > .toolbarHorizontalGroup,
+#toolbarViewerLeft > .loadingInput,
+#editorModeButtons {
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 1px !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
+}
+
+#toolbarViewerMiddle {
+  height: var(--toolbar-height) !important;
+  min-height: var(--toolbar-height) !important;
+  padding: 0 !important;
+  gap: 10px !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#toolbarViewerMiddle > .et-zoom-controls {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+.toolbar button.toolbarButton,
+#viewsManager .viewsManagerButton {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: var(--et-toolbar-control-size) !important;
+  min-width: var(--et-toolbar-control-size) !important;
+  height: var(--et-toolbar-control-size) !important;
+  min-height: var(--et-toolbar-control-size) !important;
+  border-radius: 7px !important;
+  line-height: var(--et-toolbar-control-size) !important;
+  overflow: hidden !important;
+}
+
+#toolbarContainer .toolbarButton::before,
+.toolbar button.toolbarButton::before {
+  position: absolute !important;
+  width: 19px !important;
+  height: 19px !important;
+  inset: 50% auto auto 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+#viewsManagerToggleButton::before,
+#secondaryToolbarToggleButton::before {
+  transform: translate(-50%, -50%) scaleX(var(--dir-factor)) !important;
+}
+
+#toolbarContainer .toolbarButton:focus-visible,
+#toolbarContainer .toolbarButton[aria-expanded="true"],
+#toolbarContainer .toolbarButton.toggled,
+#toolbarContainer .toolbarButton[aria-pressed="true"] {
+  outline: 0 !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--et-primary) 44%, transparent) !important;
+}
+
+#toolbarContainer .toolbarButton[aria-expanded="true"],
+#toolbarContainer .toolbarButton.toggled,
+#toolbarContainer .toolbarButton[aria-pressed="true"] {
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+}
+
+.splitToolbarButtonSeparator {
+  width: 1px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  margin: 0 !important;
+  opacity: 1 !important;
+  background: color-mix(in srgb, var(--et-outline-variant) 75%, transparent) !important;
+}
+
+#toolbarViewerLeft > .et-page-controls {
+  gap: 4px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+#pageNumber {
+  width: 42px !important;
+  min-width: 42px !important;
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 6px !important;
+  border-radius: 8px !important;
+  font-size: 14px !important;
+  line-height: var(--et-toolbar-group-height) !important;
+}
+
+#numPages {
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 8px !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
+  font-size: 12px !important;
+  line-height: var(--et-toolbar-group-height) !important;
+}
+
+#scaleSelectContainer {
+  width: 164px !important;
+  min-width: 164px !important;
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  margin-inline-start: 0 !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
+}
+
+#scaleSelectContainer select#scaleSelect {
+  min-width: 162px !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  height: var(--et-toolbar-group-height) !important;
+  padding: 0 30px 0 12px !important;
+  font-size: 13px !important;
+  line-height: var(--et-toolbar-group-height) !important;
+}
+
+#viewsManager {
+  --viewsManager-width: 300px;
+  --sidebar-width: 300px;
+  position: fixed !important;
+  inset-block-start: var(--toolbar-height) !important;
+  inset-inline-start: 0 !important;
+  width: 300px !important;
+  max-width: min(300px, calc(100vw - 24px)) !important;
+  height: calc(100vh - var(--toolbar-height)) !important;
+  padding-bottom: 0 !important;
+  border-radius: 0 8px 0 0 !important;
+  box-shadow: 0 8px 20px rgba(60, 64, 67, 0.16) !important;
+  transform: translateX(-104%) !important;
+  transition: transform var(--et-motion-emphasized) !important;
+}
+
+#outerContainer.viewsManagerOpen #viewsManager,
+#outerContainer.viewsManagerMoving #viewsManager {
+  transform: translateX(0) !important;
+}
+
+#outerContainer.viewsManagerOpen #viewerContainer:not(.pdfPresentationMode) {
+  inset-inline-start: 300px !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  min-height: 48px !important;
+  height: 48px !important;
+  padding: 6px 10px !important;
+  border-radius: 0 !important;
+  background: var(--et-surface-container-low) !important;
+}
+
+#viewsManagerTitle {
+  width: 100% !important;
+  height: 36px !important;
+  display: grid !important;
+  grid-template-columns: 32px 14px minmax(0, 1fr) 32px 32px !important;
+  align-items: center !important;
+  column-gap: 6px !important;
+  padding: 0 !important;
+}
+
+#viewsManagerTitle::after {
+  display: none !important;
+}
+
+#viewsManagerSelector {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  border-radius: 7px !important;
+}
+
+#viewsManagerSelectorButton::before,
+#viewsManagerAddFileButton::before,
+#viewsManagerCurrentOutlineButton::before {
+  width: 19px !important;
+  height: 19px !important;
+}
+
+#viewsManagerSelectorButton::after {
+  width: 14px !important;
+  height: 14px !important;
+  justify-self: center !important;
+}
+
+#viewsManagerHeaderLabel {
+  font-size: 14px !important;
+  line-height: 18px !important;
+  font-weight: 700 !important;
+}
+
+#viewsManagerContent {
+  height: calc(100% - 48px) !important;
+}
+
+#thumbnailsView {
+  gap: 8px !important;
+  padding: 10px !important;
+  justify-items: center !important;
+}
+
+#thumbnailsView .thumbnail {
+  padding: 4px !important;
+  border-radius: 8px !important;
+}
+
+#thumbnailsView .thumbnailImageContainer {
+  border-radius: 7px !important;
+}
+
+#thumbnailsView .thumbnailPageNumber,
+#thumbnailsView .pageNumber {
+  min-width: 34px !important;
+  height: 18px !important;
+  margin-top: 4px !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  line-height: 18px !important;
+}
+
+@media (max-width: 760px) {
+  #toolbarViewer {
+    gap: 6px !important;
+  }
+
+  #toolbarViewerLeft,
+  #toolbarViewerMiddle,
+  #toolbarViewerRight {
+    gap: 5px !important;
+  }
+
+  #scaleSelectContainer {
+    width: 128px !important;
+    min-width: 128px !important;
+  }
+
+  #scaleSelectContainer select#scaleSelect {
+    min-width: 126px !important;
+  }
+
+  #viewsManager {
+    width: min(292px, calc(100vw - 24px)) !important;
+  }
+}
+
+/* Final toolbar grouping polish: page counter as one field, strict sidebar
+   clipping, and consistent right-side icon wells. */
+#toolbarViewerLeft > .et-page-controls {
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
+}
+
+#toolbarViewerLeft > .et-page-controls > .loadingInput {
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#pageNumber {
+  width: 50px !important;
+  min-width: 50px !important;
+  border-radius: 8px 0 0 8px !important;
+  box-shadow: none !important;
+}
+
+#numPages {
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  min-width: 46px !important;
+  padding: 0 11px !important;
+  border-radius: 0 8px 8px 0 !important;
+  background: transparent !important;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+#viewsManager {
+  inline-size: 300px !important;
+  min-inline-size: 300px !important;
+  max-inline-size: 300px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  border-radius: 0 !important;
+}
+
+#viewsManager #viewsManagerHeader,
+#viewsManagerTitle,
+#viewsManagerContent {
+  inline-size: 100% !important;
+  max-inline-size: 100% !important;
+  box-sizing: border-box !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  overflow: hidden !important;
+  border-radius: 0 !important;
+}
+
+#viewsManagerTitle {
+  grid-template-columns: 54px minmax(0, 1fr) 32px 32px !important;
+  column-gap: 8px !important;
+}
+
+#viewsManagerSelector {
+  width: 54px !important;
+  height: 32px !important;
+}
+
+#viewsManagerSelectorButton {
+  width: 54px !important;
+  min-width: 54px !important;
+  position: relative !important;
+}
+
+#viewsManagerSelectorButton::before {
+  inset-inline-start: 9px !important;
+  inset-inline-end: auto !important;
+}
+
+#viewsManagerSelectorButton::after {
+  position: absolute !important;
+  inset-block-start: 50% !important;
+  inset-inline-end: 6px !important;
+  transform: translateY(-50%) !important;
+}
+
+#viewsManagerHeaderLabel {
+  justify-self: start !important;
+  text-align: start !important;
+}
+
+#toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-print-controls,
+#toolbarViewerRight > .et-more-control {
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 1px !important;
+  border-radius: 8px !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
+}
+
+#toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-more-control {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 34px !important;
+  min-width: 34px !important;
+}
+
+#toolbarViewerRight > .et-print-controls {
+  gap: 0 !important;
+}
+
+#toolbarViewerRight > .et-print-controls .toolbarButton + .toolbarButton {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 75%, transparent) !important;
+}
+
+#editorModeButtons {
+  gap: 0 !important;
+  overflow: hidden !important;
+}
+
+#editorModeButtons .toolbarButtonWithContainer + .toolbarButtonWithContainer {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 75%, transparent) !important;
+}
+
+#editorModeButtons .toolbarButtonWithContainer,
+#toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-more-control {
+  position: relative !important;
+}
+
+#toolbarViewerRight .toolbarButton::before,
+#editorModeButtons .toolbarButton::before {
+  position: absolute !important;
+  inset: 50% auto auto 50% !important;
+  width: 19px !important;
+  height: 19px !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+#secondaryToolbarToggleButton::before {
+  transform: translate(-50%, -50%) scaleX(var(--dir-factor)) !important;
+}
+
+@media (max-width: 760px) {
+  #viewsManager {
+    inline-size: min(292px, calc(100vw - 24px)) !important;
+    min-inline-size: min(292px, calc(100vw - 24px)) !important;
+    max-inline-size: min(292px, calc(100vw - 24px)) !important;
+  }
+}
+
+/* Final secondary menu repair. Toolbar icon centering must not leak into menu
+   rows; menu icons are grid cells, not absolute toolbar glyphs. */
+#secondaryToolbar {
+  width: min(340px, calc(100vw - 24px)) !important;
+  min-width: min(340px, calc(100vw - 24px)) !important;
+  max-width: min(340px, calc(100vw - 24px)) !important;
+}
+
+#secondaryToolbar .menuContainer {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  padding: 10px !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+
+#secondaryToolbarButtonContainer,
+#secondaryToolbarButtonContainer > .visibleMediumView,
+#secondaryToolbarButtonContainer > .hiddenMediumView,
+#secondaryToolbarButtonContainer > #cursorToolButtons,
+#secondaryToolbarButtonContainer > #scrollModeButtons,
+#secondaryToolbarButtonContainer > #spreadModeButtons {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 2px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton,
+#outerContainer #secondaryToolbar #viewBookmark,
+#outerContainer #secondaryToolbar #currentOutlineItem,
+#secondaryToolbar #secondaryToolbarButtonContainer > #cursorToolButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > #scrollModeButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > #spreadModeButtons > .toolbarButton,
+#secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView > .toolbarButton {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: 40px minmax(0, 1fr) !important;
+  align-items: center !important;
+  justify-content: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  column-gap: 12px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--et-text) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 20px !important;
+  text-align: start !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton::before,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton::before,
+#outerContainer #secondaryToolbar #viewBookmark::before,
+#outerContainer #secondaryToolbar #currentOutlineItem::before,
+#secondaryToolbar #secondaryToolbarButtonContainer > #cursorToolButtons > .toolbarButton::before,
+#secondaryToolbar #secondaryToolbarButtonContainer > #scrollModeButtons > .toolbarButton::before,
+#secondaryToolbar #secondaryToolbarButtonContainer > #spreadModeButtons > .toolbarButton::before,
+#secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView > .toolbarButton::before {
+  position: static !important;
+  grid-column: 1 !important;
+  justify-self: center !important;
+  align-self: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  margin: 0 !important;
+  inset: auto !important;
+  transform: none !important;
+  background-color: currentColor !important;
+  opacity: 1 !important;
+}
+
+#outerContainer #secondaryToolbar .menuContainer .toolbarButton > span,
+#outerContainer #secondaryToolbar .menuContainer a.toolbarButton > span,
+#outerContainer #secondaryToolbar #viewBookmark > span,
+#outerContainer #secondaryToolbar #currentOutlineItem > span,
+#secondaryToolbar #secondaryToolbarButtonContainer > #cursorToolButtons > .toolbarButton > span,
+#secondaryToolbar #secondaryToolbarButtonContainer > #scrollModeButtons > .toolbarButton > span,
+#secondaryToolbar #secondaryToolbarButtonContainer > #spreadModeButtons > .toolbarButton > span,
+#secondaryToolbar #secondaryToolbarButtonContainer > .visibleMediumView > .toolbarButton > span {
+  position: static !important;
+  grid-column: 2 !important;
+  display: block !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  clip: auto !important;
+  clip-path: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  overflow: hidden !important;
+  text-indent: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#secondaryToolbar .menuContainer .horizontalToolbarSeparator,
+#secondaryToolbar .menuContainer.no-scroll .horizontalToolbarSeparator,
+#secondaryToolbar .menuContainer .horizontalToolbarSeparator:last-of-type {
+  display: block !important;
+  height: 1px !important;
+  margin: 7px 6px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--et-outline-variant) 88%, transparent) !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton:disabled,
+#secondaryToolbar .menuContainer .toolbarButton[disabled],
+#secondaryToolbar .menuContainer a.toolbarButton[disabled] {
+  color: color-mix(in srgb, var(--et-muted) 54%, transparent) !important;
+  opacity: 1 !important;
+}
+
+#documentPropertiesClose,
+#documentPropertiesDialog #documentPropertiesClose,
+#documentPropertiesDialog .buttonRow #documentPropertiesClose {
+  background: var(--et-primary) !important;
+  color: #ffffff !important;
+}
+
+#documentPropertiesClose > span,
+#documentPropertiesDialog #documentPropertiesClose > span {
+  color: #ffffff !important;
+}
+
+/* Final PDF polish: fix left toolbar icon drift, refine the page drawer header,
+   soften the page counter, and make nested theme menus scrollbar-free. */
+#viewFindButton {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: var(--et-toolbar-control-size) !important;
+  min-width: var(--et-toolbar-control-size) !important;
+  height: var(--et-toolbar-control-size) !important;
+  min-height: var(--et-toolbar-control-size) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+}
+
+#viewFindButton::before {
+  position: absolute !important;
+  inset: 50% auto auto 50% !important;
+  width: 20px !important;
+  height: 20px !important;
+  margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+#toolbarViewerLeft > .et-page-controls {
+  background: color-mix(in srgb, var(--et-surface-container-low) 82%, var(--et-surface)) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 86%, transparent),
+    0 1px 2px rgba(60, 64, 67, 0.08) !important;
+}
+
+#pageNumber {
+  background: color-mix(in srgb, var(--et-primary-container) 42%, var(--et-surface)) !important;
+  color: var(--et-primary) !important;
+  border-radius: 8px 0 0 8px !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 16%, transparent) !important;
+}
+
+#numPages {
+  color: color-mix(in srgb, var(--et-text) 74%, var(--et-muted)) !important;
+  background: color-mix(in srgb, var(--et-surface-container-low) 64%, var(--et-surface)) !important;
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 90%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 60%, transparent) !important;
+}
+
+#viewsManager {
+  border-inline-end: 1px solid color-mix(in srgb, var(--et-outline-variant) 80%, transparent) !important;
+  box-shadow: 8px 0 24px rgba(60, 64, 67, 0.10) !important;
+  background: var(--et-surface) !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  height: 56px !important;
+  min-height: 56px !important;
+  padding: 8px 14px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 78%, transparent) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--et-surface-container-low) 86%, var(--et-surface)), var(--et-surface-container-low)) !important;
+}
+
+#viewsManagerTitle {
+  height: 40px !important;
+  grid-template-columns: 40px minmax(0, 1fr) 36px 36px !important;
+  column-gap: 10px !important;
+}
+
+#viewsManagerSelector {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+#viewsManagerSelectorButton {
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#viewsManagerSelectorButton::before {
+  inset: 50% auto auto 50% !important;
+  width: 22px !important;
+  height: 22px !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+#viewsManagerSelectorButton::after {
+  display: none !important;
+}
+
+#viewsManagerHeaderLabel {
+  font-size: 15px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+}
+
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#viewsManagerAddFileButton:hover,
+#viewsManagerCurrentOutlineButton:hover,
+#viewsManagerSelectorButton:hover {
+  background: var(--et-state-hover) !important;
+}
+
+#viewsManagerContent {
+  height: calc(100% - 56px) !important;
+  background: var(--et-surface) !important;
+}
+
+#etThemeMenu.menu {
+  width: min(360px, calc(100vw - 24px)) !important;
+  min-width: min(360px, calc(100vw - 24px)) !important;
+  max-width: min(360px, calc(100vw - 24px)) !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 12px !important;
+}
+
+#etThemeMenu .menuContainer {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 18px 18px 14px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+#etThemeMenu .menuSectionLabel {
+  margin: 0 2px 12px !important;
+  color: var(--et-muted) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  text-transform: none !important;
+}
+
+#etThemeMenu .et-theme-row {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 0 0 16px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  padding: 0 !important;
+  border-radius: 12px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: none !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton.toggled,
+#etThemeMenu .et-theme-row > .toolbarButton[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--et-primary-container) 76%, var(--et-surface)) !important;
+  color: var(--et-primary) !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--et-primary) 42%, transparent) !important;
+}
+
+#etThemeMenu .horizontalToolbarSeparator {
+  width: 100% !important;
+  height: 1px !important;
+  margin: 0 0 16px !important;
+  background: color-mix(in srgb, var(--et-outline-variant) 88%, transparent) !important;
+}
+
+#etThemeMenu svg {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+/* Final2 PDF toolbar fixes: use flex centering for the search pseudo icon,
+   make the page counter a single container with an inner current-page chip,
+   and let editor tool submenus escape their segmented toolbar group. */
+#viewFindButton,
+#toolbarContainer #viewFindButton {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  overflow: hidden !important;
+}
+
+#viewFindButton::before,
+#toolbarContainer #viewFindButton::before {
+  position: static !important;
+  display: block !important;
+  flex: 0 0 22px !important;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  margin: 0 !important;
+  inset: auto !important;
+  transform: none !important;
+  align-self: center !important;
+}
+
+#toolbarViewerLeft > .et-page-controls,
+#toolbarContainer #toolbarViewerLeft > .et-page-controls {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 2px !important;
+  gap: 2px !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  background: color-mix(in srgb, var(--et-surface-container-low) 72%, var(--et-surface)) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 82%, transparent),
+    0 1px 2px rgba(60, 64, 67, 0.08) !important;
+}
+
+#toolbarViewerLeft > .et-page-controls > .loadingInput {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#pageNumber,
+#toolbarContainer #pageNumber {
+  width: 56px !important;
+  min-width: 56px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 0 8px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: color-mix(in srgb, var(--et-primary-container) 72%, var(--et-surface)) !important;
+  color: var(--et-primary) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 22%, transparent) !important;
+  line-height: 34px !important;
+}
+
+#numPages,
+#toolbarContainer #numPages {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 48px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 0 10px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: color-mix(in srgb, var(--et-text) 82%, var(--et-muted)) !important;
+  box-shadow: none !important;
+  font-weight: 700 !important;
+  line-height: 34px !important;
+}
+
+#outerContainer.viewsManagerOpen #viewsManager #viewsManagerHeader,
+#viewsManager #viewsManagerHeader {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  padding: 0 16px !important;
+}
+
+#outerContainer.viewsManagerOpen #viewsManagerTitle,
+#viewsManagerTitle {
+  height: 40px !important;
+  align-items: center !important;
+}
+
+#editorModeButtons,
+#editorModeButtons .toolbarButtonWithContainer {
+  overflow: visible !important;
+}
+
+#editorModeButtons .editorParamsToolbar,
+#editorHighlightParamsToolbar,
+#editorFreeTextParamsToolbar,
+#editorInkParamsToolbar,
+#editorStampParamsToolbar {
+  z-index: 10000 !important;
+}
+
+#editorStampParamsToolbar,
+#editorStampParamsToolbar .menuContainer {
+  min-width: 180px !important;
+  width: 180px !important;
+  overflow: hidden !important;
+}
+
+#editorStampParamsToolbar .toolbarButton,
+#editorStampParamsToolbar .toolbarButton.labeled {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 40px !important;
+  padding: 0 14px !important;
+  border-radius: 8px !important;
+  box-sizing: border-box !important;
+}
+
+#editorStampParamsToolbar .editorParamsLabel {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Attach the page drawer flush to the toolbar bottom. */
+#viewsManager,
+#outerContainer.viewsManagerOpen #viewsManager,
+#outerContainer.viewsManagerMoving #viewsManager {
+  inset-block-start: calc(var(--toolbar-height) - 1px) !important;
+  top: calc(var(--toolbar-height) - 1px) !important;
+  margin-block-start: 0 !important;
+  padding-block-start: 0 !important;
+  border-block-start: 0 !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  margin-block-start: 0 !important;
+  border-block-start: 0 !important;
+  transform: translateY(-1px);
+}
+
+/* Final3 density + dark-mode repair. */
+#toolbarViewerLeft > .et-page-controls,
+#toolbarContainer #toolbarViewerLeft > .et-page-controls {
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 2px !important;
+  gap: 1px !important;
+  border-radius: 9px !important;
+}
+
+#toolbarViewerLeft > .et-page-controls > .loadingInput {
+  height: 30px !important;
+  min-height: 30px !important;
+}
+
+#pageNumber,
+#toolbarContainer #pageNumber {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 6px !important;
+  border-radius: 7px !important;
+  line-height: 30px !important;
+}
+
+#numPages,
+#toolbarContainer #numPages {
+  min-width: 36px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 7px !important;
+  border-radius: 7px !important;
+  line-height: 30px !important;
+}
+
+#viewsManager,
+#outerContainer.viewsManagerOpen #viewsManager,
+#outerContainer.viewsManagerMoving #viewsManager {
+  overflow: visible !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#viewsManagerTitle {
+  display: grid !important;
+  align-items: center !important;
+  height: 40px !important;
+}
+
+#viewsManagerSelector,
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  align-self: center !important;
+  justify-self: center !important;
+}
+
+#viewsManagerHeaderLabel {
+  display: inline-flex !important;
+  align-items: center !important;
+  align-self: center !important;
+  height: 36px !important;
+}
+
+#viewsManagerContent {
+  overflow: auto hidden !important;
+  border-inline-end: 1px solid color-mix(in srgb, var(--et-outline-variant) 76%, transparent) !important;
+}
+
+#viewsManagerSelectorOptions {
+  z-index: 10050 !important;
+  min-width: 176px !important;
+  padding: 6px !important;
+  border-radius: 10px !important;
+  background: var(--et-surface) !important;
+  box-shadow: var(--et-shadow) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 76%, transparent) !important;
+}
+
+#viewsManagerSelectorOptions > button {
+  display: grid !important;
+  grid-template-columns: 28px minmax(0, 1fr) !important;
+  align-items: center !important;
+  min-height: 36px !important;
+  padding: 0 10px !important;
+  border-radius: 8px !important;
+  color: var(--et-text) !important;
+  white-space: nowrap !important;
+}
+
+html[data-theme="dark"] {
+  --et-primary: #8ab4f8;
+  --et-primary-hover: #aecbfa;
+  --et-primary-container: #1f3b68;
+  --et-on-primary: #07192d;
+  --et-bg: #15191d;
+  --et-surface: #1d2126;
+  --et-surface-dim: #111418;
+  --et-surface-container-low: #23272d;
+  --et-surface-container: #292e35;
+  --et-surface-container-high: #303640;
+  --et-surface-container-highest: #3a414c;
+  --et-text: #e8eaed;
+  --et-muted: #bdc1c6;
+  --et-outline: #6f7782;
+  --et-outline-variant: #39414a;
+  --et-state-hover: rgba(138, 180, 248, 0.12);
+  --et-state-pressed: rgba(138, 180, 248, 0.18);
+  --et-focus-ring: rgba(138, 180, 248, 0.42);
+  --et-shadow: 0 14px 32px rgba(0, 0, 0, 0.45), 0 3px 10px rgba(0, 0, 0, 0.34);
+  --et-shadow-low: 0 1px 3px rgba(0, 0, 0, 0.44);
+}
+
+html[data-theme="dark"] #toolbarContainer {
+  background: #1f2429 !important;
+  border-bottom-color: #3b434d !important;
+}
+
+html[data-theme="dark"] #mainContainer,
+html[data-theme="dark"] #viewerContainer {
+  background: #171b20 !important;
+}
+
+html[data-theme="dark"] #viewsManager {
+  background: #1a1f24 !important;
+  border-inline-end-color: #343b44 !important;
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-theme="dark"] #viewsManager #viewsManagerHeader {
+  background: #20262d !important;
+  border-bottom-color: #363e47 !important;
+}
+
+html[data-theme="dark"] #viewsManagerHeaderLabel,
+html[data-theme="dark"] #viewsManager .viewsManagerButton,
+html[data-theme="dark"] #viewsManagerSelectorOptions > button {
+  color: #e8eaed !important;
+}
+
+html[data-theme="dark"] #viewsManagerContent {
+  background: #1a1f24 !important;
+}
+
+html[data-theme="dark"] #toolbarViewerLeft > .et-page-controls {
+  background: #252b33 !important;
+  box-shadow: inset 0 0 0 1px #3d4651 !important;
+}
+
+html[data-theme="dark"] #pageNumber {
+  background: #233f70 !important;
+  color: #d3e3fd !important;
+  box-shadow: inset 0 0 0 1px rgba(138, 180, 248, 0.36) !important;
+}
+
+html[data-theme="dark"] #numPages {
+  color: #e8eaed !important;
+  background: transparent !important;
+}
+
+html[data-theme="dark"] #toolbarViewerLeft > .toolbarHorizontalGroup,
+html[data-theme="dark"] #toolbarViewerMiddle > .toolbarHorizontalGroup,
+html[data-theme="dark"] #editorModeButtons,
+html[data-theme="dark"] #scaleSelectContainer,
+html[data-theme="dark"] #toolbarViewerRight > .et-theme-control,
+html[data-theme="dark"] #toolbarViewerRight > .et-print-controls,
+html[data-theme="dark"] #toolbarViewerRight > .et-more-control {
+  background: #262c34 !important;
+  box-shadow: inset 0 0 0 1px #3d4651 !important;
+}
+
+html[data-theme="dark"] #scaleSelectContainer select#scaleSelect,
+html[data-theme="dark"] #toolbarContainer .toolbarButton {
+  color: #e8eaed !important;
+}
+
+html[data-theme="dark"] #etThemeMenu.menu,
+html[data-theme="dark"] #viewsManagerSelectorOptions {
+  background: #20252b !important;
+  outline-color: #39414a !important;
+}
+
+html[data-theme="dark"] #etThemeMenu .menuSectionLabel {
+  color: #c3c7cf !important;
+}
+
+html[data-theme="dark"] #etThemeMenu .et-theme-row > .toolbarButton {
+  background: #2a3038 !important;
+  color: #e8eaed !important;
+}
+
+html[data-theme="dark"] #etThemeMenu .et-theme-row > .toolbarButton.toggled,
+html[data-theme="dark"] #etThemeMenu .et-theme-row > .toolbarButton[aria-pressed="true"] {
+  background: #1f3b68 !important;
+  color: #d3e3fd !important;
+  box-shadow: inset 0 0 0 2px rgba(138, 180, 248, 0.5) !important;
+}
+
+html[data-theme="dark"] #etThemeMenu .horizontalToolbarSeparator {
+  background: #3a414a !important;
+}
+
+/* Final4: tighten page controls and keep the page-view selector above the drawer. */
+#toolbarViewerLeft > .et-page-controls,
+#toolbarContainer #toolbarViewerLeft > .et-page-controls {
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 2px !important;
+  gap: 0 !important;
+  border-radius: 10px !important;
+}
+
+#toolbarViewerLeft > .et-page-controls > .loadingInput,
+#toolbarContainer #toolbarViewerLeft > .et-page-controls > .loadingInput {
+  height: 32px !important;
+  min-height: 32px !important;
+}
+
+#pageNumber,
+#toolbarContainer #pageNumber {
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 6px !important;
+  border-radius: 8px !important;
+  line-height: 32px !important;
+}
+
+#numPages,
+#toolbarContainer #numPages {
+  min-width: 34px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 6px !important;
+  border-radius: 8px !important;
+  line-height: 32px !important;
+}
+
+#viewsManager,
+#outerContainer.viewsManagerOpen #viewsManager,
+#outerContainer.viewsManagerMoving #viewsManager {
+  overflow: visible !important;
+}
+
+#viewsManager #viewsManagerHeader,
+#outerContainer.viewsManagerOpen #viewsManager #viewsManagerHeader {
+  position: relative !important;
+  z-index: 60 !important;
+  overflow: visible !important;
+}
+
+#viewsManagerTitle {
+  position: relative !important;
+  z-index: 61 !important;
+  overflow: visible !important;
+  align-items: center !important;
+  justify-items: stretch !important;
+}
+
+#viewsManagerSelector {
+  position: relative !important;
+  z-index: 70 !important;
+  overflow: visible !important;
+}
+
+#viewsManagerSelectorButton {
+  position: relative !important;
+  z-index: 71 !important;
+}
+
+#viewsManagerSelectorOptions,
+#viewsManager #viewsManagerSelectorOptions,
+#viewsManager #viewsManagerHeader #viewsManagerSelectorOptions {
+  position: absolute !important;
+  inset-block-start: calc(100% + 8px) !important;
+  inset-inline-start: 0 !important;
+  z-index: 10080 !important;
+  width: 190px !important;
+  min-width: 190px !important;
+  max-width: 190px !important;
+  max-height: min(260px, calc(100vh - var(--toolbar-height) - 92px)) !important;
+  overflow: hidden auto !important;
+  border-radius: 12px !important;
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+  box-shadow: var(--et-shadow) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 76%, transparent) !important;
+}
+
+#viewsManagerSelectorOptions > button,
+#viewsManager #viewsManagerSelectorOptions > button {
+  display: grid !important;
+  grid-template-columns: 26px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 10px !important;
+  border-radius: 9px !important;
+  color: var(--et-text) !important;
+}
+
+#viewsManagerSelectorOptions > button::before,
+#viewsManager #viewsManagerSelectorOptions > button::before {
+  position: static !important;
+  grid-column: 1 !important;
+  width: 20px !important;
+  height: 20px !important;
+}
+
+#viewsManagerSelectorOptions > button > span,
+#viewsManager #viewsManagerSelectorOptions > button > span {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#viewsManagerContent {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+html[data-theme="dark"] #viewsManagerSelectorOptions,
+html[data-theme="dark"] #viewsManager #viewsManagerSelectorOptions {
+  background: #242a31 !important;
+  color: #e8eaed !important;
+  outline-color: #3d4651 !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.38) !important;
+}
+
+html[data-theme="dark"] #viewsManagerSelectorOptions > button:not(:disabled):hover {
+  background: rgba(138, 180, 248, 0.12) !important;
+}
+
+html[data-theme="dark"] #numPages {
+  background: transparent !important;
+  color: #d8dde5 !important;
+}
+
+/* Material final layer for the bundled PDF.js viewer.
+   This intentionally wins over PDF.js defaults and earlier migration passes. */
+:root,
+html[data-theme] {
+  --toolbar-height: 48px;
+  --et-toolbar-group-height: 34px;
+  --et-toolbar-control-size: 34px;
+  --et-density-gap: 8px;
+  --et-radius: 8px;
+  --et-radius-lg: 12px;
+}
+
+html,
+body,
+#outerContainer,
+#mainContainer {
+  background: var(--et-bg) !important;
+}
+
+#toolbarContainer {
+  height: var(--toolbar-height) !important;
+  min-height: var(--toolbar-height) !important;
+  padding: 6px 8px !important;
+  background: color-mix(in srgb, var(--et-surface) 94%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.08) !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+#toolbarViewer,
+#toolbarViewerLeft,
+#toolbarViewerMiddle,
+#toolbarViewerRight {
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  align-items: center !important;
+  gap: var(--et-density-gap) !important;
+}
+
+#toolbarViewerLeft {
+  min-width: 0 !important;
+}
+
+#toolbarViewerMiddle {
+  gap: 8px !important;
+}
+
+#toolbarViewerRight {
+  justify-content: flex-end !important;
+}
+
+#toolbarContainer .toolbarButton,
+#toolbarContainer .toolbarButtonWithContainer > .toolbarButton,
+#toolbarContainer button.toolbarButton {
+  width: var(--et-toolbar-control-size) !important;
+  min-width: var(--et-toolbar-control-size) !important;
+  height: var(--et-toolbar-control-size) !important;
+  min-height: var(--et-toolbar-control-size) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: var(--et-radius) !important;
+  color: var(--et-muted) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#toolbarContainer .toolbarButton:hover,
+#toolbarContainer .toolbarButton[aria-expanded="true"],
+#toolbarContainer .toolbarButton.toggled,
+#toolbarContainer .toolbarButton[aria-pressed="true"] {
+  color: var(--et-primary) !important;
+  background: var(--et-state-hover) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 34%, transparent) !important;
+}
+
+#toolbarContainer .toolbarButton::before,
+#toolbarContainer .toolbarButton::after {
+  background-color: currentColor !important;
+}
+
+#toolbarContainer .toolbarButton::before {
+  position: absolute !important;
+  inset: 50% auto auto 50% !important;
+  width: 20px !important;
+  height: 20px !important;
+  margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+#viewFindButton::before {
+  width: 21px !important;
+  height: 21px !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous),
+#toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton),
+#toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-print-controls,
+#toolbarViewerRight > .et-more-control,
+#editorModeButtons,
+#scaleSelectContainer,
+#toolbarViewerLeft > .et-page-controls {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 !important;
+  border-radius: var(--et-radius) !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  overflow: visible !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous),
+#toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton),
+#toolbarViewerRight > .et-print-controls,
+#editorModeButtons {
+  gap: 0 !important;
+}
+
+#toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous) > .toolbarButton + .splitToolbarButtonSeparator,
+#toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton) > .splitToolbarButtonSeparator,
+#toolbarViewerRight > .et-print-controls .toolbarButton + .toolbarButton,
+#editorModeButtons .toolbarButtonWithContainer + .toolbarButtonWithContainer {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+#toolbarViewerLeft > .et-page-controls {
+  width: auto !important;
+  min-width: 84px !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+}
+
+#toolbarViewerLeft > .et-page-controls > .loadingInput {
+  width: 50px !important;
+  min-width: 50px !important;
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#pageNumber,
+#toolbarContainer #pageNumber {
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  margin: 2px 4px !important;
+  padding: 0 6px !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: var(--et-primary-container) !important;
+  color: var(--et-primary) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 26%, transparent) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 30px !important;
+  text-align: center !important;
+}
+
+#numPages,
+#toolbarContainer #numPages {
+  min-width: 34px !important;
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 8px 0 6px !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  color: color-mix(in srgb, var(--et-text) 78%, var(--et-muted)) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: var(--et-toolbar-group-height) !important;
+}
+
+#scaleSelectContainer {
+  width: 164px !important;
+  min-width: 164px !important;
+  overflow: hidden !important;
+}
+
+#scaleSelectContainer select#scaleSelect {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: var(--et-toolbar-group-height) !important;
+  min-height: var(--et-toolbar-group-height) !important;
+  padding: 0 30px 0 12px !important;
+  color: var(--et-text) !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+#viewerContainer {
+  inset-block-start: var(--toolbar-height) !important;
+  top: var(--toolbar-height) !important;
+  background: var(--et-bg) !important;
+}
+
+#viewsManager,
+#outerContainer.viewsManagerOpen #viewsManager,
+#outerContainer.viewsManagerMoving #viewsManager {
+  top: var(--toolbar-height) !important;
+  inset-block-start: var(--toolbar-height) !important;
+  width: 300px !important;
+  min-width: 300px !important;
+  max-width: 300px !important;
+  height: calc(100vh - var(--toolbar-height)) !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-inline-end: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  border-radius: 0 !important;
+  background: var(--et-surface) !important;
+  box-shadow: 8px 0 22px rgba(60, 64, 67, 0.12) !important;
+}
+
+#viewsManager #viewsManagerHeader {
+  position: relative !important;
+  z-index: 80 !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  padding: 6px 14px !important;
+  border: 0 !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  background: var(--et-surface-container-low) !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+#viewsManagerTitle {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) 34px 34px !important;
+  align-items: center !important;
+  width: 100% !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  column-gap: 8px !important;
+  overflow: visible !important;
+}
+
+#viewsManagerSelector,
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+#viewsManagerSelector {
+  position: relative !important;
+  z-index: 90 !important;
+  overflow: visible !important;
+}
+
+#viewsManagerSelectorButton,
+#viewsManagerAddFileButton,
+#viewsManagerCurrentOutlineButton {
+  border-radius: var(--et-radius) !important;
+  color: var(--et-muted) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#viewsManagerSelectorButton:hover,
+#viewsManagerAddFileButton:hover,
+#viewsManagerCurrentOutlineButton:hover,
+#viewsManagerSelectorButton[aria-expanded="true"] {
+  color: var(--et-primary) !important;
+  background: var(--et-state-hover) !important;
+}
+
+#viewsManagerSelectorButton::before,
+#viewsManagerAddFileButton::before,
+#viewsManagerCurrentOutlineButton::before {
+  position: absolute !important;
+  inset: 50% auto auto 50% !important;
+  width: 21px !important;
+  height: 21px !important;
+  transform: translate(-50%, -50%) !important;
+  background-color: currentColor !important;
+}
+
+#viewsManagerSelectorButton::after {
+  display: none !important;
+}
+
+#viewsManagerHeaderLabel {
+  display: flex !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  height: 36px !important;
+  color: var(--et-text) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  line-height: 20px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#viewsManagerContent {
+  position: relative !important;
+  z-index: 1 !important;
+  height: calc(100% - 48px) !important;
+  overflow: auto hidden !important;
+  background: var(--et-surface) !important;
+  border-inline-end: 0 !important;
+}
+
+#thumbnailsView {
+  padding: 12px 14px !important;
+  gap: 10px !important;
+}
+
+#thumbnailsView .thumbnail {
+  border-radius: var(--et-radius-lg) !important;
+}
+
+#thumbnailsView .thumbnailImageContainer {
+  border-radius: var(--et-radius) !important;
+  box-shadow: var(--et-shadow-low) !important;
+}
+
+#viewsManagerSelectorOptions,
+#viewsManager #viewsManagerSelectorOptions {
+  position: absolute !important;
+  inset-block-start: calc(100% + 8px) !important;
+  inset-inline-start: 0 !important;
+  z-index: 10080 !important;
+  width: 198px !important;
+  min-width: 198px !important;
+  max-width: 198px !important;
+  padding: 6px !important;
+  border: 0 !important;
+  border-radius: var(--et-radius-lg) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+  box-shadow: var(--et-shadow) !important;
+  overflow: hidden auto !important;
+}
+
+#viewsManagerSelectorOptions > button,
+#viewsManager #viewsManagerSelectorOptions > button {
+  display: grid !important;
+  grid-template-columns: 28px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 8px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 10px !important;
+  border-radius: var(--et-radius) !important;
+  color: var(--et-text) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+#secondaryToolbar,
+#etThemeMenu.menu {
+  border: 0 !important;
+  border-radius: var(--et-radius-lg) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+  background: var(--et-surface) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+#secondaryToolbar {
+  width: min(316px, calc(100vw - 24px)) !important;
+  min-width: min(316px, calc(100vw - 24px)) !important;
+  max-width: min(316px, calc(100vw - 24px)) !important;
+}
+
+#secondaryToolbar .menuContainer {
+  max-height: min(620px, calc(100vh - var(--toolbar-height) - 24px)) !important;
+  padding: 8px !important;
+  overflow: hidden auto !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton,
+#secondaryToolbar .menuContainer a.toolbarButton,
+#secondaryToolbar #cursorToolButtons > .toolbarButton,
+#secondaryToolbar #scrollModeButtons > .toolbarButton,
+#secondaryToolbar #spreadModeButtons > .toolbarButton {
+  height: 40px !important;
+  min-height: 40px !important;
+  grid-template-columns: 38px minmax(0, 1fr) !important;
+  column-gap: 10px !important;
+  padding: 0 10px !important;
+  border-radius: var(--et-radius) !important;
+  color: var(--et-text) !important;
+}
+
+#secondaryToolbar .menuContainer .toolbarButton:hover,
+#secondaryToolbar .menuContainer a.toolbarButton:hover,
+#secondaryToolbar .menuContainer .toolbarButton.toggled,
+#secondaryToolbar .menuContainer .toolbarButton[aria-checked="true"] {
+  color: var(--et-primary) !important;
+  background: var(--et-state-hover) !important;
+}
+
+#etThemeMenu.menu {
+  width: min(330px, calc(100vw - 24px)) !important;
+  min-width: min(330px, calc(100vw - 24px)) !important;
+  max-width: min(330px, calc(100vw - 24px)) !important;
+  overflow: hidden !important;
+}
+
+#etThemeMenu .menuContainer {
+  padding: 16px !important;
+  overflow: hidden !important;
+}
+
+#etThemeMenu .menuSectionLabel {
+  margin: 0 2px 10px !important;
+  color: var(--et-muted) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+#etThemeMenu .et-theme-row {
+  gap: 10px !important;
+  padding-bottom: 14px !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton {
+  height: 52px !important;
+  min-height: 52px !important;
+  border-radius: var(--et-radius-lg) !important;
+  background: var(--et-surface-container-low) !important;
+  color: var(--et-text) !important;
+}
+
+#etThemeMenu .et-theme-row > .toolbarButton.toggled,
+#etThemeMenu .et-theme-row > .toolbarButton[aria-pressed="true"] {
+  color: var(--et-primary) !important;
+  background: var(--et-primary-container) !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--et-primary) 42%, transparent) !important;
+}
+
+#dialogContainer dialog {
+  border: 0 !important;
+  border-radius: 16px !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+  box-shadow: var(--et-shadow) !important;
+}
+
+#documentPropertiesDialog {
+  width: min(720px, calc(100vw - 48px)) !important;
+  max-height: min(760px, calc(100vh - 48px)) !important;
+  padding: 0 !important;
+  overflow: hidden auto !important;
+}
+
+#documentPropertiesDialog .et-document-properties-header {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  min-height: 56px !important;
+  padding: 0 24px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+}
+
+#documentPropertiesDialog .et-document-properties-header::before {
+  flex: 0 0 40px !important;
+  width: 40px !important;
+  height: 40px !important;
+  margin-inline-end: 14px !important;
+  border-radius: 12px !important;
+}
+
+#documentPropertiesDialog .et-document-properties-header::after {
+  inset-block-start: 50% !important;
+  inset-inline-start: 44px !important;
+  width: 20px !important;
+  height: 20px !important;
+  transform: translate(-50%, -50%) !important;
+  margin: 0 !important;
+}
+
+#documentPropertiesDialog .row {
+  display: grid !important;
+  grid-template-columns: 180px minmax(0, 1fr) !important;
+  gap: 16px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 5px 24px !important;
+  align-items: start !important;
+  color: var(--et-text) !important;
+}
+
+#documentPropertiesDialog .row > span {
+  color: var(--et-muted) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+#documentPropertiesDialog .row > p {
+  margin: 0 !important;
+  min-width: 0 !important;
+  color: var(--et-text) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 20px !important;
+  overflow-wrap: anywhere !important;
+}
+
+#documentPropertiesDialog .separator {
+  height: 1px !important;
+  margin: 10px 24px !important;
+  background: color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+}
+
+#documentPropertiesDialog .buttonRow {
+  display: flex !important;
+  justify-content: flex-end !important;
+  padding: 16px 24px 22px !important;
+  border-top: 1px solid color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+#documentPropertiesClose {
+  min-width: 84px !important;
+  height: 40px !important;
+  padding: 0 20px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--et-primary) !important;
+  color: #fff !important;
+  font-weight: 800 !important;
+}
+
+#documentPropertiesClose > span {
+  color: #fff !important;
+}
+
+#viewerContainer::-webkit-scrollbar,
+#viewsManagerContent::-webkit-scrollbar,
+#secondaryToolbar .menuContainer::-webkit-scrollbar,
+#documentPropertiesDialog::-webkit-scrollbar {
+  width: 10px !important;
+  height: 10px !important;
+}
+
+#viewerContainer::-webkit-scrollbar-thumb,
+#viewsManagerContent::-webkit-scrollbar-thumb,
+#secondaryToolbar .menuContainer::-webkit-scrollbar-thumb,
+#documentPropertiesDialog::-webkit-scrollbar-thumb {
+  border: 3px solid transparent !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--et-muted) 56%, transparent) !important;
+  background-clip: padding-box !important;
+}
+
+html[data-theme="dark"] #toolbarContainer {
+  background: color-mix(in srgb, #1f2429 96%, transparent) !important;
+}
+
+html[data-theme="dark"] #viewsManager,
+html[data-theme="dark"] #secondaryToolbar,
+html[data-theme="dark"] #etThemeMenu.menu,
+html[data-theme="dark"] #dialogContainer dialog {
+  background: #1b2026 !important;
+  outline-color: #3d4651 !important;
+}
+
+html[data-theme="dark"] #viewsManager #viewsManagerHeader,
+html[data-theme="dark"] #toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous),
+html[data-theme="dark"] #toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton),
+html[data-theme="dark"] #toolbarViewerRight > .et-theme-control,
+html[data-theme="dark"] #toolbarViewerRight > .et-print-controls,
+html[data-theme="dark"] #toolbarViewerRight > .et-more-control,
+html[data-theme="dark"] #editorModeButtons,
+html[data-theme="dark"] #scaleSelectContainer,
+html[data-theme="dark"] #toolbarViewerLeft > .et-page-controls,
+html[data-theme="dark"] #etThemeMenu .et-theme-row > .toolbarButton {
+  background: #242a31 !important;
+  box-shadow: inset 0 0 0 1px #3d4651 !important;
+}
+
+html[data-theme="dark"] #pageNumber,
+html[data-theme="dark"] #etThemeMenu .et-theme-row > .toolbarButton.toggled,
+html[data-theme="dark"] #etThemeMenu .et-theme-row > .toolbarButton[aria-pressed="true"] {
+  background: #243f70 !important;
+  color: #d3e3fd !important;
+}
+
+/* Responsive PDF toolbar density. Keep the document usable on narrow windows
+   by moving lower-priority actions into the existing Tools menu. */
+@media (max-width: 720px) {
+  :root,
+  html[data-theme] {
+    --et-density-gap: 5px;
+    --et-toolbar-control-size: 32px;
+    --et-toolbar-group-height: 32px;
+  }
+
+  #toolbarContainer {
+    padding-inline: 6px !important;
+  }
+
+  #toolbarViewer,
+  #toolbarViewerLeft,
+  #toolbarViewerMiddle,
+  #toolbarViewerRight {
+    gap: 5px !important;
+  }
+
+  #editorModeButtons,
+  #toolbarViewerRight > .et-print-controls {
+    display: none !important;
+  }
+
+  #toolbarViewerLeft > .et-page-controls > .loadingInput {
+    width: 46px !important;
+    min-width: 46px !important;
+  }
+
+  #pageNumber,
+  #toolbarContainer #pageNumber {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    line-height: 28px !important;
+  }
+
+  #numPages,
+  #toolbarContainer #numPages {
+    min-width: 31px !important;
+    padding-inline: 5px 6px !important;
+  }
+
+  #scaleSelectContainer {
+    width: 112px !important;
+    min-width: 112px !important;
+  }
+
+  #scaleSelectContainer select#scaleSelect {
+    padding-inline: 10px 24px !important;
+    font-size: 12px !important;
+  }
+
+  #viewsManager,
+  #outerContainer.viewsManagerOpen #viewsManager,
+  #outerContainer.viewsManagerMoving #viewsManager {
+    width: min(260px, calc(100vw - 24px)) !important;
+    min-width: min(260px, calc(100vw - 24px)) !important;
+    max-width: min(260px, calc(100vw - 24px)) !important;
+  }
+
+  #outerContainer.viewsManagerOpen #viewerContainer:not(.pdfPresentationMode) {
+    inset-inline-start: min(260px, calc(100vw - 24px)) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  #viewFindButton,
+  #toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous) {
+    display: none !important;
+  }
+
+  #toolbarViewer {
+    justify-content: flex-start !important;
+  }
+
+  #toolbarViewerLeft,
+  #toolbarViewerMiddle,
+  #toolbarViewerRight {
+    flex: 0 0 auto !important;
+  }
+
+  #scaleSelectContainer {
+    display: none !important;
+  }
+
+  #toolbarViewerMiddle {
+    margin-inline-start: 0 !important;
+  }
+
+  #toolbarViewerRight {
+    margin-inline-start: auto !important;
+  }
+
+  #toolbarViewerLeft > .et-page-controls {
+    min-width: 88px !important;
+  }
+}
+
+/* Material polish for editor parameter panels. These are PDF.js submenus that
+   otherwise keep a denser native look than the rest of the viewer chrome. */
+#editorModeButtons .editorParamsToolbar,
+#editorHighlightParamsToolbar,
+#editorFreeTextParamsToolbar,
+#editorInkParamsToolbar,
+#editorStampParamsToolbar,
+#editorSignatureParamsToolbar {
+  min-width: 224px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: var(--et-radius-lg) !important;
+  outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+  background: var(--et-surface) !important;
+  color: var(--et-text) !important;
+  box-shadow: var(--et-shadow) !important;
+  overflow: hidden !important;
+}
+
+#editorHighlightParamsToolbar .editorParamsToolbarContainer,
+#editorFreeTextParamsToolbar .editorParamsToolbarContainer,
+#editorInkParamsToolbar .editorParamsToolbarContainer,
+#editorSignatureParamsToolbar .menuContainer,
+#editorStampParamsToolbar .menuContainer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 10px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 12px !important;
+  background: transparent !important;
+  box-sizing: border-box !important;
+}
+
+#editorStampParamsToolbar,
+#editorSignatureParamsToolbar {
+  width: 224px !important;
+}
+
+#editorStampParamsToolbar .menuContainer,
+#editorSignatureParamsToolbar .menuContainer {
+  min-width: 224px !important;
+}
+
+#editorFreeTextParamsToolbar .editorParamsSetter,
+#editorInkParamsToolbar .editorParamsSetter,
+#editorHighlightThickness,
+#editorHighlightVisibility .toggler {
+  display: grid !important;
+  grid-template-columns: 72px minmax(0, 1fr) !important;
+  align-items: center !important;
+  column-gap: 12px !important;
+  min-height: 32px !important;
+  margin: 0 !important;
+}
+
+.editorParamsToolbar .editorParamsLabel,
+#editorHighlightParamsToolbar .editorParamsLabel,
+#editorFreeTextParamsToolbar .editorParamsLabel,
+#editorInkParamsToolbar .editorParamsLabel,
+#editorStampParamsToolbar .editorParamsLabel {
+  color: var(--et-muted) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+  line-height: 18px !important;
+  white-space: nowrap !important;
+}
+
+#editorFreeTextParamsToolbar .editorParamsColor,
+#editorInkParamsToolbar .editorParamsColor {
+  justify-self: end !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 3px !important;
+  border: 1px solid color-mix(in srgb, var(--et-outline-variant) 88%, transparent) !important;
+  border-radius: var(--et-radius) !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: none !important;
+}
+
+.editorParamsToolbar input[type="range"].editorParamsSlider {
+  width: 100% !important;
+  min-width: 96px !important;
+  height: 28px !important;
+  accent-color: var(--et-primary) !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.editorParamsToolbar input[type="range"].editorParamsSlider::-webkit-slider-runnable-track {
+  height: 4px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--et-primary) 36%, var(--et-outline-variant)) !important;
+}
+
+.editorParamsToolbar input[type="range"].editorParamsSlider::-webkit-slider-thumb {
+  width: 16px !important;
+  height: 16px !important;
+  margin-top: -6px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--et-primary) !important;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.22) !important;
+}
+
+#highlightParamsToolbarContainer .colorPicker {
+  display: grid !important;
+  grid-template-columns: 72px minmax(0, 1fr) !important;
+  align-items: center !important;
+  column-gap: 12px !important;
+  min-height: 44px !important;
+}
+
+#highlightParamsToolbarContainer .colorPicker > .editorParamsLabel {
+  grid-column: 1 !important;
+}
+
+#highlightParamsToolbarContainer .colorPicker .dropdown {
+  grid-column: 2 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  padding: 6px !important;
+  border: 0 !important;
+  border-radius: var(--et-radius) !important;
+  background: var(--et-surface-container-low) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+#highlightParamsToolbarContainer .colorPicker .dropdown button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#highlightParamsToolbarContainer .colorPicker .dropdown button:is(:hover, :focus-visible, [aria-selected="true"]) {
+  background: var(--et-state-hover) !important;
+  outline: 0 !important;
+}
+
+#highlightParamsToolbarContainer .colorPicker .dropdown button .swatch {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 999px !important;
+  border: 1px solid color-mix(in srgb, var(--et-outline) 70%, transparent) !important;
+  box-shadow: none !important;
+}
+
+#editorHighlightVisibility .divider {
+  height: 1px !important;
+  margin: 2px 0 0 !important;
+  background: color-mix(in srgb, var(--et-outline-variant) 86%, transparent) !important;
+}
+
+#editorHighlightVisibility .toggler {
+  padding-top: 8px !important;
+}
+
+#editorHighlightShowAll.toggle-button {
+  justify-self: end !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--et-surface-container-highest) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+#editorHighlightShowAll.toggle-button[aria-pressed="true"] {
+  background: var(--et-primary-container) !important;
+}
+
+#editorStampAddImage,
+#editorSignatureAddSignature {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 14px !important;
+  border: 0 !important;
+  border-radius: var(--et-radius) !important;
+  background: var(--et-surface-container-low) !important;
+  color: var(--et-text) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+}
+
+#editorStampAddImage:hover,
+#editorSignatureAddSignature:hover {
+  color: var(--et-primary) !important;
+  background: var(--et-state-hover) !important;
+}
+
+html[data-theme="dark"] #editorModeButtons .editorParamsToolbar,
+html[data-theme="dark"] #editorHighlightParamsToolbar,
+html[data-theme="dark"] #editorFreeTextParamsToolbar,
+html[data-theme="dark"] #editorInkParamsToolbar,
+html[data-theme="dark"] #editorStampParamsToolbar,
+html[data-theme="dark"] #editorSignatureParamsToolbar {
+  background: #1b2026 !important;
+  outline-color: #3d4651 !important;
+}
+
+html[data-theme="dark"] #highlightParamsToolbarContainer .colorPicker .dropdown,
+html[data-theme="dark"] #editorStampAddImage,
+html[data-theme="dark"] #editorSignatureAddSignature,
+html[data-theme="dark"] #editorFreeTextParamsToolbar .editorParamsColor,
+html[data-theme="dark"] #editorInkParamsToolbar .editorParamsColor {
+  background: #242a31 !important;
+  box-shadow: inset 0 0 0 1px #3d4651 !important;
+}
+
+/* The editor button cluster sits right after the theme button; a full inset
+   outline makes a stray vertical line appear immediately before the first pen
+   icon. Keep the Material top/right/bottom outline and internal dividers, but
+   leave the leading edge clean. */
+#editorModeButtons > .toolbarButtonWithContainer {
+  box-shadow: none !important;
+}
+
+#editorModeButtons > .toolbarButtonWithContainer:not([hidden]) + .toolbarButtonWithContainer:not([hidden]) {
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+#editorModeButtons > .toolbarButtonWithContainer[hidden] + .toolbarButtonWithContainer:not([hidden]) {
+  box-shadow: none !important;
+}
+
+#editorModeButtons {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent),
+    inset -1px 0 0 color-mix(in srgb, var(--et-outline-variant) 82%, transparent) !important;
+}
+
+html[data-theme="dark"] #editorModeButtons > .toolbarButtonWithContainer {
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] #editorModeButtons > .toolbarButtonWithContainer:not([hidden]) + .toolbarButtonWithContainer:not([hidden]) {
+  box-shadow: inset 1px 0 0 #3d4651 !important;
+}
+
+html[data-theme="dark"] #editorModeButtons > .toolbarButtonWithContainer[hidden] + .toolbarButtonWithContainer:not([hidden]) {
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] #editorModeButtons {
+  box-shadow:
+    inset 0 1px 0 #3d4651,
+    inset 0 -1px 0 #3d4651,
+    inset -1px 0 0 #3d4651 !important;
+}

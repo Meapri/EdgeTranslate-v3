@@ -1,5 +1,13 @@
 import { TranslatorManager } from "../../../src/background/library/translate.js";
 
+jest.mock("common/scripts/chrome_builtin_translate.js", () => ({
+    getChromeTranslatorSupportedLanguages: jest.fn(() => new Set(["en", "ko"])),
+    translateWithChromeOnDevice: jest.fn(),
+    warmupChromeOnDevice: jest.fn(),
+}));
+
+import { translateWithChromeOnDevice } from "common/scripts/chrome_builtin_translate.js";
+
 describe("TranslatorManager fast tab resolution", () => {
     test("uses sender.tab.id without querying the active tab", async () => {
         const manager = Object.create(TranslatorManager.prototype);
@@ -50,5 +58,160 @@ describe("TranslatorManager on-device bridge injection", () => {
         await expect(manager.injectOnDeviceBridge({})).rejects.toThrow(
             "Cannot inject Chrome on-device bridge without a sender tab."
         );
+    });
+});
+
+describe("TranslatorManager Gemini Nano prompt routing", () => {
+    const originalLanguageModel = global.LanguageModel;
+
+    afterEach(() => {
+        global.LanguageModel = originalLanguageModel;
+        jest.clearAllMocks();
+    });
+
+    test("uses the page bridge before falling back to the extension Prompt API", async () => {
+        global.LanguageModel = { create: jest.fn() };
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.channel = {
+            requestToTab: jest.fn().mockResolvedValue({
+                mainMeaning: "안녕",
+                translatedText: "안녕",
+                sourceLanguage: "en",
+                targetLanguage: "ko",
+            }),
+        };
+        manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
+        const localTranslator = {
+            useConfig: jest.fn(),
+            supportedLanguages: jest.fn(),
+            detect: jest.fn(),
+            translate: jest.fn(),
+            pronounce: jest.fn(),
+            stopPronounce: jest.fn(),
+        };
+
+        const proxy = manager.createLocalTranslatorProxy(localTranslator, {
+            enabled: true,
+            mode: "chromeBuiltin",
+        });
+
+        await expect(proxy.translate("hello", "en", "ko")).resolves.toMatchObject({
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+        });
+        expect(manager.channel.requestToTab).toHaveBeenCalledWith(42, "chrome_builtin_translate", {
+            text: "hello",
+            sl: "en",
+            tl: "ko",
+            engine: "geminiNano",
+        });
+        expect(translateWithChromeOnDevice).not.toHaveBeenCalled();
+    });
+
+    test("falls back to the extension Prompt API when the page bridge is unavailable", async () => {
+        global.LanguageModel = { create: jest.fn() };
+        translateWithChromeOnDevice.mockResolvedValue({
+            originalText: "hello",
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.channel = {
+            requestToTab: jest
+                .fn()
+                .mockRejectedValue(new Error("Receiving end does not exist.")),
+        };
+        manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
+        const localTranslator = {
+            useConfig: jest.fn(),
+            supportedLanguages: jest.fn(),
+            detect: jest.fn(),
+            translate: jest.fn(),
+            pronounce: jest.fn(),
+            stopPronounce: jest.fn(),
+        };
+
+        const proxy = manager.createLocalTranslatorProxy(localTranslator, {
+            enabled: true,
+            mode: "geminiNano",
+        });
+
+        await expect(proxy.translate("hello", "en", "ko")).resolves.toMatchObject({
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+        });
+        expect(translateWithChromeOnDevice).toHaveBeenCalledWith("hello", "en", "ko");
+    });
+
+    test("does not hide page bridge model preparation failures behind fallback routes", async () => {
+        global.LanguageModel = { create: jest.fn() };
+        const tabError = new Error(
+            "Chrome Gemini Nano session creation timed out while preparing the on-device model."
+        );
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.channel = { requestToTab: jest.fn().mockRejectedValue(tabError) };
+        manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
+        const localTranslator = {
+            useConfig: jest.fn(),
+            supportedLanguages: jest.fn(),
+            detect: jest.fn(),
+            translate: jest.fn(),
+            pronounce: jest.fn(),
+            stopPronounce: jest.fn(),
+        };
+
+        const proxy = manager.createLocalTranslatorProxy(localTranslator, {
+            enabled: true,
+            mode: "geminiNano",
+        });
+
+        await expect(proxy.translate("hello", "en", "ko")).rejects.toThrow(
+            "session creation timed out"
+        );
+        expect(translateWithChromeOnDevice).not.toHaveBeenCalled();
+    });
+
+    test("limits general Gemini Nano translations to four concurrent prompts", async () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
+        manager.geminiNanoMaxConcurrentTranslations = 4;
+        manager.geminiNanoActiveTranslations = 0;
+        manager.geminiNanoTranslationQueue = [];
+
+        let active = 0;
+        let maxActive = 0;
+        const release = [];
+        manager.translateWithChromePromptTab = jest.fn(
+            (_tabId, text) =>
+                new Promise((resolve) => {
+                    active += 1;
+                    maxActive = Math.max(maxActive, active);
+                    release.push(() => {
+                        active -= 1;
+                        resolve({ mainMeaning: text, translatedText: text });
+                    });
+                })
+        );
+
+        const requests = Array.from({ length: 6 }, (_, index) =>
+            manager.translateWithGeminiNanoPrompt(`text-${index}`, "en", "ko")
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(manager.translateWithChromePromptTab).toHaveBeenCalledTimes(4);
+        expect(maxActive).toBe(4);
+
+        release.shift()();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(manager.translateWithChromePromptTab).toHaveBeenCalledTimes(5);
+
+        while (manager.translateWithChromePromptTab.mock.calls.length < 6 || release.length) {
+            if (release.length) release.shift()();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        await expect(Promise.all(requests)).resolves.toHaveLength(6);
+        expect(maxActive).toBe(4);
     });
 });

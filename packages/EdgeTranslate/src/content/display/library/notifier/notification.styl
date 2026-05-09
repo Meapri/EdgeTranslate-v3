@@ -2,7 +2,8 @@
  * style for notification items
  */
 final-opacity = 0.95;
-animation-duration = 400ms;
+animation-duration = 220ms;
+motion-emphasized = cubic-bezier(0.2, 0, 0, 1);
 
 .edge-translate-notifier-item {
 	display: flex;
@@ -79,18 +80,18 @@ animation-duration = 400ms;
 .edge-translate-notifier-show-animation {
 	animation-name: edge-translate-notifier-show-animation;
 	animation-duration: animation-duration;
-	animation-timing-function: cubic-bezier(0.45, 1.45, 0.75, 1);
+	animation-timing-function: motion-emphasized;
 }
 
 .edge-translate-notifier-disappear-animation {
 	animation-name: edge-translate-notifier-disappear-animation;
 	animation-duration: animation-duration;
-	animation-timing-function: ease;
+	animation-timing-function: motion-emphasized;
 }
 
 @keyframes edge-translate-notifier-show-animation {
 	from {
-		transform: translate(0, -30px) scale(0.75);
+		transform: translate(0, -8px) scale(0.98);
 		opacity: 0;
 	}
 
@@ -107,7 +108,14 @@ animation-duration = 400ms;
 	}
 
 	to {
-		transform: translate(0, -30px) scale(0.75);
+		transform: translate(0, -8px) scale(0.98);
 		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.edge-translate-notifier-show-animation,
+	.edge-translate-notifier-disappear-animation {
+		animation-duration: 1ms !important;
 	}
 }

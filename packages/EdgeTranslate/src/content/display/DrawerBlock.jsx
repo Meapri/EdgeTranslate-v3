@@ -6,6 +6,8 @@ import styled, { css } from "styled-components";
 import ArrowDownIcon from "./icons/arrow-down.svg";
 import ArrowUpIcon from "./icons/arrow-up.svg";
 
+const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
+
 /**
  *
  * @param {{
@@ -68,8 +70,12 @@ const HandleExpandHeight = 15; // Height of the drawer handler when the drawer i
 const Drawer = styled.div`
     overflow: hidden;
     position: relative;
-    transition: height 0.4s;
+    transition: height ${MotionStandard};
     ${(props) => (props.height ? `height: ${props.height}px` : "")}
+
+    @media (prefers-reduced-motion: reduce) {
+        transition-duration: 1ms !important;
+    }
 `;
 const Content = styled.div``;
 /**
@@ -86,27 +92,55 @@ const Handle = styled.div`
     cursor: pointer;
     background: linear-gradient(
         transparent 0%,
-        rgba(250, 250, 250, 0.3) 30%,
-        rgb(250, 250, 250) 100%
+        rgba(255, 255, 255, 0.44) 32%,
+        rgb(255, 255, 255) 100%
     );
     ${(props) => (props.fold ? "position: absolute; bottom: 0;" : "")}
 
     &:hover {
         background: linear-gradient(
             transparent 0%,
-            rgba(250, 250, 250, 0.6) 30%,
-            rgb(250, 250, 250) 100%
+            rgba(211, 227, 253, 0.72) 32%,
+            rgb(255, 255, 255) 100%
         );
     }
 
     &:hover svg {
-        fill: dimgray;
+        fill: #0b57d0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        transition-duration: 1ms !important;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        background: linear-gradient(
+            transparent 0%,
+            rgba(27, 32, 38, 0.48) 32%,
+            rgb(27, 32, 38) 100%
+        );
+
+        &:hover {
+            background: linear-gradient(
+                transparent 0%,
+                rgba(31, 59, 104, 0.72) 32%,
+                rgb(27, 32, 38) 100%
+            );
+        }
+
+        &:hover svg {
+            fill: #a8c7fa;
+        }
     }
 `;
 const IconStyle = css`
     width: 20px;
     height: 20px;
-    fill: #959595;
+    fill: #5f6368;
+
+    @media (prefers-color-scheme: dark) {
+        fill: #bdc1c6;
+    }
 `;
 const StyledArrowDownIcon = styled(ArrowDownIcon)`
     ${IconStyle};

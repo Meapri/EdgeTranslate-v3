@@ -78,23 +78,53 @@ const ErrorInfo = styled.div`
     flex-direction: column;
     align-items: flex-start;
     margin: 10% 5%;
+    padding: 18px;
+    color: #202124;
+    background: #fff;
+    border: 1px solid #e1e3e1;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.12);
+
+    @media (prefers-color-scheme: dark) {
+        color: #e8eaed;
+        background: #20262d;
+        border-color: #3d4651;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
+    }
 `;
 
 const StyledErrorIcon = styled(ErrorIcon)`
-    width: 150px;
-    height: 150px;
+    width: 96px;
+    height: 96px;
     display: block;
     align-self: center;
-    fill: #dd5145;
+    fill: #b3261e;
 
     :hover {
-        fill: #dd5145;
+        fill: #b3261e;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        fill: #f2b8b5;
+
+        :hover {
+            fill: #f2b8b5;
+        }
     }
 `;
 
 const ErrorType = styled.p`
-    font-weight: bold;
-    font-size: large;
+    font-weight: 500;
+    font-size: 18px;
 `;
 
-const ErrorMessage = styled.p``;
+const ErrorMessage = styled.p`
+    margin: 4px 0;
+    color: #5f6368;
+    font-size: 13px;
+    line-height: 1.45;
+
+    @media (prefers-color-scheme: dark) {
+        color: #bdc1c6;
+    }
+`;

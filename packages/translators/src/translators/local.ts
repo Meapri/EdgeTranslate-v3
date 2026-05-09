@@ -2,12 +2,11 @@ import { TranslationResult } from "../types";
 import { LRUCache } from "../utils/lru";
 import { fnv1a32 } from "../utils/hash";
 
-export type LocalTranslatorMode = "endpoint" | "chromeBuiltin" | "googleAiStudio";
+export type LocalTranslatorMode = "chromeBuiltin" | "googleAiStudio";
 
 export type LocalTranslatorConfig = {
     enabled?: boolean;
     mode?: LocalTranslatorMode | string;
-    endpoint?: string;
     apiKey?: string;
     model?: string;
     timeoutMs?: number | string;
@@ -115,14 +114,10 @@ class RequestLimiter {
 
 const localRequestLimiter = new RequestLimiter(DEFAULT_MAX_CONCURRENT_REQUESTS);
 
-function normalizeEndpoint(endpoint?: string) {
-    return (endpoint || "").trim();
-}
-
 function normalizeMode(mode?: string): LocalTranslatorMode {
     if (mode === "chromeBuiltin" || mode === "geminiNano") return "chromeBuiltin";
     if (mode === "googleAiStudio") return "googleAiStudio";
-    return "endpoint";
+    return "chromeBuiltin";
 }
 
 function normalizeModel(model?: string) {
@@ -151,21 +146,76 @@ function toChromeTranslatorLanguage(language: string) {
     return CHROME_TRANSLATOR_LANGUAGE_MAP[base] || base || raw;
 }
 
-function parseTranslatedText(payload: any) {
-    return (
-        payload?.translated_text ||
-        payload?.translatedText ||
-        payload?.translation ||
-        payload?.result ||
-        payload?.text ||
-        ""
-    );
+function isDictionaryCandidate(text: string) {
+    const trimmed = String(text || "").trim();
+    if (!trimmed || trimmed.length > 64) return false;
+    if (/https?:\/\//i.test(trimmed)) return false;
+    if (/<<<EDGE_TRANSLATE_SEGMENT_\d+>>>/.test(trimmed)) return false;
+    if (/[.!?。！？\n\r\t]/.test(trimmed)) return false;
+    return trimmed.split(/\s+/).length <= 2;
+}
+
+function stripCodeFence(text: string) {
+    return String(text || "")
+        .trim()
+        .replace(/^```(?:json)?/i, "")
+        .replace(/```$/i, "")
+        .trim();
+}
+
+function asArray(value: any) {
+    return Array.isArray(value) ? value : [];
+}
+
+function parseStructuredDictionaryOutput(output: string, fallbackText: string) {
+    const cleaned = stripCodeFence(output);
+    const jsonStart = cleaned.indexOf("{");
+    const jsonEnd = cleaned.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
+
+    try {
+        const payload = JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1));
+        const mainMeaning = String(
+            payload.translation || payload.mainMeaning || payload.translatedText || ""
+        ).trim();
+        if (!mainMeaning) return null;
+        return {
+            originalText: fallbackText,
+            mainMeaning,
+            detailedMeanings: asArray(payload.detailedMeanings)
+                .map((item) => ({
+                    pos: String(item?.pos || "").trim(),
+                    meaning: String(item?.meaning || "").trim(),
+                    synonyms: asArray(item?.synonyms)
+                        .map((word) => String(word || "").trim())
+                        .filter(Boolean),
+                }))
+                .filter((item) => item.meaning),
+            definitions: asArray(payload.definitions)
+                .map((item) => ({
+                    pos: String(item?.pos || "").trim(),
+                    meaning: String(item?.meaning || "").trim(),
+                    example: String(item?.example || "").trim(),
+                    synonyms: asArray(item?.synonyms)
+                        .map((word) => String(word || "").trim())
+                        .filter(Boolean),
+                }))
+                .filter((item) => item.meaning),
+            examples: asArray(payload.examples)
+                .map((item) => ({
+                    source: item?.source ? String(item.source).trim() : null,
+                    target: item?.target ? String(item.target).trim() : null,
+                }))
+                .filter((item) => item.source || item.target),
+        } as TranslationResult;
+    } catch {
+        return null;
+    }
 }
 
 class LocalTranslator {
     private enabled = false;
-    private mode: LocalTranslatorMode = "endpoint";
-    private endpoint = "";
+    private mode: LocalTranslatorMode = "chromeBuiltin";
     private apiKey = "";
     private model = DEFAULT_GOOGLE_AI_STUDIO_MODEL;
     private timeoutMs = DEFAULT_TIMEOUT_MS;
@@ -180,7 +230,6 @@ class LocalTranslator {
     useConfig(config: LocalTranslatorConfig = {}) {
         this.enabled = Boolean(config.enabled);
         this.mode = normalizeMode(config.mode);
-        this.endpoint = normalizeEndpoint(config.endpoint);
         this.apiKey = (config.apiKey || "").trim();
         this.model = normalizeModel(config.model);
         this.timeoutMs = Number(config.timeoutMs) || DEFAULT_TIMEOUT_MS;
@@ -198,8 +247,7 @@ class LocalTranslator {
             if (!this.apiKey || !this.model) return new Set<string>();
             return new Set(SUPPORTED_LANGUAGE_CODES);
         }
-        if (!this.endpoint) return new Set<string>();
-        return new Set(SUPPORTED_LANGUAGE_CODES);
+        return new Set<string>();
     }
 
     detect() {
@@ -215,14 +263,6 @@ class LocalTranslator {
                 errorType: "CONFIG_ERR",
                 errorCode: "LOCAL_TRANSLATOR_DISABLED",
                 errorMsg: "Local translator is disabled.",
-                errorAct: { api: "local", action: "translate", text, from, to },
-            };
-        }
-        if (this.mode === "endpoint" && !this.endpoint) {
-            throw {
-                errorType: "CONFIG_ERR",
-                errorCode: "LOCAL_TRANSLATOR_ENDPOINT_MISSING",
-                errorMsg: "Local translator endpoint is not configured.",
                 errorAct: { api: "local", action: "translate", text, from, to },
             };
         }
@@ -261,7 +301,7 @@ class LocalTranslator {
         if (this.mode === "googleAiStudio") {
             return this.requestGoogleAiStudioTranslation(text, from, to);
         }
-        return this.requestEndpointTranslation(text, from, to);
+        return this.requestChromeBuiltinTranslation(text, from, to);
     }
 
     private async requestChromeBuiltinTranslation(text: string, from: string, to: string) {
@@ -354,6 +394,19 @@ class LocalTranslator {
     private buildGoogleAiStudioPrompt(text: string, from: string, to: string) {
         const sourceLanguage = toLanguageName(from);
         const targetLanguage = toLanguageName(to);
+        if (isDictionaryCandidate(text)) {
+            return [
+                "You are a bilingual dictionary and translation engine.",
+                `Translate the user's word or short term from ${sourceLanguage} to ${targetLanguage}.`,
+                "Return strict JSON only. Do not use markdown.",
+                "Schema:",
+                '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
+                "Keep details concise. Write meanings, definitions, and translated examples in the target language.",
+                "If a field is unknown, use an empty array.",
+                "",
+                text,
+            ].join("\n");
+        }
         return [
             "You are a translation engine.",
             `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
@@ -420,7 +473,20 @@ class LocalTranslator {
                 );
             }
 
-            const translated = this.parseGoogleAiStudioResponse(payload);
+            const rawOutput = this.parseGoogleAiStudioResponse(payload);
+            const structured = isDictionaryCandidate(text)
+                ? parseStructuredDictionaryOutput(rawOutput, text)
+                : null;
+            if (structured) {
+                return {
+                    ...structured,
+                    translatedText: structured.mainMeaning,
+                    sourceLanguage: from,
+                    targetLanguage: to,
+                } as TranslationResult;
+            }
+
+            const translated = rawOutput.trim();
             if (!translated) {
                 throw new Error("Google AI Studio returned an empty translation.");
             }
@@ -446,58 +512,6 @@ class LocalTranslator {
                     from,
                     to,
                 },
-            };
-        } finally {
-            clearTimeout(timeoutId);
-        }
-    }
-
-    private async requestEndpointTranslation(text: string, from: string, to: string) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-        try {
-            const headers: Record<string, string> = {
-                "Content-Type": "application/json",
-            };
-            if (this.apiKey) {
-                headers["X-API-Key"] = this.apiKey;
-            }
-
-            const response = await fetch(this.endpoint, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({
-                    text,
-                    source_language: toLanguageName(from),
-                    target_language: toLanguageName(to),
-                }),
-                signal: controller.signal,
-            });
-
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload?.success === false) {
-                throw new Error(
-                    payload?.error || `Local translator failed with ${response.status}`
-                );
-            }
-
-            const translated = parseTranslatedText(payload);
-            if (!translated) {
-                throw new Error("Local translator returned an empty translation.");
-            }
-
-            return {
-                originalText: text,
-                mainMeaning: translated,
-                sourceLanguage: payload?.source_language || payload?.detected_language || from,
-                targetLanguage: to,
-            } as TranslationResult;
-        } catch (error: any) {
-            throw {
-                errorType: "API_ERR",
-                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "LOCAL_TRANSLATOR_ERROR",
-                errorMsg: error?.message || "Local translator request failed.",
-                errorAct: { api: "local", mode: "endpoint", action: "translate", text, from, to },
             };
         } finally {
             clearTimeout(timeoutId);

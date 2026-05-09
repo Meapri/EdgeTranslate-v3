@@ -1,6 +1,8 @@
 @import '../display/library/notifier/notifier.styl';
 
 image-size = 32px;
+motion-fast = 120ms cubic-bezier(0.2, 0, 0, 1);
+motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
 
 /*
  * 划词翻译按钮样式
@@ -16,28 +18,40 @@ image-size = 32px;
     padding: 0 !important;
     margin: 0 !important;
     position: fixed !important;
-    box-shadow: 0px 0px 2px 2px #ddd !important;
+    box-shadow: 0 2px 6px rgba(60, 64, 67, .18), 0 0 0 1px rgba(225, 227, 225, .9) !important;
     cursor: pointer !important;
     border-radius: 50% !important;
     z-index: 2147483647 !important;
     box-sizing: content-box !important;
     overflow: hidden !important;
-    border: none !important;
-    transition: box-shadow 200ms ease-in-out, transform 300ms ease !important; // set transtition effect when hover occurs
-    animation: fade-in 300ms ease-in-out !important; // set fade-in animation on selection icon
+    border: 2px solid #fff !important;
+    transition: box-shadow motion-standard, transform motion-standard, filter motion-standard !important; // set transtition effect when hover occurs
+    animation: fade-in 180ms cubic-bezier(0.2, 0, 0, 1) !important; // set fade-in animation on selection icon
 
     &:hover {
-        box-shadow: 0px 0px 8px 3px #bbb !important;
-        transform: rotate(180deg) !important;
+        box-shadow: 0 6px 14px rgba(60, 64, 67, .24), 0 0 0 4px rgba(11, 87, 208, .12) !important;
+        transform: scale(1.05) !important;
+        filter: saturate(1.08) !important;
     }
 
     @keyframes fade-in {
         0% {
             opacity: 0;
+            transform: scale(.96);
         }
 
         100% {
             opacity: 1;
+            transform: scale(1);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        transition-duration: 1ms !important;
+        animation-duration: 1ms !important;
+
+        &:hover {
+            transform: none !important;
         }
     }
 }

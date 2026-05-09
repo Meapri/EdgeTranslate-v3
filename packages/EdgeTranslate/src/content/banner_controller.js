@@ -46,6 +46,13 @@ class BannerController {
         this._domPageBannerVisible = true;
         this._domTotalTranslationEntries = 0;
         this._domCompletedTranslationEntries = 0;
+        this._domBatchFailureCount = 0;
+        this._domPageRootElements = [];
+        this._domDeferredNodes = new Set();
+        this._domDeferredNodeObserver = null;
+        this._domDeferredElementNodes = new Map();
+        this._domDeferredTimer = null;
+        this._domIdleHandle = null;
         this._onDeviceBridgePromise = null;
         this._onDeviceBridgeRequestId = 0;
         this._onDeviceBridgePending = new Map();
@@ -114,19 +121,25 @@ class BannerController {
             this._domOnDeviceUnavailable = false;
             this._domCompletedTranslationEntries = 0;
             this._domTotalTranslationEntries = 0;
+            this._domBatchFailureCount = 0;
             this._domMaxConcurrentTranslations =
-                this._domPageTranslateOptions.engine === "localEndpoint" ? 1 : 2;
+                this._domPageTranslateOptions.engine === "geminiNano" ? 4 : 2;
             this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
                 this._domPageTranslateOptions.sl
             );
+            this._domPageRootElements = this.getDomPageTranslationRoots();
+            this.warmUpDomPageTranslator();
             this.showDomPageBanner();
             this.startDomFallback();
             // initial scan to cover existing content
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-            const nodes = [];
-            let t;
-            while ((t = walker.nextNode())) nodes.push(t);
-            this.translateBatchNodes(nodes);
+            const nodes = this.collectDomPageTextNodes(this._domPageRootElements);
+            const { immediate, deferred } = this.partitionDomPageTextNodes(nodes);
+            const firstPass = immediate.length ? immediate : deferred.slice(0, 24);
+            this.translateBatchNodes(firstPass);
+            const firstPassNodes = new Set(firstPass);
+            this.scheduleDeferredDomPageTranslation(
+                deferred.filter((node) => !firstPassNodes.has(node))
+            );
         });
 
         // Background may request canceling DOM fallback scheduling when banner is visible
@@ -142,7 +155,6 @@ class BannerController {
     normalizeDomPageTranslateEngine(engine) {
         if (
             engine === "dom" ||
-            engine === "localEndpoint" ||
             engine === "googleAiStudio" ||
             engine === "geminiNano" ||
             engine === "chromeBuiltin"
@@ -150,6 +162,156 @@ class BannerController {
             return engine === "chromeBuiltin" ? "geminiNano" : engine;
         }
         return "geminiNano";
+    }
+
+    warmUpDomPageTranslator() {
+        if (this._domPageTranslateOptions.engine !== "geminiNano") return;
+        if (!this.channel || typeof this.channel.request !== "function") return;
+        const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl || "auto";
+        const tl = this._domPageTranslateOptions.tl || "en";
+        this.channel.request("warmup_gemini_nano", { sl, tl }).catch(() => {});
+    }
+
+    getDomPageTranslationRoots() {
+        const selectors = [
+            "article",
+            "main",
+            "[role='main']",
+            ".article-content",
+            ".entry-content",
+        ];
+        const roots = [];
+        for (const selector of selectors) {
+            document.querySelectorAll(selector).forEach((element) => {
+                if (!element || roots.some((root) => root === element || root.contains(element))) {
+                    return;
+                }
+                for (let i = roots.length - 1; i >= 0; i -= 1) {
+                    if (element.contains(roots[i])) roots.splice(i, 1);
+                }
+                roots.push(element);
+            });
+            if (roots.length) break;
+        }
+        return roots.length ? roots : [document.body].filter(Boolean);
+    }
+
+    isNodeInDomPageTranslationRoot(node) {
+        if (!this._domPageRootElements || !this._domPageRootElements.length) return true;
+        return this._domPageRootElements.some((root) => root && root.contains(node));
+    }
+
+    isMeaningfulDomPageTextNode(node) {
+        if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+        if (!this.isNodeInDomPageTranslationRoot(node)) return false;
+        const text = String(node.nodeValue || "").trim();
+        if (text.length < 2) return false;
+        const p = node.parentElement;
+        if (!p) return false;
+        const tn = p.tagName;
+        if (/^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|SELECT|OPTION)$/i.test(tn)) return false;
+        let ancestor = p;
+        while (ancestor && ancestor !== document.documentElement) {
+            if (this._translatedBlocks.has(ancestor)) return false;
+            ancestor = ancestor.parentElement;
+        }
+        if (this._translatedSet.has(node)) return false;
+        return true;
+    }
+
+    collectDomPageTextNodes(roots) {
+        const nodes = [];
+        for (const root of roots || []) {
+            if (!root) continue;
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (this.isMeaningfulDomPageTextNode(node)) nodes.push(node);
+            }
+        }
+        return nodes;
+    }
+
+    isDomPageTextNodeNearViewport(node) {
+        const element = node && node.parentElement;
+        if (!element || typeof element.getBoundingClientRect !== "function") return true;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        const margin = Math.max(600, Math.floor((window.innerHeight || 800) * 0.75));
+        return rect.bottom >= -margin && rect.top <= (window.innerHeight || 800) + margin;
+    }
+
+    partitionDomPageTextNodes(nodes) {
+        const immediate = [];
+        const deferred = [];
+        for (const node of nodes || []) {
+            if (this.isDomPageTextNodeNearViewport(node)) immediate.push(node);
+            else deferred.push(node);
+        }
+        return { immediate, deferred };
+    }
+
+    scheduleDeferredDomPageTranslation(nodes) {
+        if (!nodes || !nodes.length) return;
+        nodes.forEach((node) => this._domDeferredNodes.add(node));
+        this.observeDeferredDomPageNodes(nodes);
+        this.scheduleIdleDeferredDomPageTranslation();
+    }
+
+    observeDeferredDomPageNodes(nodes) {
+        if (typeof IntersectionObserver !== "function") return;
+        if (!this._domDeferredNodeObserver) {
+            this._domDeferredNodeObserver = new IntersectionObserver(
+                (entries) => {
+                    const visibleNodes = [];
+                    entries.forEach((entry) => {
+                        if (!entry.isIntersecting) return;
+                        const elementNodes = this._domDeferredElementNodes.get(entry.target);
+                        this._domDeferredElementNodes.delete(entry.target);
+                        this._domDeferredNodeObserver.unobserve(entry.target);
+                        if (elementNodes) {
+                            elementNodes.forEach((node) => {
+                                if (this._domDeferredNodes.delete(node)) visibleNodes.push(node);
+                            });
+                        }
+                    });
+                    if (visibleNodes.length) this.translateBatchNodes(visibleNodes);
+                },
+                { rootMargin: "900px 0px 900px 0px" }
+            );
+        }
+
+        nodes.forEach((node) => {
+            const element = node && node.parentElement;
+            if (!element) return;
+            if (!this._domDeferredElementNodes.has(element)) {
+                this._domDeferredElementNodes.set(element, new Set());
+                this._domDeferredNodeObserver.observe(element);
+            }
+            this._domDeferredElementNodes.get(element).add(node);
+        });
+    }
+
+    scheduleIdleDeferredDomPageTranslation() {
+        if (this._domIdleHandle || this._domDeferredTimer) return;
+        const flush = (limit = 18) => {
+            this._domIdleHandle = null;
+            this._domDeferredTimer = null;
+            const nodes = Array.from(this._domDeferredNodes).slice(0, limit);
+            nodes.forEach((node) => this._domDeferredNodes.delete(node));
+            if (nodes.length) this.translateBatchNodes(nodes);
+            if (this._domDeferredNodes.size) {
+                this._domDeferredTimer = setTimeout(() => {
+                    this._domDeferredTimer = null;
+                    this.scheduleIdleDeferredDomPageTranslation();
+                }, 1200);
+            }
+        };
+        if (typeof requestIdleCallback === "function") {
+            this._domIdleHandle = requestIdleCallback(() => flush(24), { timeout: 2500 });
+        } else {
+            this._domDeferredTimer = setTimeout(() => flush(18), 1600);
+        }
     }
 
     async ensureOnDeviceBridge() {
@@ -208,7 +370,7 @@ class BannerController {
             const timeout = setTimeout(() => {
                 this._onDeviceBridgePending.delete(requestId);
                 reject(new Error("Chrome on-device translation bridge request timed out."));
-            }, 30000);
+            }, 60000);
 
             this._onDeviceBridgePending.set(requestId, { resolve, reject, timeout });
             window.postMessage(
@@ -260,38 +422,53 @@ class BannerController {
 
     async translateWithDomPageEngine(text, from, to) {
         if (
-            this._domPageTranslateOptions.engine === "localEndpoint" ||
-            this._domPageTranslateOptions.engine === "googleAiStudio"
+            this._domPageTranslateOptions.engine === "googleAiStudio" ||
+            this._domPageTranslateOptions.engine === "geminiNano" ||
+            this._domPageTranslateOptions.engine === "chromeBuiltin"
         ) {
             return await this.channel.request("translate_text_quiet", {
                 text,
                 sl: from,
                 tl: to,
                 translatorId: "LocalTranslate",
+                engine: this._domPageTranslateOptions.engine,
             });
         }
         return await this.translateWithOnDeviceEngine(text, from, to);
     }
 
     getDomPageTranslationGroupOptions() {
-        if (this._domPageTranslateOptions.engine === "localEndpoint") return { maxChars: 1400 };
         if (this._domPageTranslateOptions.engine === "googleAiStudio") return { maxChars: 6000 };
+        if (this._domPageTranslateOptions.engine === "geminiNano") return { maxChars: 4500 };
         return undefined;
     }
 
     getReadableBlockReplacementOptions() {
-        if (this._domPageTranslateOptions.engine === "localEndpoint") {
-            return { maxChars: 1400 };
-        }
         if (this._domPageTranslateOptions.engine === "googleAiStudio") {
             return { maxChars: 6000 };
+        }
+        if (this._domPageTranslateOptions.engine === "geminiNano") {
+            return { maxChars: 4500 };
         }
         return undefined;
     }
 
     getDomPageBatchOptions() {
+        if (this._domPageTranslateOptions.engine === "geminiNano") {
+            if (this._domBatchFailureCount >= 2) return { maxChars: 5000, maxItems: 6 };
+            if (this._domBatchFailureCount === 1) return { maxChars: 7000, maxItems: 8 };
+            return { maxChars: 9000, maxItems: 14 };
+        }
         if (this._domPageTranslateOptions.engine !== "googleAiStudio") return null;
         return { maxChars: 24000, maxItems: 24 };
+    }
+
+    recordDomPageBatchFailure() {
+        this._domBatchFailureCount += 1;
+    }
+
+    recordDomPageBatchSuccess() {
+        if (this._domBatchFailureCount > 0) this._domBatchFailureCount -= 1;
     }
 
     createDomPageTranslationEntry(group) {
@@ -363,8 +540,6 @@ class BannerController {
         switch (this._domPageTranslateOptions.engine) {
             case "googleAiStudio":
                 return "Google AI Studio";
-            case "localEndpoint":
-                return "Local";
             case "geminiNano":
                 return "Gemini Nano";
             case "chromeBuiltin":
@@ -497,6 +672,20 @@ class BannerController {
             this._mo.disconnect();
             this._mo = null;
         }
+        if (this._domDeferredNodeObserver) {
+            this._domDeferredNodeObserver.disconnect();
+            this._domDeferredNodeObserver = null;
+        }
+        this._domDeferredNodes.clear();
+        this._domDeferredElementNodes.clear();
+        if (this._domDeferredTimer) {
+            clearTimeout(this._domDeferredTimer);
+            this._domDeferredTimer = null;
+        }
+        if (this._domIdleHandle && typeof cancelIdleCallback === "function") {
+            cancelIdleCallback(this._domIdleHandle);
+        }
+        this._domIdleHandle = null;
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
         this._domPageBanner = null;
@@ -670,22 +859,6 @@ class BannerController {
      */
     startDomFallback() {
         if (this._mo) return;
-        const isMeaningful = (node) => {
-            if (!node || node.nodeType !== Node.TEXT_NODE) return false;
-            const text = String(node.nodeValue || "").trim();
-            if (text.length < 2) return false;
-            const p = node.parentElement;
-            if (!p) return false;
-            const tn = p.tagName;
-            if (/^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|SELECT|OPTION)$/i.test(tn)) return false;
-            let ancestor = p;
-            while (ancestor && ancestor !== document.documentElement) {
-                if (this._translatedBlocks.has(ancestor)) return false;
-                ancestor = ancestor.parentElement;
-            }
-            if (this._translatedSet.has(node)) return false;
-            return true;
-        };
         const enqueue = (node) => {
             this._pendingNodes.add(node);
             if (this._scheduleBatch) return;
@@ -702,18 +875,18 @@ class BannerController {
                     m.addedNodes &&
                         m.addedNodes.forEach((n) => {
                             if (n.nodeType === Node.TEXT_NODE) {
-                                if (isMeaningful(n)) enqueue(n);
+                                if (this.isMeaningfulDomPageTextNode(n)) enqueue(n);
                             } else if (n.nodeType === Node.ELEMENT_NODE) {
                                 const walker = document.createTreeWalker(n, NodeFilter.SHOW_TEXT);
                                 let t;
                                 while ((t = walker.nextNode())) {
-                                    if (isMeaningful(t)) enqueue(t);
+                                    if (this.isMeaningfulDomPageTextNode(t)) enqueue(t);
                                 }
                             }
                         });
                 } else if (m.type === "characterData") {
                     const tn = m.target;
-                    if (isMeaningful(tn)) enqueue(tn);
+                    if (this.isMeaningfulDomPageTextNode(tn)) enqueue(tn);
                 }
             }
         });
@@ -755,24 +928,24 @@ class BannerController {
 
         const groupOptions = this.getDomPageTranslationGroupOptions();
         const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
-        this._domTotalTranslationEntries += groups.length;
-        this.updateDomPageBannerStatus();
-        if (this._domPageTranslateOptions.engine === "googleAiStudio") {
+        if (this.getDomPageBatchOptions()) {
             const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
             const uncachedEntries = [];
             entries.forEach((entry) => {
                 const cached = this._domTranslationCache.get(entry.cacheKey);
                 if (cached && this.applyDomPageTranslatedEntry(entry, cached)) {
-                    this.markDomPageTranslationEntriesCompleted();
                     return;
                 }
                 uncachedEntries.push(entry);
             });
-            this.buildDomPageTranslationBatches(uncachedEntries).forEach((batch) =>
-                this.enqueueDomPageBatchTranslation(batch)
-            );
+            const batches = this.buildDomPageTranslationBatches(uncachedEntries);
+            this._domTotalTranslationEntries += batches.length;
+            this.updateDomPageBannerStatus();
+            batches.forEach((batch) => this.enqueueDomPageBatchTranslation(batch));
             return;
         }
+        this._domTotalTranslationEntries += groups.length;
+        this.updateDomPageBannerStatus();
         groups.forEach((group) => this.enqueueDomPageGroupTranslation(group));
     }
 
@@ -789,7 +962,9 @@ class BannerController {
                 const translatedParts = splitSegmentedTranslationText(translated, entries.length);
 
                 if (!translatedParts) {
+                    this.recordDomPageBatchFailure();
                     entries.forEach((entry) => this.enqueueDomPageGroupTranslation(entry.group));
+                    this.markDomPageTranslationEntriesCompleted();
                     return;
                 }
 
@@ -797,15 +972,18 @@ class BannerController {
                     const part = translatedParts[index];
                     if (part) this._domTranslationCache.set(entry.cacheKey, part);
                     if (this.applyDomPageTranslatedEntry(entry, part)) {
-                        this.markDomPageTranslationEntriesCompleted();
                     } else {
                         this.enqueueDomPageGroupTranslation(entry.group);
                     }
                 });
+                this.recordDomPageBatchSuccess();
+                this.markDomPageTranslationEntriesCompleted();
             } catch (error) {
+                this.recordDomPageBatchFailure();
                 entries.forEach((entry) => {
                     entry.group.nodes.forEach((node) => this._translatedSet.delete(node));
                 });
+                this.markDomPageTranslationEntriesCompleted();
             } finally {
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
@@ -858,6 +1036,7 @@ class BannerController {
                             text: group.texts[index],
                         });
                     });
+                    this.markDomPageTranslationEntriesCompleted();
                     return;
                 }
 
@@ -869,6 +1048,7 @@ class BannerController {
                 this.markDomPageTranslationEntriesCompleted();
             } catch (error) {
                 group.nodes.forEach((node) => this._translatedSet.delete(node));
+                this.markDomPageTranslationEntriesCompleted();
                 if (
                     this._domPageTranslateOptions.engine === "geminiNano" &&
                     this.isOnDeviceUnavailableError(error)

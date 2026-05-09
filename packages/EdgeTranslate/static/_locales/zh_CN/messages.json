@@ -1284,20 +1284,20 @@
         "description": "祖鲁语"
     },
     "LocalTranslate": {
-        "message": "本地 API 翻译",
-        "description": "用户配置的本地/API 翻译服务"
+        "message": "AI 翻译",
+        "description": "用户配置的端侧或 Gemini 翻译服务"
     },
     "LocalTranslateShort": {
-        "message": "本地 API",
-        "description": "本地 API 翻译简称"
+        "message": "AI",
+        "description": "AI 翻译简称"
     },
     "LocalTranslatorConfig": {
-        "message": "本地翻译",
-        "description": "用户提供的翻译 API endpoint 设置"
+        "message": "AI 翻译",
+        "description": "AI 翻译服务设置"
     },
     "LocalTranslatorEnabled": {
-        "message": "启用本地翻译",
-        "description": "启用用户配置的本地/API 翻译服务"
+        "message": "启用 AI 翻译",
+        "description": "启用用户配置的 AI 翻译服务"
     },
     "LocalTranslatorEndpoint": {
         "message": "Endpoint URL",
@@ -1308,12 +1308,12 @@
         "description": "Endpoint 模式或 Google AI Studio 模式使用的 API 密钥"
     },
     "LocalTranslatorHelp": {
-        "message": "公开 Web Store 版本不会内置服务器地址或密钥。Endpoint 模式使用你信任并自行填写的服务器；Chrome 内置模式会在支持的桌面版 Chrome 中使用本机 Translator API；Google AI Studio 模式使用你自己的 API 密钥和所选 Gemini 模型。",
-        "description": "本地/API 翻译帮助"
+        "message": "Chrome Gemini Nano 用于端侧 AI 翻译；Google AI Studio 使用你自己的 API 密钥和所选 Gemini 模型。",
+        "description": "AI 翻译帮助"
     },
     "LocalTranslatorMode": {
         "message": "模式",
-        "description": "本地翻译提供方模式"
+        "description": "AI 翻译提供方模式"
     },
     "LocalTranslatorModeEndpoint": {
         "message": "Endpoint API",
@@ -1327,10 +1327,10 @@
         "message": "Chrome Gemini Nano（端侧） 网页翻译"
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "本地翻译超时（毫秒）"
+        "message": "AI 翻译超时（毫秒）"
     },
     "LocalPageTranslate": {
-        "message": "本地翻译器网页翻译"
+        "message": "AI 翻译器网页翻译"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

@@ -90,15 +90,23 @@ export function setupThemeToggle() {
 
   const computeSystem = () => (prefersDark() ? 'dark' : 'light');
   const markActive = (mode) => {
-    for (const el of [btnAuto, btnLight, btnDark]) el.classList.remove('toggled');
+    for (const el of [btnAuto, btnLight, btnDark]) {
+      el.classList.remove('toggled');
+      el.setAttribute('aria-pressed', 'false');
+    }
     if (mode === 'auto') {
-      const sys = computeSystem();
       btnAuto.classList.add('toggled');
-      if (sys === 'light') btnLight.classList.add('toggled'); else btnDark.classList.add('toggled');
+      btnAuto.setAttribute('aria-pressed', 'true');
       return;
     }
-    if (mode === 'light') btnLight.classList.add('toggled');
-    if (mode === 'dark') btnDark.classList.add('toggled');
+    if (mode === 'light') {
+      btnLight.classList.add('toggled');
+      btnLight.setAttribute('aria-pressed', 'true');
+    }
+    if (mode === 'dark') {
+      btnDark.classList.add('toggled');
+      btnDark.setAttribute('aria-pressed', 'true');
+    }
   };
 
   const syncFromStorageOrSystem = () => {
@@ -133,6 +141,11 @@ export function setupThemeToggle() {
 
   const openMenu = () => {
     hideOtherMenus();
+    syncFromStorageOrSystem();
+    try {
+      const pagePref = localStorage.getItem('et_page_theme') || 'auto';
+      setPageThemeVisual(pagePref);
+    } catch {}
     menu.classList.remove('hidden');
     btn.setAttribute('aria-expanded', 'true');
   };
@@ -153,15 +166,23 @@ export function setupThemeToggle() {
   btnDark.addEventListener('click', () => { setExplicit('dark'); syncFromStorageOrSystem(); });
 
   const setPageThemeVisual = (mode) => {
-    for (const el of [pageAuto, pageLight, pageDark]) el && el.classList.remove('toggled');
+    for (const el of [pageAuto, pageLight, pageDark]) {
+      if (!el) continue;
+      el.classList.remove('toggled');
+      el.setAttribute('aria-pressed', 'false');
+    }
     if (mode === 'auto' && pageAuto) {
       pageAuto.classList.add('toggled');
-      const sys = computeSystem();
-      if (sys === 'light' && pageLight) pageLight.classList.add('toggled');
-      if (sys === 'dark' && pageDark) pageDark.classList.add('toggled');
+      pageAuto.setAttribute('aria-pressed', 'true');
     }
-    if (mode === 'light' && pageLight) pageLight.classList.add('toggled');
-    if (mode === 'dark' && pageDark) pageDark.classList.add('toggled');
+    if (mode === 'light' && pageLight) {
+      pageLight.classList.add('toggled');
+      pageLight.setAttribute('aria-pressed', 'true');
+    }
+    if (mode === 'dark' && pageDark) {
+      pageDark.classList.add('toggled');
+      pageDark.setAttribute('aria-pressed', 'true');
+    }
     try { localStorage.setItem('et_page_theme', mode); } catch {}
     if (mode === 'dark') {
       document.documentElement.setAttribute('data-page-theme', 'dark');
@@ -228,5 +249,3 @@ export function setupThemeToggle() {
 
   return true;
 }
-
-

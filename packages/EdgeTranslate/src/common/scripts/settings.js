@@ -32,8 +32,7 @@ const DEFAULT_SETTINGS = {
     DefaultPageTranslator: "GooglePageTranslate",
     LocalTranslatorConfig: {
         enabled: false,
-        mode: "endpoint",
-        endpoint: "",
+        mode: "chromeBuiltin",
         apiKey: "",
         model: "gemini-3.1-flash-lite",
         timeoutMs: 120000,

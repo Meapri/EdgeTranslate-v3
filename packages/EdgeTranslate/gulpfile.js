@@ -259,7 +259,10 @@ function manifest() {
                         }
                         if (Array.isArray(manifestJson.permissions)) {
                             manifestJson.permissions = manifestJson.permissions.filter(
-                                (p) => p !== "notifications" && p !== "declarativeNetRequest"
+                                (p) =>
+                                    p !== "notifications" &&
+                                    p !== "declarativeNetRequest" &&
+                                    p !== "offscreen"
                             );
                         }
 
@@ -356,9 +359,10 @@ function packStatic() {
         // pdf.js core files to build/ (sibling to web/), mirroring official layout
         let pdfjsCore = gulp
             .src([
-                "../../node_modules/pdfjs-dist/build/pdf.mjs",
-                "../../node_modules/pdfjs-dist/build/pdf.worker.mjs",
-            ], { base: "../../node_modules/pdfjs-dist" })
+                "../../node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+                "../../node_modules/pdfjs-dist/legacy/build/pdf.sandbox.mjs",
+                "../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+            ], { base: "../../node_modules/pdfjs-dist/legacy" })
             .pipe(gulp.dest(`${output_dir}build/`));
 
         const streams = [staticJSFiles, staticOtherFiles, webAssets, pdfjsCore];
@@ -385,9 +389,10 @@ function packStatic() {
     // pdf.js core files to build/
     let pdfjsCore = gulp
         .src([
-            "../../node_modules/pdfjs-dist/build/pdf.mjs",
-            "../../node_modules/pdfjs-dist/build/pdf.worker.mjs",
-        ], { base: "../../node_modules/pdfjs-dist" })
+            "../../node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+            "../../node_modules/pdfjs-dist/legacy/build/pdf.sandbox.mjs",
+            "../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+        ], { base: "../../node_modules/pdfjs-dist/legacy" })
         .pipe(gulp.dest(`${output_dir}build/`));
 
     const streams = [staticJSFiles, staticOtherFiles, webAssets, pdfjsCore];

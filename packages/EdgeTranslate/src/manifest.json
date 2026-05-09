@@ -106,6 +106,7 @@
         "activeTab",
         "scripting",
         "contextMenus",
+        "offscreen",
         "storage",
         "tabs",
         "webNavigation",

@@ -1284,20 +1284,20 @@
         "description": "Zulu"
     },
     "LocalTranslate": {
-        "message": "ローカルAPI翻訳",
-        "description": "ユーザー設定のローカル/API翻訳プロバイダー"
+        "message": "AI翻訳",
+        "description": "ユーザー設定のオンデバイスまたは Gemini 翻訳プロバイダー"
     },
     "LocalTranslateShort": {
-        "message": "ローカルAPI",
-        "description": "ローカルAPI翻訳の略称"
+        "message": "AI",
+        "description": "AI翻訳の略称"
     },
     "LocalTranslatorConfig": {
-        "message": "ローカル翻訳",
-        "description": "ユーザー提供翻訳API endpoint設定"
+        "message": "AI翻訳",
+        "description": "AI翻訳プロバイダー設定"
     },
     "LocalTranslatorEnabled": {
-        "message": "ローカル翻訳を有効化",
-        "description": "ユーザー設定のローカル/API翻訳プロバイダーを有効にします"
+        "message": "AI翻訳を有効化",
+        "description": "ユーザー設定のAI翻訳プロバイダーを有効にします"
     },
     "LocalTranslatorEndpoint": {
         "message": "Endpoint URL",
@@ -1308,12 +1308,12 @@
         "description": "Endpoint モードまたは Google AI Studio モードで使用する API キー"
     },
     "LocalTranslatorHelp": {
-        "message": "公開 Web Store ビルドにはサーバーやキーは含まれません。Endpoint モードでは信頼できるサーバーを自分で入力し、Chrome 内蔵モードでは対応するデスクトップ版 Chrome の Translator API を使用し、Google AI Studio モードでは自分の API キーと選択した Gemini モデルを使用します。",
-        "description": "ローカル/API 翻訳ヘルプ"
+        "message": "Chrome Gemini Nano はオンデバイス AI 翻訳に使用し、Google AI Studio は自分の API キーと選択した Gemini モデルを使用します。",
+        "description": "AI翻訳ヘルプ"
     },
     "LocalTranslatorMode": {
         "message": "モード",
-        "description": "ローカル翻訳プロバイダーモード"
+        "description": "AI翻訳プロバイダーモード"
     },
     "LocalTranslatorModeEndpoint": {
         "message": "Endpoint API",
@@ -1327,10 +1327,10 @@
         "message": "Chrome Gemini Nano（オンデバイス） ページ翻訳"
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "ローカル翻訳タイムアウト(ms)"
+        "message": "AI翻訳タイムアウト(ms)"
     },
     "LocalPageTranslate": {
-        "message": "ローカル翻訳ページ翻訳"
+        "message": "AI翻訳ページ翻訳"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

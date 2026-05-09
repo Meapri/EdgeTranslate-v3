@@ -31,6 +31,9 @@
 
     const translatorCache = new Map();
     const geminiNanoSessionCache = new Map();
+    const PROMPT_API_LANGUAGE_CODES = new Set(["en", "es", "ja", "de", "fr"]);
+    const GEMINI_NANO_CREATE_TIMEOUT_MS = 45000;
+    const GEMINI_NANO_PROMPT_TIMEOUT_MS = 60000;
 
     function toChromeTranslatorLanguage(language) {
         if (!language) return language;
@@ -157,6 +160,54 @@
             .trim();
     }
 
+    function getPromptApiLanguage(language) {
+        const normalized = toChromeTranslatorLanguage(language || "");
+        if (!normalized || normalized === "auto") return null;
+        const base = normalized.toLowerCase().split("-")[0];
+        return PROMPT_API_LANGUAGE_CODES.has(base) ? base : null;
+    }
+
+    function getGeminiNanoCreateOptions(sourceLanguage, targetLanguage) {
+        const inputLanguages = new Set(["en"]);
+        const sourcePromptLanguage = getPromptApiLanguage(sourceLanguage);
+        const targetPromptLanguage = getPromptApiLanguage(targetLanguage);
+        if (sourcePromptLanguage) inputLanguages.add(sourcePromptLanguage);
+        if (targetPromptLanguage) inputLanguages.add(targetPromptLanguage);
+
+        const options = {
+            expectedInputs: [{ type: "text", languages: Array.from(inputLanguages) }],
+        };
+        if (targetPromptLanguage) {
+            options.expectedOutputs = [{ type: "text", languages: [targetPromptLanguage] }];
+        }
+        return options;
+    }
+
+    function withTimeout(promise, timeoutMs, message, abortController) {
+        let timeoutId;
+        let timedOut = false;
+        const timeoutError = new Error(message);
+        const timeout = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                timedOut = true;
+                try {
+                    abortController?.abort?.(timeoutError);
+                } catch (_) {
+                    // Ignore abort failures; the timeout error below is the actionable failure.
+                }
+                reject(timeoutError);
+            }, timeoutMs);
+        });
+        return Promise.race([promise, timeout])
+            .catch((error) => {
+                if (timedOut && /abort/i.test(String(error?.message || error || ""))) {
+                    throw timeoutError;
+                }
+                throw error;
+            })
+            .finally(() => clearTimeout(timeoutId));
+    }
+
     async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
         const key = `${sourceLanguage}|${targetLanguage}`;
         if (geminiNanoSessionCache.has(key)) return geminiNanoSessionCache.get(key);
@@ -165,29 +216,40 @@
         if (!languageModelApi || typeof languageModelApi.create !== "function") {
             throw new Error("Chrome Gemini Nano LanguageModel API is not available in this page context.");
         }
+        const createOptions = getGeminiNanoCreateOptions(sourceLanguage, targetLanguage);
         if (typeof languageModelApi.availability === "function") {
-            const availability = await languageModelApi.availability();
+            const availability = await languageModelApi.availability(createOptions);
             if (availability === "unavailable") {
                 throw new Error("Chrome Gemini Nano LanguageModel API is unavailable on this device.");
             }
         }
 
-        const session = await languageModelApi.create({
-            initialPrompts: [
-                {
-                    role: "system",
-                    content: [
-                        "You are a precise translation engine powered by the local Gemini Nano model.",
-                        "Translate user-provided text only.",
-                        "Preserve meaning, tone, punctuation, line breaks, URLs, numbers, names, and HTML-like entities.",
-                        "If segment marker lines like <<<EDGE_TRANSLATE_SEGMENT_1>>> appear, keep those marker lines unchanged and translate only the text between them.",
-                        "Do not explain, summarize, romanize, add notes, or wrap the answer in quotes/code fences.",
-                        `Source language: ${toLanguageName(sourceLanguage)}.`,
-                        `Target language: ${toLanguageName(targetLanguage)}.`,
-                    ].join("\n"),
+        const abortController =
+            typeof window.AbortController === "function" ? new window.AbortController() : null;
+        const session = await withTimeout(
+            languageModelApi.create({
+                ...createOptions,
+                ...(abortController ? { signal: abortController.signal } : {}),
+                monitor(monitor) {
+                    monitor.addEventListener("downloadprogress", () => {});
                 },
-            ],
-        });
+                initialPrompts: [
+                    {
+                        role: "system",
+                        content: [
+                            "You are a fast translation engine.",
+                            "Translate only. No explanations, notes, markdown, or quotes.",
+                            "Keep URLs, numbers, names, line breaks, and <<<EDGE_TRANSLATE_SEGMENT_N>>> markers unchanged.",
+                            `Source language: ${toLanguageName(sourceLanguage)}.`,
+                            `Target language: ${toLanguageName(targetLanguage)}.`,
+                        ].join("\n"),
+                    },
+                ],
+            }),
+            GEMINI_NANO_CREATE_TIMEOUT_MS,
+            "Chrome Gemini Nano session creation timed out while preparing the on-device model. Gemini Nano may still be downloading or not installed yet. Open chrome://on-device-internals or chrome://components and finish the Optimization Guide On Device Model download, then try again.",
+            abortController
+        );
         geminiNanoSessionCache.set(key, session);
         return session;
     }
@@ -196,16 +258,25 @@
         const targetLanguage = toChromeTranslatorLanguage(to);
         const sourceLanguage = from === "auto" ? "auto" : toChromeTranslatorLanguage(from);
         const session = await getGeminiNanoSession(sourceLanguage, targetLanguage);
-        const output = await session.prompt(
-            [
-                `Translate the following text from ${toLanguageName(sourceLanguage)} to ${toLanguageName(
-                    targetLanguage
-                )}.`,
-                "Return only the translated text.",
-                "<text>",
-                text,
-                "</text>",
-            ].join("\n")
+        const prompt = /<<<EDGE_TRANSLATE_SEGMENT_\d+>>>/.test(text)
+            ? [
+                  "Fast translate. Output only translated text.",
+                  `From: ${toLanguageName(sourceLanguage)}. To: ${toLanguageName(targetLanguage)}.`,
+                  "Keep every <<<EDGE_TRANSLATE_SEGMENT_N>>> marker exactly unchanged.",
+                  "Translate text after each marker. No notes. No markdown.",
+                  text,
+              ].join("\n")
+            : [
+                  `Translate ${toLanguageName(sourceLanguage)} to ${toLanguageName(
+                      targetLanguage
+                  )}.`,
+                  "Output translation only. No notes.",
+                  text,
+              ].join("\n");
+        const output = await withTimeout(
+            session.prompt(prompt),
+            GEMINI_NANO_PROMPT_TIMEOUT_MS,
+            "Chrome Gemini Nano prompt timed out."
         );
         const translated = normalizeGeminiNanoOutput(output);
         if (!translated) throw new Error("Chrome Gemini Nano returned an empty translation.");

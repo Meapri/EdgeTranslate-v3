@@ -33,7 +33,6 @@ class Channel {
                 let parsed = JSON.parse(message);
 
                 if (!parsed || !parsed.type) {
-                    console.error(`Bad message: ${message}`);
                     return;
                 }
 
@@ -59,7 +58,6 @@ class Channel {
                         return true;
                     }
                     default:
-                        console.error(`Unknown message type: ${message.type}`);
                         break;
                 }
                 return;

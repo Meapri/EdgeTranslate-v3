@@ -444,40 +444,32 @@
         "description": "언어 이름"
     },
     "LocalTranslate": {
-        "message": "로컬 API 번역",
-        "description": "사용자가 설정하는 로컬/API 번역 공급자"
+        "message": "AI 번역",
+        "description": "사용자가 설정하는 온디바이스 또는 Gemini 번역 공급자"
     },
     "LocalTranslateShort": {
-        "message": "로컬 API",
-        "description": "로컬 API 번역 약칭"
+        "message": "AI",
+        "description": "AI 번역 약칭"
     },
     "LocalTranslatorConfig": {
-        "message": "로컬 번역",
-        "description": "사용자 제공 번역 API endpoint 설정"
+        "message": "AI 번역",
+        "description": "AI 번역 공급자 설정"
     },
     "LocalTranslatorEnabled": {
-        "message": "로컬 번역 사용",
-        "description": "사용자가 설정한 로컬/API 번역 공급자 사용"
-    },
-    "LocalTranslatorEndpoint": {
-        "message": "Endpoint URL",
-        "description": "번역 API endpoint URL"
+        "message": "AI 번역 사용",
+        "description": "사용자가 설정한 AI 번역 공급자 사용"
     },
     "LocalTranslatorApiKey": {
         "message": "API 키",
-        "description": "Endpoint 모드 또는 Google AI Studio 모드에 사용할 API 키"
+        "description": "Google AI Studio 모드에 사용할 API 키"
     },
     "LocalTranslatorHelp": {
-        "message": "공개 Web Store 빌드에는 서버 주소나 키가 포함되지 않습니다. Endpoint 모드는 신뢰하는 서버를 직접 입력하고, Chrome 내장 모드는 지원되는 데스크톱 Chrome의 Translator API를 사용하며, Google AI Studio 모드는 직접 입력한 API 키와 선택한 Gemini 모델을 사용합니다.",
-        "description": "로컬/API 번역 도움말"
+        "message": "Chrome Gemini Nano는 온디바이스 AI 번역에 사용하고, Google AI Studio는 직접 입력한 API 키와 선택한 Gemini 모델을 사용합니다. AI 단어 번역은 모델이 제공할 수 있으면 상세 의미, 정의, 예문을 함께 표시합니다.",
+        "description": "AI 번역 도움말"
     },
     "LocalTranslatorMode": {
         "message": "모드",
-        "description": "로컬 번역 제공자 모드"
-    },
-    "LocalTranslatorModeEndpoint": {
-        "message": "Endpoint API",
-        "description": "사용자가 설정한 HTTP 번역 endpoint를 사용합니다."
+        "description": "AI 번역 제공자 모드"
     },
     "LocalTranslatorModeChromeBuiltin": {
         "message": "Chrome Gemini Nano 온디바이스",
@@ -487,10 +479,10 @@
         "message": "Chrome Gemini Nano 온디바이스 페이지 번역"
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "로컬 번역기 제한 시간(ms)"
+        "message": "AI 번역기 제한 시간(ms)"
     },
     "LocalPageTranslate": {
-        "message": "로컬 번역기 페이지 번역"
+        "message": "AI 번역기 페이지 번역"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

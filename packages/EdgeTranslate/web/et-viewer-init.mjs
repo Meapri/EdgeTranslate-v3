@@ -1,8 +1,14 @@
 // EdgeTranslate PDF.js viewer bootstrap (MV3-safe: no inline script)
 import * as PDFJS from '../build/build/pdf.mjs';
-import { applyEarlyThemeFromStorageAndSystem, applyEarlyPageTheme, setupThemeToggle } from './et-viewer-theme.mjs';
+import { applyEarlyThemeFromStorageAndSystem, applyEarlyPageTheme, setupThemeToggle } from './et-viewer-theme.mjs?v=20260509-pdf-ui-goal3';
 import { setupSecondaryToolbarScroll } from './et-viewer-secondary-toolbar.mjs';
-import { parsePdfTarget, shouldPreloadPdfAsBlob } from './edge-viewer-file.js';
+import {
+  decodePdfViewerUrlParam,
+  parsePdfTarget,
+  setPdfViewerSearchParam,
+  shouldBlockPdfDropHijack,
+  shouldPreloadPdfAsBlob,
+} from './edge-viewer-file.js';
 
 // Expose as global for viewer.mjs
 if (!globalThis.pdfjsLib) {
@@ -33,14 +39,17 @@ try {
   };
 } catch {}
 
-// Disable drag-and-drop open behavior inside the viewer
+// Keep external PDF drops from replacing the current document while preserving
+// PDF.js' internal thumbnail/comment/editor drag behavior.
 try {
-  const block = (e) => {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+  const blockExternalPdfDrop = (event) => {
+    if (!shouldBlockPdfDropHijack({ dataTransfer: event.dataTransfer, target: event.target })) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
   };
-  window.addEventListener('dragover', block);
-  window.addEventListener('drop', block);
+  window.addEventListener('dragover', blockExternalPdfDrop, { capture: true });
+  window.addEventListener('drop', blockExternalPdfDrop, { capture: true });
 } catch {}
 
   try { PDFJS.GlobalWorkerOptions.workerSrc = '../build/build/pdf.worker.mjs'; } catch {}
@@ -57,9 +66,13 @@ try {
   const fileParam = params.get('file');
 
   if (fileParam) {
-    // Decode and normalize target URL
-    let rawUrl = fileParam;
-    try { rawUrl = decodeURIComponent(fileParam); } catch {}
+    // Decode and normalize target URL. URLSearchParams serializes values for us;
+    // pre-encoding blob: URLs here makes PDF.js treat them as relative paths.
+    const rawUrl = decodePdfViewerUrlParam(fileParam);
+    if (rawUrl !== fileParam) {
+      setPdfViewerSearchParam(params, 'file', rawUrl);
+      history.replaceState(null, '', urlObj.pathname + '?' + params.toString() + urlObj.hash);
+    }
 
     const target = parsePdfTarget(rawUrl, location.href);
 
@@ -80,12 +93,12 @@ try {
 
     if (isBlobUrl && sourceParam) {
       try {
-        const original = decodeURIComponent(sourceParam);
+        const original = decodePdfViewerUrlParam(sourceParam);
         const res = await fetch(original);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         try { createdBlobUrls.add(blobUrl); } catch {}
-        params.set('file', encodeURIComponent(blobUrl));
+        setPdfViewerSearchParam(params, 'file', blobUrl);
         history.replaceState(null, '', urlObj.pathname + '?' + params.toString() + urlObj.hash);
       } catch (e) {
         console.warn('[EdgeTranslate] PDF blob rehydration failed:', e);
@@ -98,8 +111,8 @@ try {
         const blobUrl = URL.createObjectURL(blob);
         try { createdBlobUrls.add(blobUrl); } catch {}
         // Preserve original URL for refresh recovery
-        params.set('source', encodeURIComponent(target.href));
-        params.set('file', encodeURIComponent(blobUrl));
+        setPdfViewerSearchParam(params, 'source', target.href);
+        setPdfViewerSearchParam(params, 'file', blobUrl);
         history.replaceState(null, '', urlObj.pathname + '?' + params.toString() + urlObj.hash);
       } catch (e) {
         console.warn('[EdgeTranslate] PDF preload failed:', e);
@@ -171,7 +184,42 @@ try {
     return true;
   };
   setupGlobalMenuDismissal();
+
+  const setupDocumentPropertiesDialog = () => {
+    const dialog = document.getElementById('documentPropertiesDialog');
+    if (!dialog) return false;
+    const resetScroll = () => {
+      requestAnimationFrame(() => {
+        try { dialog.scrollTop = 0; } catch {}
+      });
+    };
+    const normalizeTitle = () => {
+      try {
+        const title = dialog.querySelector('.et-document-properties-header > span');
+        if (title && title.textContent) title.textContent = title.textContent.replace(/[.…]+$/u, '');
+      } catch {}
+    };
+    const observer = new MutationObserver(() => {
+      if (dialog.open || dialog.hasAttribute('open')) {
+        normalizeTitle();
+        resetScroll();
+      }
+    });
+    try { observer.observe(dialog, { attributes: true, attributeFilter: ['open'] }); } catch {}
+    document.getElementById('documentProperties')?.addEventListener('click', () => {
+      setTimeout(normalizeTitle, 0);
+      setTimeout(resetScroll, 0);
+      setTimeout(normalizeTitle, 80);
+      setTimeout(resetScroll, 80);
+    });
+    return true;
+  };
+  const trySetupDocumentPropertiesDialog = () => {
+    if (!setupDocumentPropertiesDialog()) setTimeout(trySetupDocumentPropertiesDialog, 50);
+  };
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', trySetupDocumentPropertiesDialog);
+  } else {
+    trySetupDocumentPropertiesDialog();
+  }
 })();
-
-
-

@@ -184,11 +184,6 @@
                                 id="local-translator-mode"
                             >
                                 <option
-                                    value="endpoint"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeEndpoint"
-                                ></option>
-                                <option
                                     value="chromeBuiltin"
                                     class="i18n"
                                     data-i18n-name="LocalTranslatorModeChromeBuiltin"
@@ -202,24 +197,8 @@
                         </label>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="column">
-                        <label
-                            for="local-translator-endpoint"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorEndpoint"
-                            data-insert-pos="afterBegin"
-                        >
-                            <input
-                                type="text"
-                                setting-type="text"
-                                setting-path="LocalTranslatorConfig endpoint"
-                                id="local-translator-endpoint"
-                                placeholder="https://example.com/translate"
-                            />
-                        </label>
-                    </div>
-                    <div class="column">
+                <div class="row" id="local-translator-google-settings">
+                    <div class="column" data-local-mode="googleAiStudio">
                         <label
                             for="local-translator-api-key"
                             class="checked-label i18n"
@@ -235,7 +214,7 @@
                             />
                         </label>
                     </div>
-                    <div class="column">
+                    <div class="column" data-local-mode="googleAiStudio">
                         <label
                             for="local-translator-model"
                             class="checked-label i18n"
@@ -263,7 +242,7 @@
                             </select>
                         </label>
                     </div>
-                    <div class="column">
+                    <div class="column" data-local-mode="googleAiStudio">
                         <label
                             for="local-translator-timeout"
                             class="checked-label i18n"
@@ -361,40 +340,6 @@
                                 class="radio"
                                 name="default-page-translator"
                                 id="google-page-translator"
-                            />
-                        </label>
-                    </div>
-                    <div class="column">
-                        <label
-                            for="chrome-builtin-page-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="ChromeBuiltinPageTranslate"
-                        >
-                            <input
-                                type="radio"
-                                value="ChromeBuiltinPageTranslate"
-                                setting-type="radio"
-                                setting-path="DefaultPageTranslator"
-                                class="radio"
-                                name="default-page-translator"
-                                id="chrome-builtin-page-translator"
-                            />
-                        </label>
-                    </div>
-                    <div class="column">
-                        <label
-                            for="local-page-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalPageTranslate"
-                        >
-                            <input
-                                type="radio"
-                                value="LocalPageTranslate"
-                                setting-type="radio"
-                                setting-path="DefaultPageTranslator"
-                                class="radio"
-                                name="default-page-translator"
-                                id="local-page-translator"
                             />
                         </label>
                     </div>

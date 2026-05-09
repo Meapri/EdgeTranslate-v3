@@ -5,6 +5,9 @@ import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import styled, { css } from "styled-components";
 import ArrowDownIcon from "./icons/arrow-down.svg";
 
+const MotionFast = "120ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
+
 /**
  *
  * @param {{
@@ -100,26 +103,48 @@ const StyledSelect = styled.div`
 `;
 const Menu = styled.ul`
     display: ${(props) => (props.open ? "block" : "none")};
-    min-width: 100px;
-    margin: 0;
+    min-width: 168px;
+    margin: 6px 0 0;
     list-style: none;
     font-size: 14px;
     text-align: left;
     background-color: #fff;
-    border-radius: 6px;
-    padding: 6px 0;
+    border: 1px solid #e1e3e1;
+    border-radius: 8px;
+    padding: 6px;
     position: absolute;
     left: 0;
     top: 100%;
     z-index: 6;
     float: left;
-    box-shadow: 0 0 10px rgb(0 0 0 / 6%), 0 4px 4px rgb(0 0 0 / 12%);
+    box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
+    animation: et-dropdown-enter ${MotionStandard} both;
+
+    @keyframes et-dropdown-enter {
+        from {
+            opacity: 0;
+            transform: translateY(-4px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        background-color: #20262d;
+        border-color: #3d4651;
+        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
 `;
 const Title = styled.a`
     display: flex;
     align-items: center;
+    justify-content: center;
+    gap: 4px;
     margin-bottom: 0;
-    font-weight: 400;
+    font-weight: 600;
     text-align: center;
     cursor: pointer;
     outline: 0;
@@ -129,62 +154,104 @@ const Title = styled.a`
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    padding: 2px 8px;
+    padding: 0 10px 0 12px;
+    min-height: 40px;
     font-size: 14px;
     line-height: 1.5;
-    border-radius: 6px;
-    transition: color 0.2s linear, background-color 0.3s linear;
-    color: gray;
+    border-radius: 999px;
+    transition: color ${MotionFast}, background-color ${MotionFast};
+    color: #0b57d0;
     background-color: transparent;
     overflow: hidden;
     &:hover {
-        color: #575757;
-        background: #e4e4e4;
+        color: #0b57d0;
+        background: rgba(11, 87, 208, 0.08);
     }
     &:hover svg {
-        fill: #575757;
+        fill: #0b57d0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        color: #a8c7fa;
+
+        &:hover {
+            color: #d3e3fd;
+            background: rgba(168, 199, 250, 0.14);
+        }
+
+        &:hover svg {
+            fill: #d3e3fd;
+        }
     }
 `;
 const StyledArrowDownIcon = styled(ArrowDownIcon)`
-    fill: #8e8e93;
-    margin-left: 4px;
+    fill: #0b57d0;
+    width: 16px;
+    height: 16px;
+    margin-left: 0;
+
+    @media (prefers-color-scheme: dark) {
+        fill: #a8c7fa;
+    }
 `;
 
 /* Style of Item */
 const ActiveStyle = css`
-    color: #1675e0;
+    color: #0b57d0;
     font-weight: 700;
-    background-color: rgba(242, 250, 255, 0.5);
+    background-color: #d3e3fd;
     &:hover {
-        color: #1675e0;
-        background-color: rgba(242, 250, 255, 0.5);
+        color: #0b57d0;
+        background-color: #d3e3fd;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        color: #d3e3fd;
+        background-color: #1f3b68;
+
+        &:hover {
+            color: #d3e3fd;
+            background-color: #1f3b68;
+        }
     }
 `;
 const InActiveStyle = css`
-    color: #575757;
+    color: #202124;
     &:hover {
-        color: #575757;
-        background-color: #f2faff;
+        color: #0b57d0;
+        background-color: rgba(11, 87, 208, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        color: #e8eaed;
+
+        &:hover {
+            color: #d3e3fd;
+            background-color: rgba(168, 199, 250, 0.14);
+        }
     }
 `;
 const Item = styled.li`
     display: flex;
-    padding: 8px 12px;
+    align-items: center;
+    min-height: 40px;
+    padding: 0 12px;
     clear: both;
-    font-weight: 400;
+    font-weight: 600;
     line-height: 1.4;
     white-space: nowrap;
     cursor: pointer;
+    border-radius: 8px;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    -webkit-transition: color 0.3s linear, background-color 0.3s linear;
-    transition: color 0.3s linear, background-color 0.3s linear;
-    transition: color 0.3s linear, background-color 0.3s linear;
+    -webkit-transition: color ${MotionFast}, background-color ${MotionFast};
+    transition: color ${MotionFast}, background-color ${MotionFast};
+    transition: color ${MotionFast}, background-color ${MotionFast};
     transition-property: color, background-color;
-    transition-duration: 0.3s, 0.3s;
-    transition-timing-function: linear, linear;
+    transition-duration: 120ms, 120ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1);
     transition-delay: 0s, 0s;
     ${(props) => (props.active ? ActiveStyle : InActiveStyle)}
 `;

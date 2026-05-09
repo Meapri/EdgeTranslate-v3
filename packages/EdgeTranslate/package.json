@@ -67,7 +67,7 @@
     "dependencies": {
         "@edge_translate/translators": "^0.1.4",
         "dompurify": "^2.3.6",
-        "pdfjs-dist": "^5.4.54",
+        "pdfjs-dist": "^5.7.284",
         "preact": "^10.6.6",
         "preact-render-to-string": "^5.1.20",
         "react-draggable": "^4.5.0",

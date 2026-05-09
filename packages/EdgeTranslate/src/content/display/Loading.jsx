@@ -213,31 +213,31 @@ const LoadingEffect = styled.div`
     .lds-ellipsis div:nth-child(1) div {
         -webkit-animation: lds-ellipsis2 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
         animation: lds-ellipsis2 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        background: rgba(100%, 80.39215686274507%, 25.882352941176467%, 0.9);
+        background: rgba(11, 87, 208, 0.9);
     }
 
     .lds-ellipsis div:nth-child(2) div {
         -webkit-animation-delay: -0.85s;
         animation-delay: -0.85s;
-        background: rgba(86.66666666666667%, 31.764705882352956%, 27.058823529411757%, 0.9);
+        background: rgba(20, 108, 67, 0.9);
     }
 
     .lds-ellipsis div:nth-child(3) div {
         -webkit-animation-delay: -0.425s;
         animation-delay: -0.425s;
-        background: rgba(9.80392156862745%, 63.13725490196078%, 37.25490196078431%, 0.9);
+        background: rgba(122, 77, 0, 0.82);
     }
 
     .lds-ellipsis div:nth-child(4) div {
         -webkit-animation-delay: 0s;
         animation-delay: 0s;
-        background: rgba(29.411764705882348%, 54.509803921568704%, 95.68627450980392%, 0.9);
+        background: rgba(11, 87, 208, 0.72);
     }
 
     .lds-ellipsis div:nth-child(5) div {
         -webkit-animation: lds-ellipsis3 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
         animation: lds-ellipsis3 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        background: rgba(100%, 80.39215686274507%, 25.882352941176467%, 0.9);
+        background: rgba(11, 87, 208, 0.9);
     }
 
     .lds-ellipsis {

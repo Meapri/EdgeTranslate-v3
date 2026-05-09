@@ -1284,20 +1284,20 @@
         "description": "Zulu"
     },
     "LocalTranslate": {
-        "message": "Локальный API перевод",
-        "description": "Пользовательский локальный/API провайдер перевода"
+        "message": "AI Translate",
+        "description": "Пользовательский on-device или Gemini провайдер перевода"
     },
     "LocalTranslateShort": {
-        "message": "Local API",
-        "description": "Сокращение Local API Translate"
+        "message": "AI",
+        "description": "Сокращение AI Translate"
     },
     "LocalTranslatorConfig": {
-        "message": "Локальный перевод",
-        "description": "Настройки пользовательского endpoint API перевода"
+        "message": "AI Translate",
+        "description": "Настройки AI-провайдера перевода"
     },
     "LocalTranslatorEnabled": {
-        "message": "Включить локальный перевод",
-        "description": "Включить пользовательский локальный/API провайдер"
+        "message": "Включить AI Translate",
+        "description": "Включить пользовательский AI-провайдер перевода"
     },
     "LocalTranslatorEndpoint": {
         "message": "Endpoint URL",
@@ -1308,12 +1308,12 @@
         "description": "API key for Endpoint mode or Google AI Studio mode."
     },
     "LocalTranslatorHelp": {
-        "message": "Public Web Store builds do not include a server or key. Use Endpoint mode with your own trusted server, Chrome Built-in mode on supported desktop Chrome versions, or Google AI Studio mode with your own API key and selected Gemini model.",
-        "description": "Local/API translation help."
+        "message": "Use Chrome Gemini Nano for on-device AI translation, or Google AI Studio with your own API key and selected Gemini model.",
+        "description": "AI translation help."
     },
     "LocalTranslatorMode": {
         "message": "Режим",
-        "description": "Режим локального провайдера перевода."
+        "description": "Режим AI-провайдера перевода."
     },
     "LocalTranslatorModeEndpoint": {
         "message": "Endpoint API",
@@ -1327,10 +1327,10 @@
         "message": "Chrome Gemini Nano (on-device) page translation"
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "Тайм-аут локального переводчика (мс)"
+        "message": "Тайм-аут AI-переводчика (мс)"
     },
     "LocalPageTranslate": {
-        "message": "Перевод страницы локальным переводчиком"
+        "message": "Перевод страницы AI-переводчиком"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

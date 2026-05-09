@@ -9,6 +9,7 @@ module.exports = {
         "/content/notice/notice": "./src/content/notice/notice.js",
         "/popup/popup": "./src/popup/popup.js",
         "/options/options": "./src/options/options.js",
+        "/offscreen/chrome_prompt": "./src/offscreen/chrome_prompt.js",
         "/content/deepl_injector": "./src/content/deepl_injector.js",
     },
     output: {

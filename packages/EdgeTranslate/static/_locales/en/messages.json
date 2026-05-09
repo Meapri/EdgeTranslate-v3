@@ -1284,40 +1284,32 @@
         "description": "Zulu"
     },
     "LocalTranslate": {
-        "message": "Local API Translate",
-        "description": "User-configured local/API translation provider."
+        "message": "AI Translate",
+        "description": "User-configured on-device or Gemini translation provider."
     },
     "LocalTranslateShort": {
-        "message": "Local API",
-        "description": "Abbreviation of Local API Translate."
+        "message": "AI",
+        "description": "Abbreviation of AI Translate."
     },
     "LocalTranslatorConfig": {
-        "message": "Local Translate",
-        "description": "Settings for a user-provided translation API endpoint."
+        "message": "AI Translate",
+        "description": "Settings for AI translation providers."
     },
     "LocalTranslatorEnabled": {
-        "message": "Enable Local Translate",
-        "description": "Enable the user-configured local/API translation provider."
-    },
-    "LocalTranslatorEndpoint": {
-        "message": "Endpoint URL",
-        "description": "URL of your translation API endpoint."
+        "message": "Enable AI Translate",
+        "description": "Enable the user-configured AI translation provider."
     },
     "LocalTranslatorApiKey": {
         "message": "API key",
-        "description": "API key for Endpoint mode or Google AI Studio mode."
+        "description": "API key for Google AI Studio mode."
     },
     "LocalTranslatorHelp": {
-        "message": "For public Web Store builds, no server or key is bundled. Use Endpoint mode with your own trusted server, Chrome Built-in mode on supported desktop Chrome versions, or Google AI Studio mode with your own API key and selected Gemini model.",
-        "description": "Local API help text."
+        "message": "Use Chrome Gemini Nano for on-device AI translation, or Google AI Studio with your own API key and selected Gemini model. Single-word AI translations include meanings, definitions, and examples when the model can provide them.",
+        "description": "AI translation help text."
     },
     "LocalTranslatorMode": {
         "message": "Mode",
-        "description": "Local translation provider mode."
-    },
-    "LocalTranslatorModeEndpoint": {
-        "message": "Endpoint API",
-        "description": "Use a user-configured HTTP translation endpoint."
+        "description": "AI translation provider mode."
     },
     "LocalTranslatorModeChromeBuiltin": {
         "message": "Chrome Gemini Nano (on-device)",
@@ -1327,10 +1319,10 @@
         "message": "Chrome Gemini Nano (on-device) page translation"
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "Local translator timeout (ms)"
+        "message": "AI translator timeout (ms)"
     },
     "LocalPageTranslate": {
-        "message": "Local Translator Page Translate"
+        "message": "AI Translator Page Translate"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

@@ -30,7 +30,16 @@ const scrollbarWidth = getScrollbarWidth();
 // Store original css text on document.body.
 let documentBodyCSS = "";
 // The duration time of result panel's transition. unit: ms.
-const transitionDuration = 500;
+const transitionDuration = 360;
+const transitionEasing = "cubic-bezier(0.2, 0, 0, 1)";
+const DarkPrimary = "#a8c7fa";
+const DarkOnSurface = "#e8eaed";
+const DarkOnSurfaceVariant = "#bdc1c6";
+const DarkSurface = "#1b2026";
+const DarkSurfaceContainer = "#20262d";
+const DarkOutline = "#3d4651";
+const MotionFast = "120ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
 
 import { pickBestVoice } from "./voiceSelection.js";
 
@@ -728,8 +737,8 @@ export default function ResultPanel() {
                     documentBodyCSS = document.body.style.cssText;
 
                     document.body.style.position = "absolute";
-                    document.body.style.transition = `width ${transitionDuration}ms`;
-                    panelElRef.current.style.transition = `width ${transitionDuration}ms`;
+                    document.body.style.transition = `width ${transitionDuration}ms ${transitionEasing}`;
+                    panelElRef.current.style.transition = `width ${transitionDuration}ms ${transitionEasing}`;
                     /* set the start width to make the transition effect work */
                     document.body.style.width = "100%";
                     move(0, window.innerHeight, offsetLeft, 0);
@@ -766,7 +775,7 @@ export default function ResultPanel() {
      */
     async function removeFixedPanel() {
         if (resizePageFlag.current) {
-            document.body.style.transition = `width ${transitionDuration}ms`;
+            document.body.style.transition = `width ${transitionDuration}ms ${transitionEasing}`;
             await delayPromise(50);
             document.body.style.width = "100%";
             await delayPromise(transitionDuration);
@@ -983,7 +992,7 @@ export default function ResultPanel() {
  */
 
 export const MaxZIndex = 2147483647;
-const ColorPrimary = "#4a8cf7";
+const ColorPrimary = "#0b57d0";
 const PanelBorderRadius = "8px";
 export const ContentWrapperCenterClassName = "simplebar-content-wrapper-center";
 
@@ -1004,20 +1013,31 @@ const GlobalStyle = createGlobalStyle`
 
     /* Adjust width of the vertical scrollbar. */
     .simplebar-track.simplebar-vertical {
-        width: 8px;
+        width: 10px;
+        top: 10px;
+        right: 8px;
+        bottom: 10px;
+        border-radius: 999px;
+        background: transparent;
     }
 
     /* Adjust height of the horizontal scrollbar. */
     .simplebar-track.simplebar-horizontal {
-        height: 8px;
+        height: 10px;
+        left: 10px;
+        right: 10px;
+        bottom: 8px;
+        border-radius: 999px;
+        background: transparent;
     }
 
     /* Adjust position, shape and color of the scrollbar thumb. */
     .simplebar-scrollbar:before {
-        left: 1px;
-        right: 1px;
-        border-radius: 8px;
-        background-color: rgba(150, 150, 150, 0.8);
+        left: 2px;
+        right: 2px;
+        border-radius: 999px;
+        background-color: rgba(95, 99, 104, 0.42);
+        transition: background-color ${MotionFast}, opacity ${MotionFast};
     }
 
     /* Apply to the content wrapper, which is the parent element of simplebar-content, to align content in the vertical center. */
@@ -1034,11 +1054,31 @@ const GlobalStyle = createGlobalStyle`
     }
 
     /* Adjust the content container, which is the parent element of Panel Body. */
-    .simplebar-content{
+    .simplebar-content {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px 22px 16px 14px !important;
         display: flex;
         flex-direction: column;
         justify-content: flex-start;
-        align-items: center;
+        align-items: stretch;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .simplebar-scrollbar:before {
+            background-color: rgba(189, 193, 198, 0.48);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 1ms !important;
+            animation-iteration-count: 1 !important;
+            scroll-behavior: auto !important;
+            transition-duration: 1ms !important;
+        }
     }
 `;
 
@@ -1059,8 +1099,9 @@ const Panel = styled.div`
     z-index: ${MaxZIndex};
     border-radius: ${(props) => (props.displayType === "floating" ? PanelBorderRadius : 0)};
     overflow: visible;
-    box-shadow: 0px 8px 12px 5px rgba(0, 0, 0, 0.25);
-    background: rgba(235, 235, 235, 1);
+    box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
+    background: #ffffff;
+    border: 1px solid rgba(225, 227, 225, 0.92);
 
     /* Normalize the style of panel */
     padding: 0;
@@ -1068,7 +1109,7 @@ const Panel = styled.div`
     border: none;
     font-size: 16px;
     font-weight: normal;
-    color: black;
+    color: #202124;
     line-height: 1;
     -webkit-text-size-adjust: 100%;
     box-sizing: border-box;
@@ -1077,6 +1118,19 @@ const Panel = styled.div`
     font-family: system-ui, -apple-system,
         /* Firefox supports this but not yet 'system-ui' */ "Segoe UI", Roboto, Helvetica, Arial,
         sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    animation: et-panel-enter ${MotionStandard} both;
+    transition: background-color ${MotionStandard}, box-shadow ${MotionStandard},
+        color ${MotionStandard}, opacity ${MotionFast};
+
+    @keyframes et-panel-enter {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
 
     &:before {
         content: "";
@@ -1085,20 +1139,41 @@ const Panel = styled.div`
         right: 0;
         z-index: -1;
         display: block;
-        /* backdrop-filter: blur(6px); */
+        background: rgba(255, 255, 255, 0.82);
+        backdrop-filter: blur(10px);
         height: 100%;
         border-radius: ${(props) => (props.displayType === "floating" ? PanelBorderRadius : 0)};
+    }
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurface};
+        background: ${DarkSurface};
+        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.3);
+
+        &:before {
+            background: rgba(27, 32, 38, 0.86);
+        }
     }
 `;
 
 const Head = styled.div`
-    padding: 4px;
+    min-height: 56px;
+    padding: 8px 10px 8px 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex: 0 0 auto;
     overflow: visible;
     cursor: grab;
+    border-bottom: 1px solid #e1e3e1;
+    background: linear-gradient(180deg, #ffffff, #f8fafd);
+    border-radius: ${PanelBorderRadius} ${PanelBorderRadius} 0 0;
+    transition: background ${MotionStandard}, border-color ${MotionStandard};
+
+    @media (prefers-color-scheme: dark) {
+        border-bottom-color: ${DarkOutline};
+        background: linear-gradient(180deg, ${DarkSurfaceContainer}, ${DarkSurface});
+    }
 `;
 
 const HeadIcons = styled.div`
@@ -1106,6 +1181,7 @@ const HeadIcons = styled.div`
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    gap: 4px;
 `;
 
 const HeadIcon = styled.div`
@@ -1117,27 +1193,46 @@ const HeadIcon = styled.div`
     -moz-osx-font-smoothing: grayscale;
     cursor: pointer;
     font-size: 18px;
-    width: 24px;
-    height: 24px;
-    margin: 2px;
-    background-color: rgba(255, 255, 255, 0.8);
-    border-radius: 15px;
+    width: 40px;
+    height: 40px;
+    margin: 0 1px;
+    background-color: transparent;
+    border-radius: 999px;
+    transition: background-color ${MotionFast}, color ${MotionFast};
 
     svg {
-        fill: #8e8e93;
-        width: 16px;
-        height: 16px;
+        fill: #5f6368;
+        width: 20px;
+        height: 20px;
         display: block;
-        transition: fill 0.2s linear;
+        transition: fill ${MotionFast};
+    }
+
+    &:hover {
+        background: rgba(11, 87, 208, 0.08);
     }
 
     &:hover svg {
-        fill: dimgray;
+        fill: ${ColorPrimary};
+    }
+
+    @media (prefers-color-scheme: dark) {
+        svg {
+            fill: ${DarkOnSurfaceVariant};
+        }
+
+        &:hover {
+            background: rgba(168, 199, 250, 0.14);
+        }
+
+        &:hover svg {
+            fill: ${DarkPrimary};
+        }
     }
 `;
 
 const StyledPinIcon = styled(PinIcon)`
-    transition: transform 0.4s, fill 0.2s linear !important;
+    transition: transform ${MotionStandard}, fill ${MotionFast} !important;
     ${(props) => (props.fix ? "" : "transform: rotate(45deg)")}
 `;
 
@@ -1154,21 +1249,37 @@ const Body = styled.div`
     overflow-x: hidden;
     overflow-y: overlay;
     overscroll-behavior: contain;
+    background: linear-gradient(180deg, rgba(241, 244, 248, 0.9), rgba(248, 250, 253, 0)), #f8fafd;
     flex-grow: 1;
     flex-shrink: 1;
     word-break: break-word;
+    transition: background ${MotionStandard};
+
+    @media (prefers-color-scheme: dark) {
+        background: linear-gradient(180deg, rgba(36, 42, 49, 0.74), rgba(27, 32, 38, 0)), #15191d;
+    }
 `;
 
 const SourceOption = styled(Dropdown)`
     max-width: 45%;
     font-weight: normal;
-    font-size: small;
+    font-size: 13px;
     cursor: pointer;
     // To center the text in select box
     text-align-last: center;
-    background-color: transparent;
+    color: ${ColorPrimary};
+    background-color: #d3e3fd;
     border-color: transparent;
+    border-radius: 999px;
+    min-height: 40px;
+    padding: 0 12px;
     outline: none;
+    transition: background-color ${MotionFast}, color ${MotionFast};
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkPrimary};
+        background-color: #1f3b68;
+    }
 `;
 
 const Highlight = styled.div`

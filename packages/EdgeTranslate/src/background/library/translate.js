@@ -1,8 +1,13 @@
 import { HybridTranslator } from "@edge_translate/translators";
+/* global globalThis */
 // common.log는 현재 파일에서 직접 사용하지 않습니다.
 import { promiseTabs, delayPromise } from "common/scripts/promise.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
-import { getChromeTranslatorSupportedLanguages } from "common/scripts/chrome_builtin_translate.js";
+import {
+    getChromeTranslatorSupportedLanguages,
+    translateWithChromeOnDevice,
+    warmupChromeOnDevice,
+} from "common/scripts/chrome_builtin_translate.js";
 import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
@@ -40,6 +45,8 @@ class TranslatorManager {
                 configs.LocalTranslatorConfig
             );
             this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate = this.localTranslatorProxy;
+            this.HYBRID_TRANSLATOR_CONFIG = configs.HybridTranslatorConfig;
+            this.LOCAL_TRANSLATOR_CONFIG = configs.LocalTranslatorConfig;
 
             // Supported translators.
             this.TRANSLATORS = {
@@ -55,6 +62,7 @@ class TranslatorManager {
 
             // The default translator to use.
             this.DEFAULT_TRANSLATOR = configs.DefaultTranslator;
+            this.applyLocalDefaultTranslatorPreference();
         });
 
         /**
@@ -74,6 +82,9 @@ class TranslatorManager {
         this.inflightDetect = new Map(); // key -> Promise
         this.inflightTranslate = new Map(); // key -> Promise
         this.currentChromeBuiltinTabId = null;
+        this.geminiNanoMaxConcurrentTranslations = 4;
+        this.geminiNanoActiveTranslations = 0;
+        this.geminiNanoTranslationQueue = [];
 
         /**
          * Start to provide services and listen to event.
@@ -85,59 +96,272 @@ class TranslatorManager {
     /**
      * Clear caches when configuration or language settings change
      */
-    createLocalTranslatorProxy(endpointTranslator, initialConfig = {}) {
+    createLocalTranslatorProxy(localTranslator, initialConfig = {}) {
         let config = initialConfig || {};
         const manager = this;
         return {
             useConfig(nextConfig = {}) {
                 config = nextConfig || {};
-                endpointTranslator.useConfig(nextConfig);
+                localTranslator.useConfig(nextConfig);
             },
             getMode() {
                 if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
                     return "geminiNano";
                 if (config.mode === "googleAiStudio") return "googleAiStudio";
-                return "endpoint";
+                return "geminiNano";
             },
             supportedLanguages() {
                 if (!config.enabled) return new Set();
                 if (this.getMode() === "geminiNano") return getChromeTranslatorSupportedLanguages();
-                return endpointTranslator.supportedLanguages();
+                return localTranslator.supportedLanguages();
             },
             detect(text) {
                 if (this.getMode() === "geminiNano") return Promise.resolve("auto");
-                return endpointTranslator.detect(text);
+                return localTranslator.detect(text);
             },
             async translate(text, from, to) {
                 if (this.getMode() !== "geminiNano") {
-                    return endpointTranslator.translate(text, from, to);
+                    return localTranslator.translate(text, from, to);
                 }
-                const tabId = await manager.getChromeBuiltinTargetTabId();
-                const result = await manager.channel.requestToTab(
-                    tabId,
-                    "chrome_builtin_translate",
-                    {
-                        text,
-                        sl: from,
-                        tl: to,
-                        engine: "geminiNano",
-                    }
-                );
-                return {
-                    originalText: text,
-                    mainMeaning: result?.mainMeaning || result?.translatedText || "",
-                    translatedText: result?.translatedText || result?.mainMeaning || "",
-                    sourceLanguage: result?.sourceLanguage || from,
-                    targetLanguage: result?.targetLanguage || to,
-                };
+                return manager.translateWithGeminiNanoPrompt(text, from, to);
             },
             pronounce(...args) {
-                return endpointTranslator.pronounce(...args);
+                return localTranslator.pronounce(...args);
             },
             stopPronounce(...args) {
-                return endpointTranslator.stopPronounce(...args);
+                return localTranslator.stopPronounce(...args);
             },
         };
+    }
+
+    runGeminiNanoPromptTask(task) {
+        if (!this.geminiNanoTranslationQueue) this.geminiNanoTranslationQueue = [];
+        if (!this.geminiNanoMaxConcurrentTranslations) this.geminiNanoMaxConcurrentTranslations = 4;
+        if (!this.geminiNanoActiveTranslations) this.geminiNanoActiveTranslations = 0;
+
+        return new Promise((resolve, reject) => {
+            const run = async () => {
+                this.geminiNanoActiveTranslations += 1;
+                try {
+                    resolve(await task());
+                } catch (error) {
+                    reject(error);
+                } finally {
+                    this.geminiNanoActiveTranslations -= 1;
+                    this.flushGeminiNanoPromptQueue();
+                }
+            };
+            this.geminiNanoTranslationQueue.push(run);
+            this.flushGeminiNanoPromptQueue();
+        });
+    }
+
+    flushGeminiNanoPromptQueue() {
+        if (!this.geminiNanoTranslationQueue) return;
+        while (
+            this.geminiNanoActiveTranslations < this.geminiNanoMaxConcurrentTranslations &&
+            this.geminiNanoTranslationQueue.length
+        ) {
+            const next = this.geminiNanoTranslationQueue.shift();
+            next();
+        }
+    }
+
+    async translateWithGeminiNanoPrompt(text, from, to) {
+        return this.runGeminiNanoPromptTask(async () => {
+            try {
+                const tabId = await this.getChromeBuiltinTargetTabId();
+                return await this.translateWithChromePromptTab(tabId, text, from, to);
+            } catch (tabBridgeError) {
+                if (!this.isChromePromptTabBridgeUnavailableError(tabBridgeError)) {
+                    throw tabBridgeError;
+                }
+            }
+            try {
+                return await this.translateWithChromePromptApi(text, from, to);
+            } catch (backgroundError) {
+                if (!this.isChromePromptApiUnavailableError(backgroundError)) {
+                    throw backgroundError;
+                }
+            }
+            throw new Error(
+                "Chrome Gemini Nano Prompt API is not available in this browser context."
+            );
+        });
+    }
+
+    async translateWithChromePromptApi(text, from, to) {
+        if (
+            typeof chrome !== "undefined" &&
+            chrome.offscreen &&
+            chrome.runtime &&
+            typeof chrome.runtime.sendMessage === "function"
+        ) {
+            return this.translateWithChromePromptOffscreen(text, from, to);
+        }
+
+        if (
+            typeof globalThis === "undefined" ||
+            !globalThis.LanguageModel ||
+            typeof globalThis.LanguageModel.create !== "function"
+        ) {
+            throw new Error(
+                "Chrome Gemini Nano Prompt API is not available in this extension context."
+            );
+        }
+
+        const result = await translateWithChromeOnDevice(text, from, to);
+        return {
+            originalText: text,
+            mainMeaning: result?.mainMeaning || result?.translatedText || "",
+            translatedText: result?.translatedText || result?.mainMeaning || "",
+            sourceLanguage: result?.sourceLanguage || from,
+            targetLanguage: result?.targetLanguage || to,
+            detailedMeanings: result?.detailedMeanings,
+            definitions: result?.definitions,
+            examples: result?.examples,
+        };
+    }
+
+    async translateWithChromePromptOffscreen(text, from, to) {
+        await this.ensureChromePromptOffscreenDocument();
+        const response = await this.requestChromePromptOffscreen(text, from, to);
+        if (!response || !response.ok) {
+            const detail =
+                response?.error?.message || "Chrome Gemini Nano offscreen request failed.";
+            throw new Error(detail);
+        }
+
+        const result = response.result;
+        return {
+            originalText: text,
+            mainMeaning: result?.mainMeaning || result?.translatedText || "",
+            translatedText: result?.translatedText || result?.mainMeaning || "",
+            sourceLanguage: result?.sourceLanguage || from,
+            targetLanguage: result?.targetLanguage || to,
+            detailedMeanings: result?.detailedMeanings,
+            definitions: result?.definitions,
+            examples: result?.examples,
+        };
+    }
+
+    async warmupWithGeminiNanoPrompt(from, to) {
+        if (
+            typeof chrome !== "undefined" &&
+            chrome.offscreen &&
+            chrome.runtime &&
+            typeof chrome.runtime.sendMessage === "function"
+        ) {
+            await this.ensureChromePromptOffscreenDocument();
+            const response = await this.requestChromePromptOffscreenWarmup(from, to);
+            if (!response || !response.ok) {
+                const detail =
+                    response?.error?.message || "Chrome Gemini Nano warm-up request failed.";
+                throw new Error(detail);
+            }
+            return response.result;
+        }
+        return warmupChromeOnDevice(from, to);
+    }
+
+    async translateWithChromePromptTab(tabId, text, from, to) {
+        const result = await this.channel.requestToTab(tabId, "chrome_builtin_translate", {
+            text,
+            sl: from,
+            tl: to,
+            engine: "geminiNano",
+        });
+        return this.normalizeChromePromptResult(result, text, from, to);
+    }
+
+    normalizeChromePromptResult(result, text, from, to) {
+        return {
+            originalText: text,
+            mainMeaning: result?.mainMeaning || result?.translatedText || "",
+            translatedText: result?.translatedText || result?.mainMeaning || "",
+            sourceLanguage: result?.sourceLanguage || from,
+            targetLanguage: result?.targetLanguage || to,
+            detailedMeanings: result?.detailedMeanings,
+            definitions: result?.definitions,
+            examples: result?.examples,
+        };
+    }
+
+    async ensureChromePromptOffscreenDocument() {
+        if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== "function") {
+            throw new Error("Chrome offscreen documents are not available for Gemini Nano.");
+        }
+
+        const offscreenUrl = chrome.runtime.getURL("offscreen/chrome_prompt.html");
+        if (chrome.runtime.getContexts) {
+            const contexts = await chrome.runtime.getContexts({
+                contextTypes: ["OFFSCREEN_DOCUMENT"],
+                documentUrls: [offscreenUrl],
+            });
+            if (contexts.length > 0) return;
+        }
+
+        try {
+            await chrome.offscreen.createDocument({
+                url: "offscreen/chrome_prompt.html",
+                reasons: ["DOM_PARSER"],
+                justification:
+                    "Run Chrome Gemini Nano Prompt API translation from an extension document context.",
+            });
+        } catch (error) {
+            if (!/only a single offscreen document/i.test(String(error?.message || error))) {
+                throw error;
+            }
+        }
+    }
+
+    requestChromePromptOffscreen(text, from, to) {
+        const message = JSON.stringify({
+            type: "chrome_prompt_translate",
+            text,
+            from,
+            to,
+        });
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(message, (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(response);
+                }
+            });
+        });
+    }
+
+    requestChromePromptOffscreenWarmup(from, to) {
+        const message = JSON.stringify({
+            type: "chrome_prompt_warmup",
+            from,
+            to,
+        });
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(message, (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(response);
+                }
+            });
+        });
+    }
+
+    isChromePromptApiUnavailableError(error) {
+        const message = String(error && error.message ? error.message : error || "");
+        return /not available in this extension context|not available in this browser context/i.test(
+            message
+        );
+    }
+
+    isChromePromptTabBridgeUnavailableError(error) {
+        const message = String(error && error.message ? error.message : error || "");
+        return /Cannot find tab|Receiving end does not exist|No tab with id|chrome_builtin_translate|not available in this page context/i.test(
+            message
+        );
     }
 
     async getChromeBuiltinTargetTabId() {
@@ -232,7 +456,11 @@ class TranslatorManager {
             if (!text) return Promise.resolve({ originalText: "", translatedText: "" });
             let sl = (params && params.sl) || this.LANGUAGE_SETTING.sl || "auto";
             let tl = (params && params.tl) || this.LANGUAGE_SETTING.tl;
-            const translatorId = (params && params.translatorId) || this.DEFAULT_TRANSLATOR;
+            const engine = (params && params.engine) || "";
+            const translatorId =
+                engine === "geminiNano" || engine === "chromeBuiltin"
+                    ? "GeminiNano"
+                    : (params && params.translatorId) || this.DEFAULT_TRANSLATOR;
             const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
             this.currentChromeBuiltinTabId =
                 sender && sender.tab ? sender.tab.id : previousChromeBuiltinTabId;
@@ -240,7 +468,11 @@ class TranslatorManager {
                 // cache first
                 let result = this.getTranslationFromCache(text, sl, tl, translatorId);
                 if (!result) {
-                    result = await this.TRANSLATORS[translatorId].translate(text, sl, tl);
+                    if (engine === "geminiNano" || engine === "chromeBuiltin") {
+                        result = await this.translateWithGeminiNanoPrompt(text, sl, tl);
+                    } else {
+                        result = await this.TRANSLATORS[translatorId].translate(text, sl, tl);
+                    }
                     if (result) this.rememberTranslation(text, sl, tl, translatorId, result);
                 }
                 return Promise.resolve(result || { originalText: text, translatedText: text });
@@ -248,6 +480,21 @@ class TranslatorManager {
                 return Promise.resolve({ originalText: text, translatedText: text });
             } finally {
                 this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
+            }
+        });
+
+        this.channel.provide("warmup_gemini_nano", async (params) => {
+            await this.config_loader;
+            const sl = (params && params.sl) || this.LANGUAGE_SETTING.sl || "auto";
+            const tl = (params && params.tl) || this.LANGUAGE_SETTING.tl;
+            try {
+                const result = await this.warmupWithGeminiNanoPrompt(sl, tl);
+                return Promise.resolve({ ok: true, result });
+            } catch (error) {
+                return Promise.resolve({
+                    ok: false,
+                    error: error && error.message ? error.message : String(error),
+                });
             }
         });
 
@@ -328,17 +575,21 @@ class TranslatorManager {
                     await this.config_loader;
 
                     if (changes["HybridTranslatorConfig"]) {
+                        this.HYBRID_TRANSLATOR_CONFIG = changes["HybridTranslatorConfig"].newValue;
                         this.HYBRID_TRANSLATOR.useConfig(
                             changes["HybridTranslatorConfig"].newValue
                         );
                         this.clearCaches();
+                        this.applyLocalDefaultTranslatorPreference();
                     }
 
                     if (changes["LocalTranslatorConfig"]) {
+                        this.LOCAL_TRANSLATOR_CONFIG = changes["LocalTranslatorConfig"].newValue;
                         this.HYBRID_TRANSLATOR.useLocalConfig(
                             changes["LocalTranslatorConfig"].newValue
                         );
                         this.clearCaches();
+                        this.applyLocalDefaultTranslatorPreference();
                     }
 
                     if (changes["OtherSettings"]) {
@@ -360,6 +611,19 @@ class TranslatorManager {
                 }
             }).bind(this)
         );
+    }
+
+    applyLocalDefaultTranslatorPreference() {
+        if (!this.LOCAL_TRANSLATOR_CONFIG?.enabled) return;
+        if (this.HYBRID_TRANSLATOR_CONFIG?.selections?.mainMeaning !== "LocalTranslate") return;
+        if (this.DEFAULT_TRANSLATOR === "HybridTranslate") return;
+        if (this.DEFAULT_TRANSLATOR === "LocalTranslate") return;
+
+        this.DEFAULT_TRANSLATOR = "LocalTranslate";
+        chrome.storage.sync.set({ DefaultTranslator: "LocalTranslate" });
+        this.clearCaches();
+        this.inflightDetect?.clear();
+        this.inflightTranslate?.clear();
     }
 
     /**
@@ -609,10 +873,20 @@ class TranslatorManager {
         } catch (error) {
             // Inform current tab translating failed.
             this.channel.emitToTabs(currentTabId, "translating_error", {
-                error,
+                error: this.serializeError(error),
                 timestamp,
             });
         }
+    }
+
+    serializeError(error) {
+        const message = error?.message || String(error || "Translation failed.");
+        return {
+            errorType: "API_ERR",
+            errorCode: error?.name || "Error",
+            errorMsg: message,
+            errorAct: error?.stack ? { stack: error.stack } : undefined,
+        };
     }
 
     /**

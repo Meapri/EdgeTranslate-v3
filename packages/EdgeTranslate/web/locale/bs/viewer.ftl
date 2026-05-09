@@ -112,14 +112,6 @@ pdfjs-document-properties-size-kb = { NUMBER($kb, maximumSignificantDigits: 3) }
 #   $mb (Number) - the PDF file size in megabytes
 #   $b (Number) - the PDF file size in bytes
 pdfjs-document-properties-size-mb = { NUMBER($mb, maximumSignificantDigits: 3) } MB ({ $b } bajtova)
-# Variables:
-#   $size_kb (Number) - the PDF file size in kilobytes
-#   $size_b (Number) - the PDF file size in bytes
-pdfjs-document-properties-kb = { $size_kb } KB ({ $size_b } bajta)
-# Variables:
-#   $size_mb (Number) - the PDF file size in megabytes
-#   $size_b (Number) - the PDF file size in bytes
-pdfjs-document-properties-mb = { $size_mb } MB ({ $size_b } bajta)
 pdfjs-document-properties-title = Naslov:
 pdfjs-document-properties-author = Autor:
 pdfjs-document-properties-subject = Predmet:
@@ -129,10 +121,6 @@ pdfjs-document-properties-modification-date = Datum promjene:
 # Variables:
 #   $dateObj (Date) - the creation/modification date and time of the PDF file
 pdfjs-document-properties-date-time-string = { DATETIME($dateObj, dateStyle: "short", timeStyle: "medium") }
-# Variables:
-#   $date (Date) - the creation/modification date of the PDF file
-#   $time (Time) - the creation/modification time of the PDF file
-pdfjs-document-properties-date-string = { $date }, { $time }
 pdfjs-document-properties-creator = Kreator:
 pdfjs-document-properties-producer = PDF stvaratelj:
 pdfjs-document-properties-version = PDF verzija:
@@ -277,10 +265,6 @@ pdfjs-rendering-error = Došlo je do greške prilikom renderiranja strane.
 
 ## Annotations
 
-# Variables:
-#   $date (Date) - the modification date of the annotation
-#   $time (Time) - the modification time of the annotation
-pdfjs-annotation-date-string = { $date }, { $time }
 # .alt: This is used as a tooltip.
 # Variables:
 #   $type (String) - an annotation type from a list defined in the PDF spec
@@ -380,20 +364,12 @@ pdfjs-editor-add-saved-signature-button =
 pdfjs-free-text2 =
     .aria-label = Uređivač teksta
     .default-content = Počnite kucati…
-pdfjs-free-text =
-    .aria-label = Uređivač teksta
-pdfjs-free-text-default-content = Počnite kucati…
-pdfjs-ink =
-    .aria-label = Uređivač crtanja
-pdfjs-ink-canvas =
-    .aria-label = Slika koju je kreirao korisnik
 
 ## Alt-text dialog
 
 pdfjs-editor-alt-text-button-label = Alternativni tekst
 pdfjs-editor-alt-text-edit-button =
     .aria-label = Uredi alternativni tekst
-pdfjs-editor-alt-text-edit-button-label = Uredi alternativni tekst
 pdfjs-editor-alt-text-dialog-label = Odaberite opciju
 pdfjs-editor-alt-text-dialog-description = Alternativni tekst (Alt tekst) pomaže kada ljudi ne mogu vidjeti sliku ili kada se ona ne učitava.
 pdfjs-editor-alt-text-add-description-label = Dodajte opis
@@ -413,14 +389,6 @@ pdfjs-editor-alt-text-button =
 ## Editor resizers
 ## This is used in an aria label to help to understand the role of the resizer.
 
-pdfjs-editor-resizer-label-top-left = Gornji lijevi ugao — promjena veličine
-pdfjs-editor-resizer-label-top-middle = Gore u sredini — promijeni veličinu
-pdfjs-editor-resizer-label-top-right = Gornji desni ugao — promijeni veličinu
-pdfjs-editor-resizer-label-middle-right = Sredina desno — promijeni veličinu
-pdfjs-editor-resizer-label-bottom-right = Donji desni ugao — promijeni veličinu
-pdfjs-editor-resizer-label-bottom-middle = Donji srednji dio — promijeni veličinu
-pdfjs-editor-resizer-label-bottom-left = Donji lijevi ugao — promijeni veličinu
-pdfjs-editor-resizer-label-middle-left = Sredina lijevo — promijeni veličinu
 pdfjs-editor-resizer-top-left =
     .aria-label = Gornji lijevi ugao — promjena veličine
 pdfjs-editor-resizer-top-middle =
@@ -595,6 +563,8 @@ pdfjs-editor-add-signature-save-checkbox = Sačuvaj potpis
 pdfjs-editor-add-signature-save-warning-message = Dostigli ste ograničenje od 5 sačuvanih potpisa. Uklonite jedan da biste sačuvali više.
 pdfjs-editor-add-signature-image-upload-error-title = Nije moguće učitati sliku
 pdfjs-editor-add-signature-image-upload-error-description = Provjerite mrežnu vezu ili pokušajte s drugom slikom.
+pdfjs-editor-add-signature-image-no-data-error-title = Nije moguće pretvoriti ovu sliku u potpis
+pdfjs-editor-add-signature-image-no-data-error-description = Molimo pokušajte učitati drugu sliku.
 pdfjs-editor-add-signature-error-close-button = Zatvori
 
 ## Dialog buttons
