@@ -87,7 +87,7 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
     Object.keys(CHROME_TRANSLATOR_LANGUAGE_MAP)
 );
 const DEFAULT_TIMEOUT_MS = 60000;
-const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE =
     "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
@@ -375,6 +375,16 @@ class LocalTranslator {
         return (payload?.text || payload?.output || "").trim();
     }
 
+    private buildGoogleAiStudioGenerationConfig() {
+        const generationConfig: Record<string, any> = {
+            temperature: 0,
+        };
+        if (!/^gemma-/i.test(this.model)) {
+            generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        }
+        return generationConfig;
+    }
+
     private async requestGoogleAiStudioTranslation(text: string, from: string, to: string) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -396,9 +406,7 @@ class LocalTranslator {
                                 parts: [{ text: this.buildGoogleAiStudioPrompt(text, from, to) }],
                             },
                         ],
-                        generationConfig: {
-                            temperature: 0,
-                        },
+                        generationConfig: this.buildGoogleAiStudioGenerationConfig(),
                     }),
                     signal: controller.signal,
                 }

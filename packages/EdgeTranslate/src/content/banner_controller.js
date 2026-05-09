@@ -125,7 +125,9 @@ class BannerController {
     }
 
     normalizeDomPageTranslateEngine(engine) {
-        if (engine === "dom" || engine === "localEndpoint") return engine;
+        if (engine === "dom" || engine === "localEndpoint" || engine === "googleAiStudio") {
+            return engine;
+        }
         return "chromeBuiltin";
     }
 
@@ -236,7 +238,10 @@ class BannerController {
     }
 
     async translateWithDomPageEngine(text, from, to) {
-        if (this._domPageTranslateOptions.engine === "localEndpoint") {
+        if (
+            this._domPageTranslateOptions.engine === "localEndpoint" ||
+            this._domPageTranslateOptions.engine === "googleAiStudio"
+        ) {
             return await this.channel.request("translate_text_quiet", {
                 text,
                 sl: from,
@@ -247,9 +252,18 @@ class BannerController {
         return await this.translateWithOnDeviceEngine(text, from, to);
     }
 
+    getDomPageTranslationGroupOptions() {
+        if (this._domPageTranslateOptions.engine === "localEndpoint") return { maxChars: 1400 };
+        if (this._domPageTranslateOptions.engine === "googleAiStudio") return { maxChars: 6000 };
+        return undefined;
+    }
+
     getReadableBlockReplacementOptions() {
         if (this._domPageTranslateOptions.engine === "localEndpoint") {
             return { maxChars: 1400 };
+        }
+        if (this._domPageTranslateOptions.engine === "googleAiStudio") {
+            return { maxChars: 6000 };
         }
         return undefined;
     }
@@ -494,10 +508,7 @@ class BannerController {
         )
             return;
 
-        const groupOptions =
-            this._domPageTranslateOptions.engine === "localEndpoint"
-                ? { maxChars: 1400 }
-                : undefined;
+        const groupOptions = this.getDomPageTranslationGroupOptions();
         const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
         groups.forEach((group) => this.enqueueDomPageGroupTranslation(group));
     }

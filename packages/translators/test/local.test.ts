@@ -196,8 +196,54 @@ describe("LocalTranslator", () => {
         });
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.temperature).toBe(0);
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
         expect(body.contents[0].parts[0].text).toContain("from English to Korean");
         expect(body.contents[0].parts[0].text).toContain("hello");
+    });
+
+    test("defaults Google AI Studio to the low-cost Flash-Lite model", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        expect(fetchMock.mock.calls[0][0]).toBe(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=studio-test-key"
+        );
+    });
+
+    test("omits thinking config for Gemma Google AI Studio models", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemma-4-31b-it",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.temperature).toBe(0);
+        expect(body.generationConfig.thinkingConfig).toBeUndefined();
     });
 
     test("does not advertise Google AI Studio support when API key is missing", () => {

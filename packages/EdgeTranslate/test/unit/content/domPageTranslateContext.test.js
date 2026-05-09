@@ -86,4 +86,23 @@ describe("DOM page translation context grouping", () => {
 
         expect(createReadableBlockReplacement(group)).toBeNull();
     });
+
+    it("uses a larger context window for Google AI Studio API page translation chunks", () => {
+        document.body.innerHTML = `
+            <article>
+                <p id="sample">
+                    <span>${"A".repeat(1800)}</span>
+                    <span>${"B".repeat(1800)}</span>
+                    <span>${"C".repeat(1800)}</span>
+                </p>
+            </article>
+        `;
+        const nodes = Array.from(
+            document.querySelectorAll("#sample span"),
+            (span) => span.firstChild
+        );
+
+        expect(buildContextTranslationGroups(nodes, { maxChars: 6000 })).toHaveLength(1);
+        expect(buildContextTranslationGroups(nodes, { maxChars: 1400 })).toHaveLength(3);
+    });
 });
