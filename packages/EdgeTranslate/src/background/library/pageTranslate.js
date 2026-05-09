@@ -28,7 +28,7 @@ function translatePage(channel) {
                 break;
             case "ChromeBuiltinPageTranslate":
                 executeDomPageTranslate(channel, {
-                    engine: "chromeBuiltin",
+                    engine: "geminiNano",
                     sl: sourceLang,
                     tl: targetLang,
                 });

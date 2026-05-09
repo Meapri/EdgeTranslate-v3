@@ -6,10 +6,12 @@ import {
 describe("Chrome built-in translator helper", () => {
     const originalTranslator = globalThis.Translator;
     const originalLanguageDetector = globalThis.LanguageDetector;
+    const originalLanguageModel = globalThis.LanguageModel;
 
     afterEach(() => {
         globalThis.Translator = originalTranslator;
         globalThis.LanguageDetector = originalLanguageDetector;
+        globalThis.LanguageModel = originalLanguageModel;
         jest.restoreAllMocks();
     });
 
@@ -21,25 +23,24 @@ describe("Chrome built-in translator helper", () => {
         expect(toChromeTranslatorLanguage("he-IL")).toBe("iw");
     });
 
-    it("uses Chrome Translator API and reuses translators", async () => {
-        const translateMock = jest.fn().mockResolvedValueOnce("안녕").mockResolvedValueOnce("세계");
-        const createMock = jest.fn().mockResolvedValue({ translate: translateMock });
-        globalThis.Translator = {
+    it("uses Chrome Gemini Nano LanguageModel API and reuses sessions", async () => {
+        const promptMock = jest.fn().mockResolvedValueOnce("안녕").mockResolvedValueOnce("세계");
+        const createMock = jest.fn().mockResolvedValue({ prompt: promptMock });
+        globalThis.LanguageModel = {
             availability: jest.fn().mockResolvedValue("available"),
             create: createMock,
         };
+
         const first = await translateWithChromeOnDevice("hello", "en-US", "ko-KR");
         const second = await translateWithChromeOnDevice("world", "en-US", "ko-KR");
 
-        expect(globalThis.Translator.availability).toHaveBeenCalledTimes(1);
-        expect(globalThis.Translator.availability).toHaveBeenCalledWith({
-            sourceLanguage: "en",
-            targetLanguage: "ko",
-        });
+        expect(globalThis.LanguageModel.availability).toHaveBeenCalledTimes(1);
         expect(createMock).toHaveBeenCalledTimes(1);
-        expect(createMock).toHaveBeenCalledWith({ sourceLanguage: "en", targetLanguage: "ko" });
-        expect(translateMock).toHaveBeenNthCalledWith(1, "hello");
-        expect(translateMock).toHaveBeenNthCalledWith(2, "world");
+        expect(createMock.mock.calls[0][0].initialPrompts[0].content).toContain(
+            "local Gemini Nano model"
+        );
+        expect(promptMock.mock.calls[0][0]).toContain("hello");
+        expect(promptMock.mock.calls[1][0]).toContain("world");
         expect(first.mainMeaning).toBe("안녕");
         expect(second.mainMeaning).toBe("세계");
     });

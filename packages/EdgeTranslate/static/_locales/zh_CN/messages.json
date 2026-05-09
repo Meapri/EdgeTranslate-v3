@@ -1320,11 +1320,11 @@
         "description": "使用用户配置的 HTTP 翻译 endpoint。"
     },
     "LocalTranslatorModeChromeBuiltin": {
-        "message": "Chrome 内置",
+        "message": "Chrome Gemini Nano（端侧）",
         "description": "使用支持的桌面版 Chrome 内置 Translator API。"
     },
     "ChromeBuiltinPageTranslate": {
-        "message": "Chrome 内置翻译器网页翻译"
+        "message": "Chrome Gemini Nano（端侧） 网页翻译"
     },
     "LocalTranslatorTimeoutMs": {
         "message": "本地翻译超时（毫秒）"

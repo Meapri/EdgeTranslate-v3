@@ -1320,11 +1320,11 @@
         "description": "ユーザー設定の HTTP 翻訳 endpoint を使用します。"
     },
     "LocalTranslatorModeChromeBuiltin": {
-        "message": "Chrome 内蔵",
+        "message": "Chrome Gemini Nano（オンデバイス）",
         "description": "対応するデスクトップ版 Chrome の内蔵 Translator API を使用します。"
     },
     "ChromeBuiltinPageTranslate": {
-        "message": "Chrome 組み込み翻訳ページ翻訳"
+        "message": "Chrome Gemini Nano（オンデバイス） ページ翻訳"
     },
     "LocalTranslatorTimeoutMs": {
         "message": "ローカル翻訳タイムアウト(ms)"

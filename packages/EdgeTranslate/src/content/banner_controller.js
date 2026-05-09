@@ -42,6 +42,10 @@ class BannerController {
         this._domActiveTranslations = 0;
         this._domMaxConcurrentTranslations = 2;
         this._domOnDeviceUnavailable = false;
+        this._domPageBanner = null;
+        this._domPageBannerVisible = true;
+        this._domTotalTranslationEntries = 0;
+        this._domCompletedTranslationEntries = 0;
         this._onDeviceBridgePromise = null;
         this._onDeviceBridgeRequestId = 0;
         this._onDeviceBridgePending = new Map();
@@ -81,6 +85,9 @@ class BannerController {
                 case "toggle_page_translate_banner":
                     this.toggleBanner();
                     break;
+                case "cancel_page_translate":
+                    this.cancelDomPageTranslate();
+                    break;
                 default:
                     break;
             }
@@ -101,12 +108,18 @@ class BannerController {
                 sl: detail.sl || "auto",
                 tl: detail.tl || "en",
             };
+            this.currentTranslator = "dom";
+            this._domTranslationQueue = [];
+            this._domActiveTranslations = 0;
             this._domOnDeviceUnavailable = false;
+            this._domCompletedTranslationEntries = 0;
+            this._domTotalTranslationEntries = 0;
             this._domMaxConcurrentTranslations =
                 this._domPageTranslateOptions.engine === "localEndpoint" ? 1 : 2;
             this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
                 this._domPageTranslateOptions.sl
             );
+            this.showDomPageBanner();
             this.startDomFallback();
             // initial scan to cover existing content
             const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -127,10 +140,16 @@ class BannerController {
     }
 
     normalizeDomPageTranslateEngine(engine) {
-        if (engine === "dom" || engine === "localEndpoint" || engine === "googleAiStudio") {
-            return engine;
+        if (
+            engine === "dom" ||
+            engine === "localEndpoint" ||
+            engine === "googleAiStudio" ||
+            engine === "geminiNano" ||
+            engine === "chromeBuiltin"
+        ) {
+            return engine === "chromeBuiltin" ? "geminiNano" : engine;
         }
-        return "chromeBuiltin";
+        return "geminiNano";
     }
 
     async ensureOnDeviceBridge() {
@@ -228,7 +247,7 @@ class BannerController {
                 text,
                 sl: from,
                 tl: to,
-                engine: "chromeBuiltin",
+                engine: this._domPageTranslateOptions.engine || "geminiNano",
             });
         } catch (bridgeError) {
             try {
@@ -340,6 +359,153 @@ class BannerController {
         return batches;
     }
 
+    getDomPageTranslatorLabel() {
+        switch (this._domPageTranslateOptions.engine) {
+            case "googleAiStudio":
+                return "Google AI Studio";
+            case "localEndpoint":
+                return "Local";
+            case "geminiNano":
+                return "Gemini Nano";
+            case "chromeBuiltin":
+                return "Chrome Built-in";
+            default:
+                return "DOM";
+        }
+    }
+
+    showDomPageBanner() {
+        this.ensureDomPageBanner();
+        this.updateDomPageBannerStatus();
+        getOrSetDefaultSettings("HidePageTranslatorBanner", DEFAULT_SETTINGS).then((result) => {
+            this.setDomPageBannerVisible(!result.HidePageTranslatorBanner);
+        });
+    }
+
+    ensureDomPageBanner() {
+        let host = document.getElementById("edge-translate-dom-page-banner");
+        if (!host) {
+            host = document.createElement("div");
+            host.id = "edge-translate-dom-page-banner";
+            host.style.cssText = [
+                "position: fixed",
+                "top: 0",
+                "left: 0",
+                "right: 0",
+                "height: 40px",
+                "z-index: 2147483647",
+                "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            ].join(";");
+            const root = host.attachShadow({ mode: "open" });
+            root.innerHTML = `
+                <style>
+                    .bar {
+                        height: 40px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        gap: 12px;
+                        box-sizing: border-box;
+                        padding: 0 14px;
+                        color: #202124;
+                        background: #fff;
+                        border-bottom: 1px solid rgba(60, 64, 67, 0.2);
+                        box-shadow: 0 1px 3px rgba(60, 64, 67, 0.24);
+                        font-size: 13px;
+                    }
+                    .title { font-weight: 600; }
+                    .status { color: #5f6368; margin-left: 8px; }
+                    .actions { display: flex; align-items: center; gap: 6px; }
+                    button {
+                        border: 1px solid #dadce0;
+                        border-radius: 4px;
+                        background: #fff;
+                        color: #1a73e8;
+                        cursor: pointer;
+                        font: inherit;
+                        height: 28px;
+                        padding: 0 10px;
+                    }
+                    button:hover { background: #f1f3f4; }
+                    .close { color: #5f6368; min-width: 28px; padding: 0 8px; }
+                </style>
+                <div class="bar" role="status" aria-live="polite">
+                    <div>
+                        <span class="title">Edge Translate</span>
+                        <span class="status" data-role="status"></span>
+                    </div>
+                    <div class="actions">
+                        <button type="button" data-action="hide">Hide</button>
+                        <button type="button" class="close" data-action="close" aria-label="Close">×</button>
+                    </div>
+                </div>
+            `;
+            root.querySelector("[data-action='hide']").addEventListener("click", () => {
+                this.setDomPageBannerVisible(false);
+                getOrSetDefaultSettings("HidePageTranslatorBanner", DEFAULT_SETTINGS).then(
+                    (result) => {
+                        result.HidePageTranslatorBanner = true;
+                        chrome.storage.sync.set(result);
+                    }
+                );
+            });
+            root.querySelector("[data-action='close']").addEventListener("click", () => {
+                this.cancelDomPageTranslate();
+            });
+            (document.documentElement || document.body).appendChild(host);
+        }
+        this._domPageBanner = host;
+        return host;
+    }
+
+    setDomPageBannerVisible(visible) {
+        const host = this.ensureDomPageBanner();
+        this._domPageBannerVisible = visible;
+        host.style.display = visible ? "block" : "none";
+        this.movePage("top", visible ? 40 : 0, true);
+    }
+
+    updateDomPageBannerStatus() {
+        const host =
+            this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
+        if (!host || !host.shadowRoot) return;
+        const status = host.shadowRoot.querySelector("[data-role='status']");
+        if (!status) return;
+        const label = this.getDomPageTranslatorLabel();
+        const total = this._domTotalTranslationEntries;
+        if (!total) {
+            status.textContent = `${label} page translation is starting…`;
+            return;
+        }
+        const completed = Math.min(this._domCompletedTranslationEntries, total);
+        status.textContent = `${label} page translation ${completed}/${total}`;
+    }
+
+    markDomPageTranslationEntriesCompleted(count = 1) {
+        this._domCompletedTranslationEntries += count;
+        this.updateDomPageBannerStatus();
+    }
+
+    cancelDomPageTranslate() {
+        if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
+        this._pendingNodes.clear();
+        if (this._scheduleBatch) {
+            cancelAnimationFrame(this._scheduleBatch);
+            this._scheduleBatch = null;
+        }
+        if (this._mo) {
+            this._mo.disconnect();
+            this._mo = null;
+        }
+        const host = document.getElementById("edge-translate-dom-page-banner");
+        if (host) host.remove();
+        this._domPageBanner = null;
+        this._domTotalTranslationEntries = 0;
+        this._domCompletedTranslationEntries = 0;
+        if (this.currentTranslator === "dom") this.currentTranslator = null;
+        this.movePage("top", 0, true);
+    }
+
     /**
      * Toggle the visibility of banner frame.
      *
@@ -377,10 +543,16 @@ class BannerController {
         if (this._moveRaf) cancelAnimationFrame(this._moveRaf);
         this._moveRaf = requestAnimationFrame(() => {
             try {
-                document.body.style.cssText = document.body.style.cssText.replace(
-                    new RegExp(`${property}:.*;`, "g"),
-                    `${property}: ${target}px !important;`
-                );
+                const nextRule = `${property}: ${target}px !important;`;
+                const pattern = new RegExp(`${property}:.*;`, "g");
+                if (pattern.test(document.body.style.cssText)) {
+                    document.body.style.cssText = document.body.style.cssText.replace(
+                        pattern,
+                        nextRule
+                    );
+                } else {
+                    document.body.style.setProperty(property, `${target}px`, "important");
+                }
             } catch {
                 document.body.style.setProperty(property, `${target}px`, "important");
             }
@@ -431,7 +603,7 @@ class BannerController {
 
                 // If the banner is destroyed, we should cancel listeners.
                 if (data.distance <= 0) {
-                    this.canceller();
+                    if (this.canceller) this.canceller();
                     this.canceller = null;
                     this.currentTranslator = null;
                 }
@@ -464,6 +636,10 @@ class BannerController {
                         this.toggleBannerFrame(true);
                         this.movePage("top", 40, true);
                     }
+                    break;
+                }
+                case "dom": {
+                    this.setDomPageBannerVisible(!result.HidePageTranslatorBanner);
                     break;
                 }
                 default:
@@ -574,20 +750,22 @@ class BannerController {
         if (!eligibleNodes.length) return;
 
         if (this._domPageTranslateOptions.engine === "dom") return;
-        if (
-            this._domPageTranslateOptions.engine === "chromeBuiltin" &&
-            this._domOnDeviceUnavailable
-        )
+        if (this._domPageTranslateOptions.engine === "geminiNano" && this._domOnDeviceUnavailable)
             return;
 
         const groupOptions = this.getDomPageTranslationGroupOptions();
         const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
+        this._domTotalTranslationEntries += groups.length;
+        this.updateDomPageBannerStatus();
         if (this._domPageTranslateOptions.engine === "googleAiStudio") {
             const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
             const uncachedEntries = [];
             entries.forEach((entry) => {
                 const cached = this._domTranslationCache.get(entry.cacheKey);
-                if (cached && this.applyDomPageTranslatedEntry(entry, cached)) return;
+                if (cached && this.applyDomPageTranslatedEntry(entry, cached)) {
+                    this.markDomPageTranslationEntriesCompleted();
+                    return;
+                }
                 uncachedEntries.push(entry);
             });
             this.buildDomPageTranslationBatches(uncachedEntries).forEach((batch) =>
@@ -618,7 +796,9 @@ class BannerController {
                 entries.forEach((entry, index) => {
                     const part = translatedParts[index];
                     if (part) this._domTranslationCache.set(entry.cacheKey, part);
-                    if (!this.applyDomPageTranslatedEntry(entry, part)) {
+                    if (this.applyDomPageTranslatedEntry(entry, part)) {
+                        this.markDomPageTranslationEntriesCompleted();
+                    } else {
                         this.enqueueDomPageGroupTranslation(entry.group);
                     }
                 });
@@ -664,6 +844,7 @@ class BannerController {
                     if (translated && block && block.isConnected) {
                         this._translatedBlocks.add(block);
                         block.textContent = translated;
+                        this.markDomPageTranslationEntriesCompleted();
                     }
                     return;
                 }
@@ -685,10 +866,11 @@ class BannerController {
                         node.nodeValue = translatedParts[index];
                     }
                 });
+                this.markDomPageTranslationEntriesCompleted();
             } catch (error) {
                 group.nodes.forEach((node) => this._translatedSet.delete(node));
                 if (
-                    this._domPageTranslateOptions.engine === "chromeBuiltin" &&
+                    this._domPageTranslateOptions.engine === "geminiNano" &&
                     this.isOnDeviceUnavailableError(error)
                 ) {
                     this._domOnDeviceUnavailable = true;
@@ -724,7 +906,7 @@ class BannerController {
             } catch (error) {
                 this._translatedSet.delete(item.node);
                 if (
-                    this._domPageTranslateOptions.engine === "chromeBuiltin" &&
+                    this._domPageTranslateOptions.engine === "geminiNano" &&
                     this.isOnDeviceUnavailableError(error)
                 ) {
                     this._domOnDeviceUnavailable = true;
@@ -762,3 +944,5 @@ class BannerController {
 
 // Create the object.
 window.EdgeTranslateBannerController = new BannerController();
+
+export { BannerController };

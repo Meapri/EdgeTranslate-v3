@@ -1320,11 +1320,11 @@
         "description": "Использовать пользовательский HTTP endpoint перевода."
     },
     "LocalTranslatorModeChromeBuiltin": {
-        "message": "Chrome Built-in",
+        "message": "Chrome Gemini Nano (on-device)",
         "description": "Использовать встроенный Translator API настольного Chrome, если доступен."
     },
     "ChromeBuiltinPageTranslate": {
-        "message": "Перевод страницы встроенным переводчиком Chrome"
+        "message": "Chrome Gemini Nano (on-device) page translation"
     },
     "LocalTranslatorTimeoutMs": {
         "message": "Тайм-аут локального переводчика (мс)"

@@ -36,4 +36,24 @@ describe("pageTranslate module", () => {
             tl: "ko",
         });
     });
+
+    it("routes Chrome built-in page translation through Gemini Nano", async () => {
+        getOrSetDefaultSettings.mockResolvedValue({
+            DefaultPageTranslator: "ChromeBuiltinPageTranslate",
+            languageSetting: { sl: "en", tl: "ko" },
+            LocalTranslatorConfig: {},
+        });
+        const channel = { emitToTabs: jest.fn() };
+        chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
+
+        translatePage(channel);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
+            engine: "geminiNano",
+            sl: "en",
+            tl: "ko",
+        });
+    });
 });

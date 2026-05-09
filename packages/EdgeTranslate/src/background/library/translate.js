@@ -95,22 +95,21 @@ class TranslatorManager {
             },
             getMode() {
                 if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
-                    return "chromeBuiltin";
+                    return "geminiNano";
                 if (config.mode === "googleAiStudio") return "googleAiStudio";
                 return "endpoint";
             },
             supportedLanguages() {
                 if (!config.enabled) return new Set();
-                if (this.getMode() === "chromeBuiltin")
-                    return getChromeTranslatorSupportedLanguages();
+                if (this.getMode() === "geminiNano") return getChromeTranslatorSupportedLanguages();
                 return endpointTranslator.supportedLanguages();
             },
             detect(text) {
-                if (this.getMode() === "chromeBuiltin") return Promise.resolve("auto");
+                if (this.getMode() === "geminiNano") return Promise.resolve("auto");
                 return endpointTranslator.detect(text);
             },
             async translate(text, from, to) {
-                if (this.getMode() !== "chromeBuiltin") {
+                if (this.getMode() !== "geminiNano") {
                     return endpointTranslator.translate(text, from, to);
                 }
                 const tabId = await manager.getChromeBuiltinTargetTabId();
@@ -121,7 +120,7 @@ class TranslatorManager {
                         text,
                         sl: from,
                         tl: to,
-                        engine: "chromeBuiltin",
+                        engine: "geminiNano",
                     }
                 );
                 return {
