@@ -7,6 +7,16 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
  */
 const channel = new Channel();
 
+function stripPronunciationDisplaySelections(config = {}) {
+    const selections = { ...(config.selections || {}) };
+    delete selections.tPronunciation;
+    delete selections.sPronunciation;
+    return {
+        ...config,
+        selections,
+    };
+}
+
 /**
  * 初始化设置列表
  */
@@ -24,7 +34,7 @@ window.onload = () => {
      */
     getOrSetDefaultSettings(["languageSetting", "HybridTranslatorConfig"], DEFAULT_SETTINGS).then(
         async (result) => {
-            let config = result.HybridTranslatorConfig;
+            let config = stripPronunciationDisplaySelections(result.HybridTranslatorConfig);
             let languageSetting = result.languageSetting;
             let availableTranslators = await channel.request("get_available_translators", {
                 from: languageSetting.sl,
@@ -42,7 +52,10 @@ window.onload = () => {
      * Update translator config options on translator config update.
      */
     channel.on("hybrid_translator_config_updated", (detail) =>
-        setUpTranslateConfig(detail.config, detail.availableTranslators)
+        setUpTranslateConfig(
+            stripPronunciationDisplaySelections(detail.config),
+            detail.availableTranslators
+        )
     );
 
     /**
@@ -159,6 +172,7 @@ function syncLocalTranslatorFields(mode) {
  * @returns {void} nothing
  */
 function setUpTranslateConfig(config, availableTranslators) {
+    config = stripPronunciationDisplaySelections(config);
     let translatorConfigEles = document.getElementsByClassName("translator-config");
 
     for (let ele of translatorConfigEles) {

@@ -27,8 +27,6 @@ const notifier = new Notifier("center");
  * @param {{
  *   mainMeaning: string;
  *   originalText: string;
- *   tPronunciation?: string;
- *   sPronunciation?: string;
  *   detailedMeanings?: Array<{
  *     pos: string;
  *     meaning: string;
@@ -57,8 +55,6 @@ export default function Result(props) {
     /**
      * The visible state of contents.
      */
-    const [displayTPronunciation, setDisplayTPronunciation] = useState(false);
-    const [displaySPronunciation, setDisplaySPronunciation] = useState(false);
     const [displayTPronunciationIcon, setDisplayTPronunciationIcon] = useState(false);
     const [displaySPronunciationIcon, setDisplaySPronunciationIcon] = useState(false);
     const [contentFilter, setContentFilter] = useState({});
@@ -117,53 +113,43 @@ export default function Result(props) {
                             title={chrome.i18n.getMessage("CopyResult")}
                         />
                     </TextLine>
-                    {(displayTPronunciationIcon || displayTPronunciation) && (
+                    {displayTPronunciationIcon && (
                         <PronounceLine>
-                            {displayTPronunciationIcon &&
-                                (targetPronouncing ? (
-                                    <StyledPronounceLoadingIcon
-                                        role="button"
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            if (stopping) return;
+                            {targetPronouncing ? (
+                                <StyledPronounceLoadingIcon
+                                    role="button"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (stopping) return;
 
-                                            console.log("Target TTS stop clicked");
-                                            setStopping(true);
-                                            // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
-                                            const emitPromise = channel.emit("frame_closed");
-                                            if (
-                                                emitPromise &&
-                                                typeof emitPromise.catch === "function"
-                                            ) {
-                                                emitPromise
-                                                    .catch(() => {
-                                                        // 실패 시 조용히 처리
-                                                    })
-                                                    .finally(() => {
-                                                        setStopping(false);
-                                                    });
-                                            } else {
-                                                // If emit doesn't return a promise, just call finally callback
-                                                setStopping(false);
-                                            }
-                                        }}
-                                        title={chrome.i18n.getMessage("StopPronounce")}
-                                    />
-                                ) : (
-                                    <StyledPronounceIcon
-                                        role="button"
-                                        onClick={() => setTargetPronounce(true)}
-                                    />
-                                ))}
-                            {displayTPronunciation && (
-                                <PronounceText
-                                    dir={textDirection}
-                                    DrawerHeight={TextContentDrawerHeight}
-                                    DisableDrawer={!foldLongContent}
-                                >
-                                    {props.tPronunciation}
-                                </PronounceText>
+                                        console.log("Target TTS stop clicked");
+                                        setStopping(true);
+                                        // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
+                                        const emitPromise = channel.emit("frame_closed");
+                                        if (
+                                            emitPromise &&
+                                            typeof emitPromise.catch === "function"
+                                        ) {
+                                            emitPromise
+                                                .catch(() => {
+                                                    // 실패 시 조용히 처리
+                                                })
+                                                .finally(() => {
+                                                    setStopping(false);
+                                                });
+                                        } else {
+                                            // If emit doesn't return a promise, just call finally callback
+                                            setStopping(false);
+                                        }
+                                    }}
+                                    title={chrome.i18n.getMessage("StopPronounce")}
+                                />
+                            ) : (
+                                <StyledPronounceIcon
+                                    role="button"
+                                    onClick={() => setTargetPronounce(true)}
+                                />
                             )}
                         </PronounceLine>
                     )}
@@ -209,53 +195,43 @@ export default function Result(props) {
                             />
                         )}
                     </TextLine>
-                    {(displaySPronunciationIcon || displaySPronunciation) && (
+                    {displaySPronunciationIcon && (
                         <PronounceLine>
-                            {displaySPronunciationIcon &&
-                                (sourcePronouncing ? (
-                                    <StyledPronounceLoadingIcon
-                                        role="button"
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            if (stopping) return;
+                            {sourcePronouncing ? (
+                                <StyledPronounceLoadingIcon
+                                    role="button"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (stopping) return;
 
-                                            console.log("Source TTS stop clicked");
-                                            setStopping(true);
-                                            // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
-                                            const emitPromise = channel.emit("frame_closed");
-                                            if (
-                                                emitPromise &&
-                                                typeof emitPromise.catch === "function"
-                                            ) {
-                                                emitPromise
-                                                    .catch(() => {
-                                                        // 실패 시 조용히 처리
-                                                    })
-                                                    .finally(() => {
-                                                        setStopping(false);
-                                                    });
-                                            } else {
-                                                // If emit doesn't return a promise, just call finally callback
-                                                setStopping(false);
-                                            }
-                                        }}
-                                        title={chrome.i18n.getMessage("StopPronounce")}
-                                    />
-                                ) : (
-                                    <StyledPronounceIcon
-                                        role="button"
-                                        onClick={() => setSourcePronounce(true)}
-                                    />
-                                ))}
-                            {displaySPronunciation && (
-                                <PronounceText
-                                    dir={textDirection}
-                                    DrawerHeight={TextContentDrawerHeight}
-                                    DisableDrawer={!foldLongContent}
-                                >
-                                    {props.sPronunciation}
-                                </PronounceText>
+                                        console.log("Source TTS stop clicked");
+                                        setStopping(true);
+                                        // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
+                                        const emitPromise = channel.emit("frame_closed");
+                                        if (
+                                            emitPromise &&
+                                            typeof emitPromise.catch === "function"
+                                        ) {
+                                            emitPromise
+                                                .catch(() => {
+                                                    // 실패 시 조용히 처리
+                                                })
+                                                .finally(() => {
+                                                    setStopping(false);
+                                                });
+                                        } else {
+                                            // If emit doesn't return a promise, just call finally callback
+                                            setStopping(false);
+                                        }
+                                    }}
+                                    title={chrome.i18n.getMessage("StopPronounce")}
+                                />
+                            ) : (
+                                <StyledPronounceIcon
+                                    role="button"
+                                    onClick={() => setSourcePronounce(true)}
+                                />
                             )}
                         </PronounceLine>
                     )}
@@ -480,8 +456,6 @@ export default function Result(props) {
             DEFAULT_SETTINGS
         ).then((result) => {
             setContentDisplayOrder(result.ContentDisplayOrder);
-            setDisplaySPronunciation(result.TranslateResultFilter["sPronunciation"]);
-            setDisplayTPronunciation(result.TranslateResultFilter["tPronunciation"]);
             setDisplaySPronunciationIcon(result.TranslateResultFilter["sPronunciationIcon"]);
             setDisplayTPronunciationIcon(result.TranslateResultFilter["tPronunciationIcon"]);
             setContentFilter(result.TranslateResultFilter);
@@ -496,8 +470,6 @@ export default function Result(props) {
             }
 
             if (changes.TranslateResultFilter) {
-                setDisplaySPronunciation(changes.TranslateResultFilter.newValue["sPronunciation"]);
-                setDisplayTPronunciation(changes.TranslateResultFilter.newValue["tPronunciation"]);
                 setDisplaySPronunciationIcon(
                     changes.TranslateResultFilter.newValue["sPronunciationIcon"]
                 );
@@ -549,7 +521,6 @@ const Gray = "#5f6368";
 const SurfaceContainer = "#f1f4f8";
 const OutlineVariant = "#e1e3e1";
 const BlockContentDrawerHeight = 150; // drawer height for blocks
-const TextContentDrawerHeight = 50; // drawer height for texts
 
 /**
  * basic style for a block used to display content
@@ -564,6 +535,9 @@ export const Block = styled.div`
     padding: ${BlockPadding};
     margin: 0 0 ${BlockMargin};
     background-color: #fff;
+    --drawer-handle-surface: #fff;
+    --drawer-handle-fade: rgba(255, 255, 255, 0.44);
+    --drawer-handle-hover-fade: rgba(211, 227, 253, 0.72);
     border: 1px solid ${OutlineVariant};
     border-radius: 8px;
     line-height: 1.45;
@@ -575,6 +549,9 @@ export const Block = styled.div`
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
         background-color: ${DarkSurfaceContainer};
+        --drawer-handle-surface: ${DarkSurfaceContainer};
+        --drawer-handle-fade: rgba(32, 38, 45, 0.52);
+        --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
         border-color: ${DarkOutline};
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
     }
@@ -585,10 +562,16 @@ const Source = styled(Block)`
     white-space: pre-wrap;
     color: #5f6368;
     background: ${SurfaceContainer};
+    --drawer-handle-surface: ${SurfaceContainer};
+    --drawer-handle-fade: rgba(241, 244, 248, 0.5);
+    --drawer-handle-hover-fade: rgba(211, 227, 253, 0.7);
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurfaceVariant};
         background: ${DarkSurfaceContainerHigh};
+        --drawer-handle-surface: ${DarkSurfaceContainerHigh};
+        --drawer-handle-fade: rgba(36, 42, 49, 0.56);
+        --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
     }
 `;
 
@@ -598,10 +581,14 @@ const Target = styled(Block)`
     color: #202124;
     font-size: 16px;
     background: #ffffff;
+    --drawer-handle-surface: #ffffff;
+    --drawer-handle-fade: rgba(255, 255, 255, 0.44);
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
         background: ${DarkSurfaceContainer};
+        --drawer-handle-surface: ${DarkSurfaceContainer};
+        --drawer-handle-fade: rgba(32, 38, 45, 0.52);
     }
 `;
 
@@ -679,19 +666,12 @@ const StyledEditDoneIcon = styled(EditDoneIcon)`
 
 const PronounceLine = styled.div`
     width: 100%;
-    margin: 6px 0 2px;
+    margin: 8px 0 0;
     display: flex;
     flex-direction: ${(props) => (props.theme.textDirection === "ltr" ? "row" : "row-reverse")};
     justify-content: flex-start;
-    align-items: center;
-`;
-
-const PronounceText = styled(DrawerBlock)`
-    color: ${Gray};
-
-    @media (prefers-color-scheme: dark) {
-        color: ${DarkOnSurfaceVariant};
-    }
+    align-items: flex-start;
+    gap: 8px;
 `;
 
 const StyledCopyIcon = styled(CopyIcon)`
@@ -726,7 +706,6 @@ const StyledPronounceIcon = styled(PronounceIcon)`
     height: 36px;
     box-sizing: border-box;
     padding: 8px;
-    margin-right: 8px;
     fill: ${LightPrimary};
     flex: 0 0 36px;
     display: block;
@@ -736,10 +715,10 @@ const StyledPronounceIcon = styled(PronounceIcon)`
     ${(props) =>
         props.theme.textDirection === "ltr"
             ? `
-                margin-right: 8px;
+                margin-right: 0;
             `
             : `
-                margin-left: 8px;
+                margin-left: 0;
                 transform: rotate(180deg);
             `}
 
@@ -762,7 +741,6 @@ const StyledPronounceLoadingIcon = styled(PronounceLoadingIcon)`
     width: 36px;
     height: 36px;
     box-sizing: border-box;
-    margin-right: 8px;
     fill: ${LightPrimary};
     padding: 6px;
     flex: 0 0 36px;

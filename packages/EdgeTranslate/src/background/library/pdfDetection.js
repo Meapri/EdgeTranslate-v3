@@ -382,6 +382,7 @@ function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, 
 
             if (!shouldHandlePdfNavigationUrl(url, config)) return;
 
+            const potentiallyPdf = isPotentialPdfUrl(url, config);
             let shouldRedirect = true;
             const cached = cache.get(url);
             let pdfConfirmed = cached?.isPdf === true;
@@ -389,7 +390,7 @@ function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, 
                 if (cached.isPdf === false || cached.isDownload) {
                     shouldRedirect = false;
                 }
-            } else if (config.enableNetworkProbe && shouldNetworkProbe(url)) {
+            } else if (potentiallyPdf && config.enableNetworkProbe && shouldNetworkProbe(url)) {
                 const probeResult = await confirmPdfByNetwork(url, {
                     probeCache,
                     inflightProbes,
@@ -416,7 +417,7 @@ function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, 
 
             if (!shouldRedirect) return;
 
-            if (!pdfConfirmed && !isPotentialPdfUrl(url, config)) return;
+            if (!pdfConfirmed && !potentiallyPdf) return;
 
             await redirectToViewer(tabId, url, config, { logInfo, logWarn });
         } catch (error) {

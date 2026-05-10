@@ -31,7 +31,7 @@ export default function DrawerBlock(props) {
             setUseDrawer(false);
             return;
         }
-        if (originalHeight < props.DrawerHeight) {
+        if (originalHeight <= props.DrawerHeight + 12) {
             setUseDrawer(false);
         } else {
             setUseDrawer(true);
@@ -50,7 +50,12 @@ export default function DrawerBlock(props) {
         >
             <Content ref={contentElRef}>{props.children}</Content>
             {useDrawer && (
-                <Handle role="button" fold={fold} onClick={() => setFold(!fold)}>
+                <Handle
+                    role="button"
+                    aria-expanded={!fold}
+                    fold={fold}
+                    onClick={() => setFold(!fold)}
+                >
                     {fold ? (
                         <StyledArrowDownIcon title={chrome.i18n.getMessage("ClickToExpand")} />
                     ) : (
@@ -65,9 +70,12 @@ export default function DrawerBlock(props) {
 /**
  * STYLE FOR THE COMPONENT START
  */
-const HandleFoldHeight = 40; // Height of the drawer handle when the drawer is folded.
-const HandleExpandHeight = 15; // Height of the drawer handler when the drawer is expanded.
+const HandleFoldHeight = 32; // Height of the drawer handle when the drawer is folded.
+const HandleExpandHeight = 28; // Height of the drawer handler when the drawer is expanded.
 const Drawer = styled.div`
+    --drawer-handle-surface: #fff;
+    --drawer-handle-fade: rgba(255, 255, 255, 0.44);
+    --drawer-handle-hover-fade: rgba(211, 227, 253, 0.72);
     overflow: hidden;
     position: relative;
     transition: height ${MotionStandard};
@@ -75,6 +83,12 @@ const Drawer = styled.div`
 
     @media (prefers-reduced-motion: reduce) {
         transition-duration: 1ms !important;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        --drawer-handle-surface: #1b2026;
+        --drawer-handle-fade: rgba(27, 32, 38, 0.48);
+        --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
     }
 `;
 const Content = styled.div``;
@@ -90,18 +104,20 @@ const Handle = styled.div`
     justify-content: center;
     align-items: flex-end;
     cursor: pointer;
+    border-radius: 0 0 8px 8px;
+    transition: background ${MotionStandard};
     background: linear-gradient(
         transparent 0%,
-        rgba(255, 255, 255, 0.44) 32%,
-        rgb(255, 255, 255) 100%
+        var(--drawer-handle-fade) 42%,
+        var(--drawer-handle-surface) 100%
     );
     ${(props) => (props.fold ? "position: absolute; bottom: 0;" : "")}
 
     &:hover {
         background: linear-gradient(
             transparent 0%,
-            rgba(211, 227, 253, 0.72) 32%,
-            rgb(255, 255, 255) 100%
+            var(--drawer-handle-hover-fade) 42%,
+            var(--drawer-handle-surface) 100%
         );
     }
 
@@ -114,20 +130,6 @@ const Handle = styled.div`
     }
 
     @media (prefers-color-scheme: dark) {
-        background: linear-gradient(
-            transparent 0%,
-            rgba(27, 32, 38, 0.48) 32%,
-            rgb(27, 32, 38) 100%
-        );
-
-        &:hover {
-            background: linear-gradient(
-                transparent 0%,
-                rgba(31, 59, 104, 0.72) 32%,
-                rgb(27, 32, 38) 100%
-            );
-        }
-
         &:hover svg {
             fill: #a8c7fa;
         }

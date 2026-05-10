@@ -812,7 +812,7 @@ const defaultOptions = {
     kind: OptionKind.VIEWER
   },
   sidebarViewOnLoad: {
-    value: -1,
+    value: 1,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE
   },
   scrollModeOnLoad: {
@@ -18439,9 +18439,10 @@ const PDFViewerApplication = {
         fileInput: evt.target
       });
     });
+    const isPdfFileLike = file => file?.type === "application/pdf" || /\.pdf(?:$|[?#])/i.test(file?.name || "");
     appConfig.mainContainer.addEventListener("dragover", function (evt) {
       for (const item of evt.dataTransfer.items) {
-        if (item.type === "application/pdf") {
+        if (item.type === "application/pdf" || item.kind === "file" && !item.type) {
           evt.dataTransfer.dropEffect = evt.dataTransfer.effectAllowed === "copy" ? "copy" : "move";
           stopEvent(evt);
           return;
@@ -18449,7 +18450,7 @@ const PDFViewerApplication = {
       }
     });
     appConfig.mainContainer.addEventListener("drop", function (evt) {
-      if (evt.dataTransfer.files?.[0].type !== "application/pdf") {
+      if (!isPdfFileLike(evt.dataTransfer.files?.[0])) {
         return;
       }
       stopEvent(evt);
@@ -19538,8 +19539,12 @@ PDFPrintServiceFactory.initGlobals(PDFViewerApplication);
     if (HOSTED_VIEWER_ORIGINS.has(viewerOrigin)) {
       return;
     }
-    const fileOrigin = URL.parse(file, window.location)?.origin;
+    const parsedFile = URL.parse(file, window.location);
+    const fileOrigin = parsedFile?.origin;
     if (fileOrigin === viewerOrigin) {
+      return;
+    }
+    if (/^(chrome|moz|safari-web)-extension:\/\//.test(viewerOrigin) && parsedFile?.protocol === "file:") {
       return;
     }
     const ex = new Error("file origin does not match viewer's");

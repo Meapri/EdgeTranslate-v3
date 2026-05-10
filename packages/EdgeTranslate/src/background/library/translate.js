@@ -11,6 +11,18 @@ import {
 import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
+const GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS = 2;
+
+function stripPronunciationDisplaySelections(config = {}) {
+    const selections = { ...(config.selections || {}) };
+    delete selections.tPronunciation;
+    delete selections.sPronunciation;
+    return {
+        ...config,
+        selections,
+    };
+}
+
 class TranslatorManager {
     /**
      * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
@@ -34,9 +46,12 @@ class TranslatorManager {
             ],
             DEFAULT_SETTINGS
         ).then((configs) => {
+            const hybridTranslatorConfig = stripPronunciationDisplaySelections(
+                configs.HybridTranslatorConfig
+            );
             // Init hybrid translator.
             this.HYBRID_TRANSLATOR = new HybridTranslator(
-                configs.HybridTranslatorConfig,
+                hybridTranslatorConfig,
                 channel,
                 configs.LocalTranslatorConfig
             );
@@ -45,7 +60,7 @@ class TranslatorManager {
                 configs.LocalTranslatorConfig
             );
             this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate = this.localTranslatorProxy;
-            this.HYBRID_TRANSLATOR_CONFIG = configs.HybridTranslatorConfig;
+            this.HYBRID_TRANSLATOR_CONFIG = hybridTranslatorConfig;
             this.LOCAL_TRANSLATOR_CONFIG = configs.LocalTranslatorConfig;
 
             // Supported translators.
@@ -82,7 +97,7 @@ class TranslatorManager {
         this.inflightDetect = new Map(); // key -> Promise
         this.inflightTranslate = new Map(); // key -> Promise
         this.currentChromeBuiltinTabId = null;
-        this.geminiNanoMaxConcurrentTranslations = 4;
+        this.geminiNanoMaxConcurrentTranslations = GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS;
         this.geminiNanoActiveTranslations = 0;
         this.geminiNanoTranslationQueue = [];
 
@@ -136,7 +151,9 @@ class TranslatorManager {
 
     runGeminiNanoPromptTask(task) {
         if (!this.geminiNanoTranslationQueue) this.geminiNanoTranslationQueue = [];
-        if (!this.geminiNanoMaxConcurrentTranslations) this.geminiNanoMaxConcurrentTranslations = 4;
+        if (!this.geminiNanoMaxConcurrentTranslations) {
+            this.geminiNanoMaxConcurrentTranslations = GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS;
+        }
         if (!this.geminiNanoActiveTranslations) this.geminiNanoActiveTranslations = 0;
 
         return new Promise((resolve, reject) => {
@@ -171,7 +188,9 @@ class TranslatorManager {
         return this.runGeminiNanoPromptTask(async () => {
             try {
                 const tabId = await this.getChromeBuiltinTargetTabId();
-                return await this.translateWithChromePromptTab(tabId, text, from, to);
+                if (await this.shouldUseChromePromptTabBridge(tabId)) {
+                    return await this.translateWithChromePromptTab(tabId, text, from, to);
+                }
             } catch (tabBridgeError) {
                 if (!this.isChromePromptTabBridgeUnavailableError(tabBridgeError)) {
                     throw tabBridgeError;
@@ -359,7 +378,7 @@ class TranslatorManager {
 
     isChromePromptTabBridgeUnavailableError(error) {
         const message = String(error && error.message ? error.message : error || "");
-        return /Cannot find tab|Receiving end does not exist|No tab with id|chrome_builtin_translate|not available in this page context/i.test(
+        return /Cannot find tab|Receiving end does not exist|message port closed before a response was received|message channel closed before a response was received|No tab with id|chrome_builtin_translate|not available in this page context|Cannot access contents of url|extensions gallery cannot be scripted|Cannot access a chrome-extension|Script injection is blocked/i.test(
             message
         );
     }
@@ -368,6 +387,31 @@ class TranslatorManager {
         if (typeof this.currentChromeBuiltinTabId === "number")
             return this.currentChromeBuiltinTabId;
         return this.getCurrentTabId();
+    }
+
+    async shouldUseChromePromptTabBridge(tabId) {
+        if (
+            typeof chrome === "undefined" ||
+            !chrome.tabs ||
+            typeof chrome.tabs.get !== "function" ||
+            !chrome.runtime ||
+            typeof chrome.runtime.getURL !== "function"
+        ) {
+            return true;
+        }
+
+        try {
+            const tab = await chrome.tabs.get(tabId);
+            const tabUrl = tab?.url || "";
+            const extensionRoot = chrome.runtime.getURL("");
+            if (extensionRoot && tabUrl.startsWith(extensionRoot)) {
+                return false;
+            }
+        } catch {
+            return true;
+        }
+
+        return true;
     }
 
     /**
@@ -575,10 +619,11 @@ class TranslatorManager {
                     await this.config_loader;
 
                     if (changes["HybridTranslatorConfig"]) {
-                        this.HYBRID_TRANSLATOR_CONFIG = changes["HybridTranslatorConfig"].newValue;
-                        this.HYBRID_TRANSLATOR.useConfig(
+                        const hybridTranslatorConfig = stripPronunciationDisplaySelections(
                             changes["HybridTranslatorConfig"].newValue
                         );
+                        this.HYBRID_TRANSLATOR_CONFIG = hybridTranslatorConfig;
+                        this.HYBRID_TRANSLATOR.useConfig(hybridTranslatorConfig);
                         this.clearCaches();
                         this.applyLocalDefaultTranslatorPreference();
                     }

@@ -3464,6 +3464,18 @@ input[type="range"] {
   z-index: 10000 !important;
 }
 
+#viewsManagerContent > .hidden,
+#thumbnailsView.hidden,
+#outlinesView.hidden,
+#attachmentsView.hidden,
+#layersView.hidden {
+  display: none !important;
+}
+
+#thumbnailsView:not(.hidden) {
+  display: grid !important;
+}
+
 #editorStampParamsToolbar,
 #editorStampParamsToolbar .menuContainer {
   min-width: 180px !important;
@@ -4175,7 +4187,12 @@ body,
   position: relative !important;
   z-index: 1 !important;
   height: calc(100% - 48px) !important;
-  overflow: auto hidden !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+  -webkit-overflow-scrolling: touch !important;
   background: var(--et-surface) !important;
   border-inline-end: 0 !important;
 }

@@ -58,7 +58,7 @@ describe("edge PDF viewer file loading", () => {
         );
     });
 
-    it("blocks external PDF file drops on the viewer surface", () => {
+    it("allows external PDF file drops so PDF.js can open dragged documents", () => {
         const dataTransfer = {
             types: ["Files"],
             items: [{ kind: "file", type: "application/pdf" }],
@@ -66,7 +66,7 @@ describe("edge PDF viewer file loading", () => {
         const target = { closest: jest.fn(() => null) };
 
         expect(isPdfFileDragData(dataTransfer)).toBe(true);
-        expect(shouldBlockPdfDropHijack({ dataTransfer, target })).toBe(true);
+        expect(shouldBlockPdfDropHijack({ dataTransfer, target })).toBe(false);
     });
 
     it("detects PDFs by file name when the MIME type is missing", () => {

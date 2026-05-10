@@ -43,11 +43,9 @@ const DEFAULT_SETTINGS = {
 
         // The translators for each item.
         selections: {
-            // ATTENTION: The following four items MUST HAVE THE SAME TRANSLATOR!
+            // ATTENTION: The following two items MUST HAVE THE SAME TRANSLATOR!
             originalText: "GoogleTranslate",
             mainMeaning: "GoogleTranslate",
-            tPronunciation: "GoogleTranslate",
-            sPronunciation: "GoogleTranslate",
 
             // For the following three items, any translator combination is OK.
             detailedMeanings: "BingTranslate",
@@ -59,8 +57,6 @@ const DEFAULT_SETTINGS = {
     TranslateResultFilter: {
         mainMeaning: true,
         originalText: true,
-        tPronunciation: true,
-        sPronunciation: true,
         tPronunciationIcon: true,
         sPronunciationIcon: true,
         detailedMeanings: true,

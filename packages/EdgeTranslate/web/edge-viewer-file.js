@@ -105,12 +105,13 @@ function isPdfFileDragData(dataTransfer) {
   });
 }
 
-function shouldBlockPdfDropHijack({ dataTransfer }) {
-  return isPdfFileDragData(dataTransfer);
+function shouldBlockPdfDropHijack() {
+  return false;
 }
 
 export {
   decodePdfViewerUrlParam,
+  isExtensionViewerOrigin,
   isPdfFileDragData,
   parsePdfTarget,
   setPdfViewerSearchParam,

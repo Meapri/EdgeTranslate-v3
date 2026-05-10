@@ -1,5 +1,17 @@
 import EventManager from "./event.js";
 
+function formatChannelError(error) {
+    if (!error) return "Unknown extension messaging error.";
+    if (typeof error === "string") return error;
+    if (error.message) return error.message;
+    if (error.errorMsg) return error.errorMsg;
+    try {
+        return JSON.stringify(error);
+    } catch (_) {
+        return String(error);
+    }
+}
+
 /**
  * Channel for inter-context communication.
  *
@@ -52,7 +64,7 @@ class Channel {
                                 callback &&
                                 callback({
                                     __edgeTranslateError: true,
-                                    message: error && error.message ? error.message : String(error),
+                                    message: formatChannelError(error),
                                 })
                         );
                         return true;
@@ -139,7 +151,7 @@ class Channel {
         let message = JSON.stringify({ type: "event", event, detail });
         chrome.runtime.sendMessage(message, () => {
             if (chrome.runtime.lastError) {
-                console.error(chrome.runtime.lastError);
+                console.error("[EdgeTranslate]", formatChannelError(chrome.runtime.lastError));
             }
         });
     }
@@ -165,7 +177,9 @@ class Channel {
 
         const message = JSON.stringify({ type: "event", event, detail });
         for (let tabId of tabIds) {
-            send(tabId, message).catch((error) => console.error(error));
+            send(tabId, message).catch((error) =>
+                console.error("[EdgeTranslate]", formatChannelError(error))
+            );
         }
     }
 

@@ -63,9 +63,11 @@ describe("TranslatorManager on-device bridge injection", () => {
 
 describe("TranslatorManager Gemini Nano prompt routing", () => {
     const originalLanguageModel = global.LanguageModel;
+    const originalChrome = global.chrome;
 
     afterEach(() => {
         global.LanguageModel = originalLanguageModel;
+        global.chrome = originalChrome;
         jest.clearAllMocks();
     });
 
@@ -76,6 +78,8 @@ describe("TranslatorManager Gemini Nano prompt routing", () => {
             requestToTab: jest.fn().mockResolvedValue({
                 mainMeaning: "안녕",
                 translatedText: "안녕",
+                tPronunciation: "annyeong",
+                sPronunciation: "hello",
                 sourceLanguage: "en",
                 targetLanguage: "ko",
             }),
@@ -95,10 +99,12 @@ describe("TranslatorManager Gemini Nano prompt routing", () => {
             mode: "chromeBuiltin",
         });
 
-        await expect(proxy.translate("hello", "en", "ko")).resolves.toMatchObject({
+        const result = await proxy.translate("hello", "en", "ko");
+        expect(result).toMatchObject({
             mainMeaning: "안녕",
             translatedText: "안녕",
         });
+        expect(result).not.toHaveProperty("tPronunciation");
         expect(manager.channel.requestToTab).toHaveBeenCalledWith(42, "chrome_builtin_translate", {
             text: "hello",
             sl: "en",
@@ -114,14 +120,14 @@ describe("TranslatorManager Gemini Nano prompt routing", () => {
             originalText: "hello",
             mainMeaning: "안녕",
             translatedText: "안녕",
+            tPronunciation: "annyeong",
+            sPronunciation: "hello",
             sourceLanguage: "en",
             targetLanguage: "ko",
         });
         const manager = Object.create(TranslatorManager.prototype);
         manager.channel = {
-            requestToTab: jest
-                .fn()
-                .mockRejectedValue(new Error("Receiving end does not exist.")),
+            requestToTab: jest.fn().mockRejectedValue(new Error("Receiving end does not exist.")),
         };
         manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
         const localTranslator = {
@@ -138,11 +144,72 @@ describe("TranslatorManager Gemini Nano prompt routing", () => {
             mode: "geminiNano",
         });
 
-        await expect(proxy.translate("hello", "en", "ko")).resolves.toMatchObject({
+        const result = await proxy.translate("hello", "en", "ko");
+        expect(result).toMatchObject({
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+        });
+        expect(result).not.toHaveProperty("tPronunciation");
+        expect(translateWithChromeOnDevice).toHaveBeenCalledWith("hello", "en", "ko");
+    });
+
+    test("falls back when a PDF viewer tab has no Gemini Nano page bridge response", async () => {
+        global.LanguageModel = { create: jest.fn() };
+        translateWithChromeOnDevice.mockResolvedValue({
+            originalText: "hello",
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.channel = {
+            requestToTab: jest
+                .fn()
+                .mockRejectedValue(
+                    new Error("The message port closed before a response was received.")
+                ),
+        };
+        manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
+
+        await expect(
+            manager.translateWithGeminiNanoPrompt("hello", "en", "ko")
+        ).resolves.toMatchObject({
             mainMeaning: "안녕",
             translatedText: "안녕",
         });
         expect(translateWithChromeOnDevice).toHaveBeenCalledWith("hello", "en", "ko");
+    });
+
+    test("skips the page bridge for extension PDF viewer tabs", async () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
+        manager.translateWithChromePromptTab = jest.fn();
+        manager.translateWithChromePromptApi = jest.fn().mockResolvedValue({
+            originalText: "hello",
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        global.chrome = {
+            runtime: { getURL: jest.fn((path = "") => `chrome-extension://edge/${path}`) },
+            tabs: {
+                get: jest.fn().mockResolvedValue({
+                    id: 42,
+                    url: "chrome-extension://edge/web/viewer.html?file=https%3A%2F%2Fexample.com%2Fa.pdf",
+                }),
+            },
+        };
+
+        await expect(
+            manager.translateWithGeminiNanoPrompt("hello", "en", "ko")
+        ).resolves.toMatchObject({
+            mainMeaning: "안녕",
+            translatedText: "안녕",
+        });
+        expect(manager.translateWithChromePromptTab).not.toHaveBeenCalled();
+        expect(manager.translateWithChromePromptApi).toHaveBeenCalledWith("hello", "en", "ko");
     });
 
     test("does not hide page bridge model preparation failures behind fallback routes", async () => {
@@ -173,10 +240,10 @@ describe("TranslatorManager Gemini Nano prompt routing", () => {
         expect(translateWithChromeOnDevice).not.toHaveBeenCalled();
     });
 
-    test("limits general Gemini Nano translations to four concurrent prompts", async () => {
+    test("limits Gemini Nano translations to two concurrent prompts for balanced thermals", async () => {
         const manager = Object.create(TranslatorManager.prototype);
         manager.getChromeBuiltinTargetTabId = jest.fn().mockResolvedValue(42);
-        manager.geminiNanoMaxConcurrentTranslations = 4;
+        manager.geminiNanoMaxConcurrentTranslations = undefined;
         manager.geminiNanoActiveTranslations = 0;
         manager.geminiNanoTranslationQueue = [];
 
@@ -200,18 +267,18 @@ describe("TranslatorManager Gemini Nano prompt routing", () => {
         );
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(manager.translateWithChromePromptTab).toHaveBeenCalledTimes(4);
-        expect(maxActive).toBe(4);
+        expect(manager.translateWithChromePromptTab).toHaveBeenCalledTimes(2);
+        expect(maxActive).toBe(2);
 
         release.shift()();
         await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(manager.translateWithChromePromptTab).toHaveBeenCalledTimes(5);
+        expect(manager.translateWithChromePromptTab).toHaveBeenCalledTimes(3);
 
         while (manager.translateWithChromePromptTab.mock.calls.length < 6 || release.length) {
             if (release.length) release.shift()();
             await new Promise((resolve) => setTimeout(resolve, 0));
         }
         await expect(Promise.all(requests)).resolves.toHaveLength(6);
-        expect(maxActive).toBe(4);
+        expect(maxActive).toBe(2);
     });
 });

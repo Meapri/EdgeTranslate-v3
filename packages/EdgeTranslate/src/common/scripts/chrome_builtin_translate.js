@@ -48,6 +48,7 @@ const CHROME_TRANSLATOR_LANGUAGE_MAP = {
 const CHROME_TRANSLATOR_CACHE = new Map();
 const GEMINI_NANO_SESSION_CACHE = new Map();
 const PROMPT_API_LANGUAGE_CODES = new Set(["en", "es", "ja"]);
+const PROMPT_API_DEFAULT_OUTPUT_LANGUAGE = "en";
 const GEMINI_NANO_CREATE_TIMEOUT_MS = 45000;
 const GEMINI_NANO_PROMPT_TIMEOUT_MS = 60000;
 const DICTIONARY_RESULT_SCHEMA = JSON.stringify({
@@ -56,6 +57,67 @@ const DICTIONARY_RESULT_SCHEMA = JSON.stringify({
     definitions: [{ pos: "...", meaning: "...", example: "...", synonyms: ["..."] }],
     examples: [{ source: "...", target: "..." }],
 });
+
+const TRANSLATION_RESULT_SCHEMA = JSON.stringify({
+    translation: "...",
+});
+const LATIN_TARGET_LANGUAGES = new Set([
+    "en",
+    "fr",
+    "de",
+    "es",
+    "it",
+    "pt",
+    "vi",
+    "id",
+    "tr",
+    "nl",
+    "pl",
+    "cs",
+    "da",
+    "fi",
+    "hr",
+    "hu",
+    "lt",
+    "no",
+    "ro",
+    "sk",
+    "sl",
+    "sv",
+]);
+const CYRILLIC_TARGET_LANGUAGES = new Set(["ru", "uk", "bg"]);
+const ABJAD_TARGET_LANGUAGES = new Set(["ar", "iw"]);
+const INDIC_TARGET_LANGUAGES = new Set(["hi", "bn", "kn", "mr", "ta", "te"]);
+const CJK_OR_KANA_OR_HANGUL = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+const CJK_OR_KANA_OR_HANGUL_OR_CYRILLIC = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0400-\u04ff]/;
+const KANA_OR_CJK = /[\u3040-\u30ff\u3400-\u9fff]/;
+const KANA_OR_HANGUL = /[\u3040-\u30ff\uac00-\ud7af]/;
+const HANGUL = /[\uac00-\ud7af]/;
+const TARGET_LANGUAGE_FRAGMENT_REPLACEMENTS = {
+    ko: [
+        [/不正ログイン/g, "부정 로그인"],
+        [/([가-힣])不正하게/g, "$1 부정하게"],
+        [/不正하게/g, "부정하게"],
+        [/([가-힣])不正한/g, "$1 부정한"],
+        [/不正한/g, "부정한"],
+        [/不正/g, "부정"],
+        [/ログイン/g, "로그인"],
+        [/メールアドレス/g, "이메일 주소"],
+        [/パスワード/g, "비밀번호"],
+        [/アカウント/g, "계정"],
+        [/サービス/g, "서비스"],
+        [/オンライン/g, "온라인"],
+        [/メンテナンス/g, "유지 보수"],
+    ],
+    en: [
+        [/不正ログイン/g, "unauthorized login"],
+        [/不正/g, "unauthorized"],
+        [/ログイン/g, "login"],
+        [/メールアドレス/g, "email address"],
+        [/パスワード/g, "password"],
+        [/アカウント/g, "account"],
+    ],
+};
 
 function toChromeTranslatorLanguage(language) {
     if (!language) return language;
@@ -111,7 +173,25 @@ function toLanguageName(language) {
         nl: "Dutch",
         pl: "Polish",
         uk: "Ukrainian",
+        bg: "Bulgarian",
+        bn: "Bengali",
+        cs: "Czech",
+        da: "Danish",
+        el: "Greek",
+        fi: "Finnish",
+        hr: "Croatian",
+        hu: "Hungarian",
         iw: "Hebrew",
+        kn: "Kannada",
+        lt: "Lithuanian",
+        mr: "Marathi",
+        no: "Norwegian",
+        ro: "Romanian",
+        sk: "Slovak",
+        sl: "Slovenian",
+        sv: "Swedish",
+        ta: "Tamil",
+        te: "Telugu",
     };
     return names[normalized] || normalized || language || "the source language";
 }
@@ -123,6 +203,54 @@ function normalizeGeminiNanoOutput(output) {
         .replace(/```$/g, "")
         .replace(/^translation\s*:\s*/i, "")
         .trim();
+}
+
+function unescapeLooseJsonString(value) {
+    return String(value || "")
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\n")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, String.fromCharCode(34))
+        .replace(/\\\\/g, "\\")
+        .trim();
+}
+
+function extractLooseJsonStringField(text, field, nextFields = []) {
+    const source = String(text || "");
+    const keyMatch = new RegExp(`["']${field}["']\\s*:\\s*["']`, "i").exec(source);
+    if (!keyMatch) return "";
+
+    const valueStart = keyMatch.index + keyMatch[0].length;
+    const nextFieldPattern = nextFields.length
+        ? nextFields.map((key) => `["']${key}["']\\s*:`).join("|")
+        : "$^";
+    const rest = source.slice(valueStart);
+    const endPattern = new RegExp(`["']\\s*,\\s*(?:${nextFieldPattern})|["']\\s*[,}]\\s*$`, "i");
+    const endMatch = endPattern.exec(rest);
+    const raw = endMatch ? rest.slice(0, endMatch.index) : rest.replace(/["'}\s]*$/g, "");
+    return unescapeLooseJsonString(raw);
+}
+
+function parseLooseGeminiNanoTranslationOutput(output, originalText) {
+    const cleaned = normalizeGeminiNanoOutput(output);
+    if (!/["']translation["']\s*:/i.test(cleaned)) return null;
+
+    const mainMeaning = extractLooseJsonStringField(cleaned, "translation", [
+        "mainMeaning",
+        "translatedText",
+        "tPronunciation",
+        "sPronunciation",
+        "detailedMeanings",
+        "definitions",
+        "examples",
+    ]);
+    if (!mainMeaning) return null;
+
+    return {
+        originalText,
+        mainMeaning,
+        translatedText: mainMeaning,
+    };
 }
 
 function isDictionaryCandidate(text) {
@@ -138,7 +266,17 @@ function parseGeminiNanoDictionaryOutput(output, originalText) {
     const cleaned = normalizeGeminiNanoOutput(output);
     const jsonStart = cleaned.indexOf("{");
     const jsonEnd = cleaned.lastIndexOf("}");
-    if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
+    if (jsonStart < 0) return null;
+    if (jsonEnd <= jsonStart) {
+        const looseResult = parseLooseGeminiNanoTranslationOutput(cleaned, originalText);
+        if (!looseResult) return null;
+        return {
+            ...looseResult,
+            detailedMeanings: [],
+            definitions: [],
+            examples: [],
+        };
+    }
 
     try {
         const payload = JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1));
@@ -178,13 +316,10 @@ function parseGeminiNanoDictionaryOutput(output, originalText) {
                 .filter((item) => item.source || item.target),
         };
     } catch {
-        const translationMatch = cleaned.match(/"translation"\s*:\s*"([^"]+)"/);
-        const mainMeaning = String(translationMatch?.[1] || "").trim();
-        if (!mainMeaning) return null;
+        const looseResult = parseLooseGeminiNanoTranslationOutput(cleaned, originalText);
+        if (!looseResult) return null;
         return {
-            originalText,
-            mainMeaning,
-            translatedText: mainMeaning,
+            ...looseResult,
             detailedMeanings: [],
             definitions: [],
             examples: [],
@@ -192,7 +327,158 @@ function parseGeminiNanoDictionaryOutput(output, originalText) {
     }
 }
 
+function parseGeminiNanoTranslationOutput(output, originalText) {
+    const cleaned = normalizeGeminiNanoOutput(output);
+    const jsonStart = cleaned.indexOf("{");
+    const jsonEnd = cleaned.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd <= jsonStart) {
+        return parseLooseGeminiNanoTranslationOutput(cleaned, originalText);
+    }
+
+    try {
+        const payload = JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1));
+        const mainMeaning = String(
+            payload.translation || payload.mainMeaning || payload.translatedText || ""
+        ).trim();
+        if (!mainMeaning) return null;
+        return {
+            originalText,
+            mainMeaning,
+            translatedText: mainMeaning,
+        };
+    } catch {
+        return parseLooseGeminiNanoTranslationOutput(cleaned, originalText);
+    }
+}
+
+function applyTargetLanguageFragmentReplacements(value, targetLanguage) {
+    const normalized = toChromeTranslatorLanguage(targetLanguage || "");
+    const replacements = TARGET_LANGUAGE_FRAGMENT_REPLACEMENTS[normalized];
+    if (!replacements || typeof value !== "string" || !value) return value;
+    return replacements.reduce(
+        (text, [pattern, replacement]) => text.replace(pattern, replacement),
+        value
+    );
+}
+
+function normalizeTargetLanguageResult(result, targetLanguage) {
+    if (!result) return result;
+    const normalizeText = (value) => applyTargetLanguageFragmentReplacements(value, targetLanguage);
+    const normalizeItem = (item, fields) => {
+        if (!item) return item;
+        return fields.reduce(
+            (nextItem, field) => ({
+                ...nextItem,
+                [field]: normalizeText(nextItem[field]),
+            }),
+            item
+        );
+    };
+
+    return {
+        ...result,
+        mainMeaning: normalizeText(result.mainMeaning),
+        translatedText: normalizeText(result.translatedText),
+        detailedMeanings: Array.isArray(result.detailedMeanings)
+            ? result.detailedMeanings.map((item) => ({
+                  ...normalizeItem(item, ["meaning"]),
+                  synonyms: Array.isArray(item.synonyms)
+                      ? item.synonyms.map((synonym) => normalizeText(synonym))
+                      : item.synonyms,
+              }))
+            : result.detailedMeanings,
+        definitions: Array.isArray(result.definitions)
+            ? result.definitions.map((item) => ({
+                  ...normalizeItem(item, ["meaning", "example"]),
+                  synonyms: Array.isArray(item.synonyms)
+                      ? item.synonyms.map((synonym) => normalizeText(synonym))
+                      : item.synonyms,
+              }))
+            : result.definitions,
+        examples: Array.isArray(result.examples)
+            ? result.examples.map((item) => normalizeItem(item, ["target"]))
+            : result.examples,
+    };
+}
+
+function getTargetLanguageOutputRule(targetLanguage) {
+    const normalized = toChromeTranslatorLanguage(targetLanguage || "");
+    if (!normalized || normalized === "auto") return null;
+
+    const languageName = toLanguageName(normalized);
+    const baseInstruction = [
+        `For ${languageName} output, translate every source-language word and sentence into natural ${languageName}.`,
+        "Keep only URLs, numbers, code, brand/product names, and customary proper nouns unchanged.",
+        "Do not leave untranslated source-script fragments in normal prose.",
+    ].join(" ");
+
+    if (normalized === "ko") {
+        return {
+            languageName,
+            disallowedScriptPattern: KANA_OR_CJK,
+            repairInstruction: `${baseInstruction} Use Hangul Korean for translated prose.`,
+        };
+    }
+    if (normalized === "ja") {
+        return {
+            languageName,
+            disallowedScriptPattern: HANGUL,
+            repairInstruction: `${baseInstruction} Use natural Japanese writing for translated prose.`,
+        };
+    }
+    if (normalized === "zh" || normalized === "zh-Hant") {
+        return {
+            languageName,
+            disallowedScriptPattern: KANA_OR_HANGUL,
+            repairInstruction: `${baseInstruction} Use ${
+                normalized === "zh-Hant" ? "Traditional Chinese" : "Simplified Chinese"
+            } for translated prose.`,
+        };
+    }
+    if (LATIN_TARGET_LANGUAGES.has(normalized)) {
+        return {
+            languageName,
+            disallowedScriptPattern: CJK_OR_KANA_OR_HANGUL_OR_CYRILLIC,
+            repairInstruction: `${baseInstruction} Use the normal Latin-script form of ${languageName}.`,
+        };
+    }
+    if (CYRILLIC_TARGET_LANGUAGES.has(normalized)) {
+        return {
+            languageName,
+            disallowedScriptPattern: CJK_OR_KANA_OR_HANGUL,
+            repairInstruction: `${baseInstruction} Use natural Cyrillic ${languageName}.`,
+        };
+    }
+    if (ABJAD_TARGET_LANGUAGES.has(normalized) || INDIC_TARGET_LANGUAGES.has(normalized)) {
+        return {
+            languageName,
+            disallowedScriptPattern: CJK_OR_KANA_OR_HANGUL_OR_CYRILLIC,
+            repairInstruction: baseInstruction,
+        };
+    }
+    if (normalized === "th") {
+        return {
+            languageName,
+            disallowedScriptPattern: CJK_OR_KANA_OR_HANGUL_OR_CYRILLIC,
+            repairInstruction: `${baseInstruction} Use natural Thai script for translated prose.`,
+        };
+    }
+    return {
+        languageName,
+        disallowedScriptPattern: CJK_OR_KANA_OR_HANGUL_OR_CYRILLIC,
+        repairInstruction: baseInstruction,
+    };
+}
+
 function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage) {
+    const targetRule = getTargetLanguageOutputRule(targetLanguage);
+    const targetSpecificRules = targetRule
+        ? [
+              targetRule.repairInstruction,
+              `The final answer must read as natural ${targetRule.languageName}.`,
+          ]
+        : [];
+
     if (isDictionaryCandidate(text)) {
         return [
             "Translate the following word or short term.",
@@ -202,6 +488,7 @@ function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage) {
             "Schema:",
             DICTIONARY_RESULT_SCHEMA,
             "Keep details concise. Write meanings, definitions, and translated examples in the target language.",
+            ...targetSpecificRules,
             "If a field is unknown, use an empty array.",
             "<text>",
             text,
@@ -214,6 +501,7 @@ function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage) {
             "Fast translate. Output only translated text.",
             `From: ${toLanguageName(sourceLanguage)}. To: ${toLanguageName(targetLanguage)}.`,
             "Keep every <<<EDGE_TRANSLATE_SEGMENT_N>>> marker exactly unchanged.",
+            ...targetSpecificRules,
             "Translate text after each marker. No notes. No markdown.",
             text,
         ].join("\n");
@@ -221,7 +509,11 @@ function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage) {
 
     return [
         `Translate ${toLanguageName(sourceLanguage)} to ${toLanguageName(targetLanguage)}.`,
-        "Output translation only. No notes.",
+        "Return strict JSON only. Do not use markdown.",
+        "Schema:",
+        TRANSLATION_RESULT_SCHEMA,
+        "translation must contain the complete translated text.",
+        ...targetSpecificRules,
         text,
     ].join("\n");
 }
@@ -237,16 +529,14 @@ function getGeminiNanoCreateOptions(sourceLanguage, targetLanguage) {
     const inputLanguages = new Set(["en"]);
     const sourcePromptLanguage = getPromptApiLanguage(sourceLanguage);
     const targetPromptLanguage = getPromptApiLanguage(targetLanguage);
+    const outputLanguage = targetPromptLanguage || PROMPT_API_DEFAULT_OUTPUT_LANGUAGE;
     if (sourcePromptLanguage) inputLanguages.add(sourcePromptLanguage);
     if (targetPromptLanguage) inputLanguages.add(targetPromptLanguage);
 
-    const options = {
+    return {
         expectedInputs: [{ type: "text", languages: Array.from(inputLanguages) }],
+        expectedOutputs: [{ type: "text", languages: [outputLanguage] }],
     };
-    if (targetPromptLanguage) {
-        options.expectedOutputs = [{ type: "text", languages: [targetPromptLanguage] }];
-    }
-    return options;
 }
 
 function withTimeout(promise, timeoutMs, message, abortController) {
@@ -308,9 +598,11 @@ async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
                     content: [
                         "You are a fast translation engine.",
                         "Translate only. No explanations, notes, markdown, or quotes.",
-                        "Keep URLs, numbers, names, line breaks, and <<<EDGE_TRANSLATE_SEGMENT_N>>> markers unchanged.",
+                        "Keep URLs, numbers, line breaks, and <<<EDGE_TRANSLATE_SEGMENT_N>>> markers unchanged.",
+                        "Keep proper names and brands unchanged only when that is customary in the target language.",
                         `Source language: ${toLanguageName(sourceLanguage)}.`,
                         `Target language: ${toLanguageName(targetLanguage)}.`,
+                        getTargetLanguageOutputRule(targetLanguage)?.repairInstruction || "",
                     ].join("\n"),
                 },
             ],
@@ -386,13 +678,27 @@ async function translateWithGeminiNano(text, from, to) {
         : null;
     if (dictionaryResult) {
         return {
-            ...dictionaryResult,
+            ...normalizeTargetLanguageResult(dictionaryResult, targetLanguage),
             sourceLanguage,
             targetLanguage,
         };
     }
 
-    const translated = normalizeGeminiNanoOutput(output);
+    const structuredResult = !dictionaryCandidate
+        ? parseGeminiNanoTranslationOutput(output, text)
+        : null;
+    if (structuredResult) {
+        return {
+            ...normalizeTargetLanguageResult(structuredResult, targetLanguage),
+            sourceLanguage,
+            targetLanguage,
+        };
+    }
+
+    const translated = applyTargetLanguageFragmentReplacements(
+        normalizeGeminiNanoOutput(output),
+        targetLanguage
+    );
     if (!translated) throw new Error("Chrome Gemini Nano returned an empty translation.");
 
     return {

@@ -6,7 +6,6 @@ import {
   decodePdfViewerUrlParam,
   parsePdfTarget,
   setPdfViewerSearchParam,
-  shouldBlockPdfDropHijack,
   shouldPreloadPdfAsBlob,
 } from './edge-viewer-file.js';
 
@@ -39,20 +38,52 @@ try {
   };
 } catch {}
 
-// Keep external PDF drops from replacing the current document while preserving
-// PDF.js' internal thumbnail/comment/editor drag behavior.
-try {
-  const blockExternalPdfDrop = (event) => {
-    if (!shouldBlockPdfDropHijack({ dataTransfer: event.dataTransfer, target: event.target })) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
-  };
-  window.addEventListener('dragover', blockExternalPdfDrop, { capture: true });
-  window.addEventListener('drop', blockExternalPdfDrop, { capture: true });
-} catch {}
-
   try { PDFJS.GlobalWorkerOptions.workerSrc = '../build/build/pdf.worker.mjs'; } catch {}
+
+function xhrPdfBlob(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      const request = new XMLHttpRequest();
+      request.open('GET', url, true);
+      request.responseType = 'blob';
+      request.onload = () => {
+        const blob = request.response;
+        if (blob && blob.size !== 0) {
+          resolve(blob);
+          return;
+        }
+        reject(new Error(`Empty PDF response for ${url}`));
+      };
+      request.onerror = () => reject(new Error(`Unable to read PDF from ${url}`));
+      request.ontimeout = () => reject(new Error(`Timed out reading PDF from ${url}`));
+      request.send();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function readPdfBlob(url) {
+  let fetchError;
+  try {
+    const response = await fetch(url);
+    if (!response.ok && response.status !== 0) {
+      throw new Error(`Unexpected PDF response ${response.status}`);
+    }
+    const blob = await response.blob();
+    if (blob && blob.size !== 0) return blob;
+    throw new Error(`Empty PDF response for ${url}`);
+  } catch (error) {
+    fetchError = error;
+  }
+
+  try {
+    const target = new URL(url, location.href);
+    if (target.protocol === 'file:') return await xhrPdfBlob(target.href);
+  } catch {}
+
+  throw fetchError;
+}
 
 // Prepare URL before loading viewer.mjs, following official behavior where file param drives initial load
 (async () => {
@@ -94,8 +125,7 @@ try {
     if (isBlobUrl && sourceParam) {
       try {
         const original = decodePdfViewerUrlParam(sourceParam);
-        const res = await fetch(original);
-        const blob = await res.blob();
+        const blob = await readPdfBlob(original);
         const blobUrl = URL.createObjectURL(blob);
         try { createdBlobUrls.add(blobUrl); } catch {}
         setPdfViewerSearchParam(params, 'file', blobUrl);
@@ -106,8 +136,7 @@ try {
     } else if (shouldPreloadPdfAsBlob({ rawUrl, viewerOrigin: location.origin, baseUrl: location.href })) {
       // Cross-origin: preload then point file param at same-origin blob URL before viewer runs
       try {
-        const res = await fetch(target.href);
-        const blob = await res.blob();
+        const blob = await readPdfBlob(target.href);
         const blobUrl = URL.createObjectURL(blob);
         try { createdBlobUrls.add(blobUrl); } catch {}
         // Preserve original URL for refresh recovery
@@ -150,6 +179,47 @@ try {
     window.addEventListener('DOMContentLoaded', trySetupToolbar);
   } else {
     trySetupToolbar();
+  }
+
+  const setupViewsManagerWheelScroll = () => {
+    const manager = document.getElementById('viewsManager');
+    const content = document.getElementById('viewsManagerContent');
+    if (!manager || !content) return false;
+    if (manager.dataset.etWheelScroll === 'true') return true;
+    manager.dataset.etWheelScroll = 'true';
+
+    const normalizeWheelDelta = (event) => {
+      let delta = event.deltaY;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+        delta *= 16;
+      } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+        delta *= content.clientHeight || 1;
+      }
+      return delta;
+    };
+
+    manager.addEventListener('wheel', (event) => {
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      if (content.scrollHeight <= content.clientHeight + 1) return;
+
+      const before = content.scrollTop;
+      const maxScrollTop = content.scrollHeight - content.clientHeight;
+      const next = Math.min(maxScrollTop, Math.max(0, before + normalizeWheelDelta(event)));
+      if (next === before) return;
+
+      content.scrollTop = next;
+      event.preventDefault();
+      event.stopPropagation();
+    }, { capture: true, passive: false });
+    return true;
+  };
+  const trySetupViewsManagerWheelScroll = () => {
+    if (!setupViewsManagerWheelScroll()) setTimeout(trySetupViewsManagerWheelScroll, 50);
+  };
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', trySetupViewsManagerWheelScroll);
+  } else {
+    trySetupViewsManagerWheelScroll();
   }
 
   // Close any open PDF.js doorhangers/menus when clicking the background
