@@ -12,6 +12,7 @@ describe("pdfDetection redirect guards", () => {
     afterEach(() => {
         global.chrome = originalChrome;
         global.fetch = originalFetch;
+        jest.useRealTimers();
         jest.restoreAllMocks();
     });
 
@@ -70,6 +71,50 @@ describe("pdfDetection redirect guards", () => {
 
         expect(global.fetch).not.toHaveBeenCalled();
         expect(global.chrome.tabs.update).not.toHaveBeenCalled();
+        detection.dispose();
+    });
+
+    it("still redirects header-confirmed PDFs even when the URL has no PDF-looking path", async () => {
+        jest.useFakeTimers();
+        let webRequestListener;
+        global.chrome = {
+            runtime: {
+                getURL: jest.fn((path) => `chrome-extension://edge/${path}`),
+            },
+            tabs: {
+                update: jest.fn(),
+            },
+            webRequest: {
+                onHeadersReceived: {
+                    addListener: jest.fn((listener) => {
+                        webRequestListener = listener;
+                    }),
+                    removeListener: jest.fn(),
+                },
+            },
+            webNavigation: {
+                onCommitted: {
+                    addListener: jest.fn(),
+                    removeListener: jest.fn(),
+                },
+            },
+        };
+
+        const detection = setupPdfDetection();
+        webRequestListener({
+            frameId: 0,
+            tabId: 11,
+            url: "https://example.com/document/viewer?id=123",
+            responseHeaders: [{ name: "content-type", value: "application/pdf" }],
+        });
+
+        jest.advanceTimersByTime(20);
+        await Promise.resolve();
+
+        expect(global.chrome.tabs.update).toHaveBeenCalledWith(11, {
+            url:
+                "chrome-extension://edge/web/viewer.html?file=https%3A%2F%2Fexample.com%2Fdocument%2Fviewer%3Fid%3D123&source=https%3A%2F%2Fexample.com%2Fdocument%2Fviewer%3Fid%3D123",
+        });
         detection.dispose();
     });
 });

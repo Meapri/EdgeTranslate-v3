@@ -56,7 +56,7 @@ const Dropdown = forwardRef((props, ref) => {
                     setOpen(!open);
                 }}
             >
-                {props.title}
+                <TitleLabel>{props.title}</TitleLabel>
                 <StyledArrowDownIcon />
             </Title>
             <Menu open={open}>{Items}</Menu>
@@ -99,6 +99,7 @@ const StyledSelect = styled.div`
     position: relative;
     display: flex;
     align-items: center;
+    min-width: 0;
     font-size: 0;
 `;
 const Menu = styled.ul`
@@ -184,7 +185,14 @@ const Title = styled.a`
         }
     }
 `;
+const TitleLabel = styled.span`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+`;
 const StyledArrowDownIcon = styled(ArrowDownIcon)`
+    flex: 0 0 auto;
     fill: #0b57d0;
     width: 16px;
     height: 16px;

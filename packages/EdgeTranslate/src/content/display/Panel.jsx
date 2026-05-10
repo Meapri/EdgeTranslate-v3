@@ -1160,9 +1160,11 @@ const Head = styled.div`
     min-height: 56px;
     padding: 8px 10px 8px 12px;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
+    gap: 8px;
     flex: 0 0 auto;
+    min-width: 0;
     overflow: visible;
     cursor: grab;
     border-bottom: 1px solid #e1e3e1;
@@ -1179,9 +1181,12 @@ const Head = styled.div`
 const HeadIcons = styled.div`
     display: flex;
     flex-direction: row;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    min-width: 0;
 `;
 
 const HeadIcon = styled.div`
@@ -1193,8 +1198,8 @@ const HeadIcon = styled.div`
     -moz-osx-font-smoothing: grayscale;
     cursor: pointer;
     font-size: 18px;
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     margin: 0 1px;
     background-color: transparent;
     border-radius: 999px;
@@ -1261,7 +1266,9 @@ const Body = styled.div`
 `;
 
 const SourceOption = styled(Dropdown)`
-    max-width: 45%;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: min(55%, 210px);
     font-weight: normal;
     font-size: 13px;
     cursor: pointer;

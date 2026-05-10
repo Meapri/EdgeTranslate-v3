@@ -323,19 +323,30 @@ function setupWebRequestListener({ cache, probeCache, config, logInfo, logWarn }
 
             const headers = details.responseHeaders || [];
             const contentType = safeGetHeader(headers, "content-type");
-            const isPdf = isPdfContentType(contentType, config);
+            const contentDisposition = safeGetHeader(headers, "content-disposition");
+            const typeMatches = isPdfContentType(contentType, config);
+            const filenameMatches = /\.pdf(?:["')]|$)/i.test(contentDisposition);
+            const isPdf = typeMatches || filenameMatches;
             const isDownload = isDownloadRequest(headers, config.downloadDispositionTokens);
+            const potentiallyPdf = isPotentialPdfUrl(details.url, config);
 
             const entry = { isPdf, isDownload, contentType };
-            cache.set(details.url, entry);
-            probeCache?.set(details.url, entry);
 
             if (isPdf && !isDownload) {
+                cache.set(details.url, entry);
+                probeCache?.set(details.url, entry);
                 setTimeout(() => {
                     void redirectToViewer(details.tabId, details.url, config, { logInfo, logWarn });
                 }, config.redirectDelayMs);
             } else if (isDownload) {
+                if (potentiallyPdf || isPdf) {
+                    cache.set(details.url, entry);
+                    probeCache?.set(details.url, entry);
+                }
                 logInfo?.(`PDF download detected and left untouched: ${details.url}`);
+            } else if (potentiallyPdf) {
+                cache.set(details.url, entry);
+                probeCache?.set(details.url, entry);
             }
         } catch (error) {
             logWarn?.("webRequest PDF detection failed", error);
