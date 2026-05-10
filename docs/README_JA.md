@@ -33,6 +33,20 @@ AI 翻訳、つまり Gemini Nano 経路に重点を置いています。
 - 設定ページを整理し、プロバイダー名を分かりやすくし、視覚的なノイズを削減。
 - キーボードショートカット、ブラックリスト、翻訳ボタンの動作設定に対応。
 
+## スクリーンショット
+
+### 選択テキスト翻訳
+
+![フローティング翻訳パネル](./images/readme/selection-floating-panel.png)
+
+![固定サイド翻訳パネル](./images/readme/selection-side-panel.png)
+
+### PDF 翻訳
+
+![Material 風の PDF ビューアー](./images/readme/pdf-viewer.png)
+
+![PDF 選択テキスト翻訳](./images/readme/pdf-selection-translation.png)
+
 ## AI 翻訳について
 
 Chrome のオンデバイス Gemini Nano 経路は、ブラウザーが `LanguageModel` API を提供している場合に

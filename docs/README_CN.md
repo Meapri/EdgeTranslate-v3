@@ -31,6 +31,20 @@ Chrome、Firefox 和 Safari 的扩展政策进行了现代化调整。
 - 设置页经过整理，供应商名称更清晰，视觉干扰更少。
 - 支持快捷键、黑名单控制和可配置的翻译按钮行为。
 
+## 截图
+
+### 划词翻译
+
+![浮动翻译面板](./images/readme/selection-floating-panel.png)
+
+![固定侧边翻译面板](./images/readme/selection-side-panel.png)
+
+### PDF 翻译
+
+![Material 风格 PDF 阅读器](./images/readme/pdf-viewer.png)
+
+![PDF 划词翻译](./images/readme/pdf-selection-translation.png)
+
 ## AI 翻译说明
 
 当浏览器提供 `LanguageModel` API 时，Chrome 的本机 Gemini Nano 路径会作为 AI 翻译供应商出现。

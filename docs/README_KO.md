@@ -32,6 +32,20 @@ AI 번역에 초점을 둡니다.
 - 설정 페이지를 정리해 공급자 이름을 더 명확하게 만들고 시각적 복잡도를 줄였습니다.
 - 키보드 단축키, 블랙리스트, 번역 버튼 동작 설정을 지원합니다.
 
+## 스크린샷
+
+### 선택 번역
+
+![플로팅 번역 패널](./images/readme/selection-floating-panel.png)
+
+![고정 사이드 번역 패널](./images/readme/selection-side-panel.png)
+
+### PDF 번역
+
+![Material 스타일 PDF 뷰어](./images/readme/pdf-viewer.png)
+
+![PDF 선택 번역](./images/readme/pdf-selection-translation.png)
+
 ## AI 번역 안내
 
 Chrome의 온디바이스 Gemini Nano 경로는 브라우저가 `LanguageModel` API를 제공할 때 AI 번역 공급자로

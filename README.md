@@ -34,6 +34,20 @@ translation through Gemini Nano where the browser supports it.
 - Settings page cleanup with clearer provider names and less visual clutter.
 - Keyboard shortcuts, blacklist controls, and configurable translation button behavior.
 
+## Screenshots
+
+### Selection Translation
+
+![Floating translation panel](./docs/images/readme/selection-floating-panel.png)
+
+![Pinned side translation panel](./docs/images/readme/selection-side-panel.png)
+
+### PDF Translation
+
+![Material-inspired PDF viewer](./docs/images/readme/pdf-viewer.png)
+
+![PDF selection translation](./docs/images/readme/pdf-selection-translation.png)
+
 ## AI Translation Notes
 
 Chrome's on-device Gemini Nano path is exposed as an AI translation provider where the
