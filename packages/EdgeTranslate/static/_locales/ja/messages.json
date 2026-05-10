@@ -240,7 +240,7 @@
         "description": "翻訳後、テキスト選択を自動的にキャンセルします。"
     },
     "GooglePageTranslate": {
-        "message": "Googleページ翻訳",
+        "message": "Google ページ翻訳",
         "description": "Google翻訳APIで現在のページを翻訳します。"
     },
     "TranslatePage": {
@@ -328,15 +328,15 @@
         "description": "典型的な例文の翻訳ソースを設定します。"
     },
     "BingTranslate": {
-        "message": "ビング翻訳",
-        "description": "ビング翻訳"
+        "message": "Bing 翻訳",
+        "description": "Bing 翻訳"
     },
     "BingTranslateShort": {
-        "message": "ビング",
-        "description": "ビング翻訳"
+        "message": "Bing",
+        "description": "Bing 翻訳の略称"
     },
     "DeepLTranslate": {
-        "message": "DeepL Translate",
+        "message": "DeepL 翻訳",
         "description": "DeepL Translate."
     },
     "DeepLTranslateShort": {
@@ -344,12 +344,12 @@
         "description": "Abbreviation of DeepL Translate."
     },
     "GoogleTranslate": {
-        "message": "グーグル翻訳",
-        "description": "グーグル翻訳"
+        "message": "Google 翻訳",
+        "description": "Google 翻訳"
     },
     "GoogleTranslateShort": {
-        "message": "グーグル",
-        "description": "グーグル翻訳"
+        "message": "Google",
+        "description": "Google 翻訳の略称"
     },
     "HybridTranslate": {
         "message": "ブレンド翻訳",
@@ -1299,25 +1299,17 @@
         "message": "AI翻訳を有効化",
         "description": "ユーザー設定のAI翻訳プロバイダーを有効にします"
     },
-    "LocalTranslatorEndpoint": {
-        "message": "Endpoint URL",
-        "description": "翻訳API endpoint URL"
-    },
     "LocalTranslatorApiKey": {
         "message": "APIキー",
-        "description": "Endpoint モードまたは Google AI Studio モードで使用する API キー"
+        "description": "Google AI Studio モードで使用する API キー"
     },
     "LocalTranslatorHelp": {
-        "message": "Chrome Gemini Nano はオンデバイス AI 翻訳に使用し、Google AI Studio は自分の API キーと選択した Gemini モデルを使用します。",
+        "message": "Chrome Gemini Nano はオンデバイス AI 翻訳に使用し、Google AI Studio は自分の API キーと選択した Gemini モデルを使用します。AI の単語翻訳では、モデルが提供できる場合に詳しい意味、定義、例文も表示します。",
         "description": "AI翻訳ヘルプ"
     },
     "LocalTranslatorMode": {
         "message": "モード",
         "description": "AI翻訳プロバイダーモード"
-    },
-    "LocalTranslatorModeEndpoint": {
-        "message": "Endpoint API",
-        "description": "ユーザー設定の HTTP 翻訳 endpoint を使用します。"
     },
     "LocalTranslatorModeChromeBuiltin": {
         "message": "Chrome Gemini Nano（オンデバイス）",

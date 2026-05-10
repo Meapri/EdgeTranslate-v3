@@ -164,6 +164,8 @@ select {
 
 select {
     cursor: pointer;
+    padding-right: 38px;
+    padding-inline-end: 38px;
 }
 
 input[type="text"]:focus,
@@ -362,6 +364,11 @@ select {
     font-weight: 500;
 }
 
+select {
+    border-right: 12px solid transparent;
+    background-clip: padding-box;
+}
+
 input[type="text"]:hover,
 input[type="password"]:hover,
 input[type="number"]:hover,
@@ -451,6 +458,10 @@ p.i18n {
         color: #e8eaed;
         background: #242a31;
         box-shadow: inset 0 0 0 1px #3d4651;
+    }
+
+    select {
+        border-right-color: transparent;
     }
 
     input[type="text"]:hover,

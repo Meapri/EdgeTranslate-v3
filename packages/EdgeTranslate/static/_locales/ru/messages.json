@@ -240,7 +240,7 @@
         "description": "Отменить выделение текста автоматически после перевода"
     },
     "GooglePageTranslate": {
-        "message": "Переводчик страниц Google",
+        "message": "Перевод страниц Google",
         "description": "Перевод текущей страницы с помощью Google Translate API."
     },
     "TranslatePage": {
@@ -328,12 +328,12 @@
         "description": "Выберите источник примеров слов."
     },
     "BingTranslate": {
-        "message": "Переводчик Bing",
-        "description": "Переводчик Bing"
+        "message": "Bing Переводчик",
+        "description": "Bing Переводчик"
     },
     "BingTranslateShort": {
         "message": "Bing",
-        "description": "Переводчик Bing"
+        "description": "Сокращение Bing Переводчик"
     },
     "DeepLTranslate": {
         "message": "DeepL Translate",
@@ -341,7 +341,7 @@
     },
     "DeepLTranslateShort": {
         "message": "DeepL",
-        "description": "Abbreviation of DeepL Translate."
+        "description": "Сокращение DeepL Translate."
     },
     "GoogleTranslate": {
         "message": "Google Переводчик",
@@ -349,7 +349,7 @@
     },
     "GoogleTranslateShort": {
         "message": "Google",
-        "description": "Google Переводчик"
+        "description": "Сокращение Google Переводчик"
     },
     "HybridTranslate": {
         "message": "Смешанный переводчик",
@@ -1284,47 +1284,39 @@
         "description": "Zulu"
     },
     "LocalTranslate": {
-        "message": "AI Translate",
+        "message": "AI-перевод",
         "description": "Пользовательский on-device или Gemini провайдер перевода"
     },
     "LocalTranslateShort": {
         "message": "AI",
-        "description": "Сокращение AI Translate"
+        "description": "Сокращение AI-перевода"
     },
     "LocalTranslatorConfig": {
-        "message": "AI Translate",
+        "message": "AI-перевод",
         "description": "Настройки AI-провайдера перевода"
     },
     "LocalTranslatorEnabled": {
-        "message": "Включить AI Translate",
+        "message": "Включить AI-перевод",
         "description": "Включить пользовательский AI-провайдер перевода"
     },
-    "LocalTranslatorEndpoint": {
-        "message": "Endpoint URL",
-        "description": "URL endpoint API перевода"
-    },
     "LocalTranslatorApiKey": {
-        "message": "API key",
-        "description": "API key for Endpoint mode or Google AI Studio mode."
+        "message": "API-ключ",
+        "description": "API-ключ для режима Google AI Studio."
     },
     "LocalTranslatorHelp": {
-        "message": "Use Chrome Gemini Nano for on-device AI translation, or Google AI Studio with your own API key and selected Gemini model.",
-        "description": "AI translation help."
+        "message": "Используйте Chrome Gemini Nano для AI-перевода на устройстве или Google AI Studio со своим API-ключом и выбранной моделью Gemini. Для отдельных слов AI-перевод показывает значения, определения и примеры, если модель может их предоставить.",
+        "description": "Справка по AI-переводу."
     },
     "LocalTranslatorMode": {
         "message": "Режим",
         "description": "Режим AI-провайдера перевода."
     },
-    "LocalTranslatorModeEndpoint": {
-        "message": "Endpoint API",
-        "description": "Использовать пользовательский HTTP endpoint перевода."
-    },
     "LocalTranslatorModeChromeBuiltin": {
-        "message": "Chrome Gemini Nano (on-device)",
+        "message": "Chrome Gemini Nano (на устройстве)",
         "description": "Использовать встроенный Translator API настольного Chrome, если доступен."
     },
     "ChromeBuiltinPageTranslate": {
-        "message": "Chrome Gemini Nano (on-device) page translation"
+        "message": "Перевод страниц Chrome Gemini Nano (на устройстве)"
     },
     "LocalTranslatorTimeoutMs": {
         "message": "Тайм-аут AI-переводчика (мс)"
@@ -1337,7 +1329,7 @@
         "description": "Использовать Gemini API с вашим ключом Google AI Studio."
     },
     "LocalTranslatorModel": {
-        "message": "AI model",
+        "message": "AI-модель",
         "description": "Название модели Google AI Studio."
     }
 }

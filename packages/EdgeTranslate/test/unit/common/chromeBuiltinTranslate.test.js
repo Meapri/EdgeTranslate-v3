@@ -109,6 +109,26 @@ describe("Chrome built-in translator helper", () => {
         expect(promptMock.mock.calls[0][0]).not.toContain("tPronunciation");
     });
 
+    it("rejects copied Gemini Nano source output without a second prompt", async () => {
+        const copiedSource =
+            "This is a long enough source sentence that should be translated into Korean.";
+        const promptMock = jest.fn().mockResolvedValue(
+            JSON.stringify({
+                translation: copiedSource,
+            })
+        );
+        globalThis.LanguageModel = {
+            availability: jest.fn().mockResolvedValue("available"),
+            create: jest.fn().mockResolvedValue({ prompt: promptMock }),
+        };
+
+        await expect(translateWithChromeOnDevice(copiedSource, "ru", "ko")).rejects.toThrow(
+            "returned source text"
+        );
+        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(promptMock.mock.calls[0][0]).toContain("Do not return the source text unchanged");
+    });
+
     it("does not expose malformed Gemini Nano JSON in the translation panel", async () => {
         const promptMock = jest
             .fn()

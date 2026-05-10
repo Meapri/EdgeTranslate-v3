@@ -104,6 +104,11 @@ select,
     transition: background-color motion-fast, box-shadow motion-fast, color motion-fast;
 }
 
+select {
+    padding-right: 38px;
+    padding-inline-end: 38px;
+}
+
 select:hover,
 #translate_input:hover {
     background: material-hover;
@@ -256,6 +261,11 @@ select,
     font-weight: 500;
 }
 
+select {
+    border-right: 12px solid transparent;
+    background-clip: padding-box;
+}
+
 select:hover,
 #translate_input:hover {
     background: #e6edf4;
@@ -345,6 +355,10 @@ footer {
         color: #e8eaed;
         background: #242a31;
         box-shadow: inset 0 0 0 1px #3d4651;
+    }
+
+    select {
+        border-right-color: transparent;
     }
 
     select:hover,

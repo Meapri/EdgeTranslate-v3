@@ -1,6 +1,6 @@
 {
     "AppName": {
-        "message": "側邊翻譯",
+        "message": "Edge Translate",
         "description": "應用名稱"
     },
     "Description": {
@@ -148,24 +148,24 @@
         "description": "將當前域名移出黑名單。"
     },
     "DataCollectionNotice": {
-        "message": "感謝使用側邊翻譯！\n為了改善用戶體驗，我們需要收集一些統計數據，點此查看選項。",
-        "description": "關於收集數據的提示"
+        "message": "感謝使用 Edge Translate！\n為了改善使用者體驗，請在選項中查看設定。",
+        "description": "Edge Translate 歡迎提示"
     },
     "PrivacyPolicyLink": {
         "message": "https://github.com/EdgeTranslate/EdgeTranslate/blob/master/docs/wiki/zh_TW/%E9%9A%B1%E7%A7%81%E6%94%BF%E7%AD%96.md",
         "description": "隱私政策鏈接"
     },
     "ExtensionInstalled": {
-        "message": "側邊翻譯安裝成功！點此閱讀使用說明",
-        "description": "通知用戶側邊翻譯已安裝。"
+        "message": "Edge Translate 安裝成功！點此閱讀使用說明",
+        "description": "通知使用者 Edge Translate 已安裝。"
     },
     "WikiLink": {
         "message": "https://github.com/EdgeTranslate/EdgeTranslate/blob/master/docs/wiki/zh_TW/%E6%8F%92%E4%BB%B6%E4%BB%8B%E7%B4%B9.md",
         "description": "Wiki link."
     },
     "ExtensionUpdated": {
-        "message": "側邊翻譯更新成功！點此閱讀更新日誌",
-        "description": "通知用戶側邊翻譯已更新。"
+        "message": "Edge Translate 更新成功！點此閱讀更新日誌",
+        "description": "通知使用者 Edge Translate 已更新。"
     },
     "InputHint": {
         "message": "翻譯内容不能為空",
@@ -184,8 +184,8 @@
         "description": "目標語言"
     },
     "PermissionRemind": {
-        "message": "如果想在此頁面使用側邊翻譯，請在擴展程序管理頁面中開啟：'允許訪問文件網址' 的開關。",
-        "description": "在用戶的 '允許訪問文件網址'的權限未打開時，給用戶合理的提醒"
+        "message": "如果想在此頁面使用 Edge Translate，請在擴充功能管理頁面中開啟：'允許存取檔案網址' 的開關。",
+        "description": "在使用者的 '允許存取檔案網址' 權限未開啟時給出提醒"
     },
     "ContentSettings": {
         "message": "翻譯結果設定",
@@ -240,8 +240,8 @@
         "description": "翻譯後自動取消文本選擇"
     },
     "GooglePageTranslate": {
-        "message": "谷歌網頁翻譯",
-        "description": "使用谷歌翻譯的api翻譯當前頁面。"
+        "message": "Google 網頁翻譯",
+        "description": "使用 Google 翻譯目前頁面。"
     },
     "TranslatePage": {
         "message": "翻譯此頁",
@@ -256,8 +256,8 @@
         "description": "隱藏或展示網頁翻譯器的頂欄。"
     },
     "TranslatePageGoogle": {
-        "message": "使用谷歌翻譯此頁",
-        "description": "使用谷歌翻譯的api翻譯當前頁面。"
+        "message": "使用 Google 翻譯此頁",
+        "description": "使用 Google 翻譯目前頁面。"
     },
     "PrivacyPolicy": {
         "message": "隱私政策",
@@ -288,8 +288,8 @@
         "description": "左下"
     },
     "SettingsTitle": {
-        "message": "側邊翻譯設置",
-        "description": "側邊翻譯設置頁面"
+        "message": "Edge Translate 設定",
+        "description": "Edge Translate 設定頁面"
     },
     "MutualTranslation": {
         "message": "互譯模式",
@@ -328,15 +328,15 @@
         "description": "設置典型例句翻譯源。"
     },
     "BingTranslate": {
-        "message": "必應翻譯",
-        "description": "必應翻譯翻譯源。"
+        "message": "Bing 翻譯",
+        "description": "Bing 翻譯源。"
     },
     "BingTranslateShort": {
-        "message": "必應翻譯",
-        "description": "必應翻譯翻譯源縮寫。"
+        "message": "Bing",
+        "description": "Bing 翻譯源縮寫。"
     },
     "DeepLTranslate": {
-        "message": "DeepL翻譯",
+        "message": "DeepL 翻譯",
         "description": "DeepL翻譯翻譯源"
     },
     "DeepLTranslateShort": {
@@ -344,12 +344,12 @@
         "description": "DeepL翻譯翻譯源縮寫"
     },
     "GoogleTranslate": {
-        "message": "谷歌翻譯",
-        "description": "谷歌翻譯翻譯源。"
+        "message": "Google 翻譯",
+        "description": "Google 翻譯源。"
     },
     "GoogleTranslateShort": {
-        "message": "谷歌翻譯",
-        "description": "谷歌翻譯翻譯源縮寫。"
+        "message": "Google",
+        "description": "Google 翻譯源縮寫。"
     },
     "HybridTranslate": {
         "message": "混合翻譯",
@@ -372,7 +372,7 @@
         "description": "提示頁面的第一個原因"
     },
     "NoticeReason2": {
-        "message": "你正在一個無法注入我們擴展腳本的頁面上使用側邊翻譯。",
+        "message": "你正在一個無法注入 Edge Translate 腳本的頁面上使用它。",
         "description": "提示頁面的第二個原因"
     },
     "NoticeExampleSites": {
@@ -384,7 +384,7 @@
         "description": "一個空白頁面"
     },
     "NoticeReason3": {
-        "message": "你正在一個文件頁面上使用側邊翻譯，但是我們沒有訪問文件鏈接的權限。",
+        "message": "你正在一個檔案頁面上使用 Edge Translate，但是它沒有存取檔案連結的權限。",
         "description": "提示頁面的第三個原因"
     },
     "NoticeReason4": {
@@ -1299,25 +1299,17 @@
         "message": "啟用 AI 翻譯",
         "description": "啟用使用者設定的 AI 翻譯服務"
     },
-    "LocalTranslatorEndpoint": {
-        "message": "Endpoint URL",
-        "description": "翻譯 API endpoint URL"
-    },
     "LocalTranslatorApiKey": {
         "message": "API 金鑰",
-        "description": "Endpoint 模式或 Google AI Studio 模式使用的 API 金鑰"
+        "description": "Google AI Studio 模式使用的 API 金鑰"
     },
     "LocalTranslatorHelp": {
-        "message": "Chrome Gemini Nano 用於裝置端 AI 翻譯；Google AI Studio 使用你自己的 API 金鑰和所選 Gemini 模型。",
+        "message": "Chrome Gemini Nano 用於裝置端 AI 翻譯；Google AI Studio 使用你自己的 API 金鑰和所選 Gemini 模型。AI 單字翻譯會在模型可提供時顯示詳細意思、定義和例句。",
         "description": "AI 翻譯說明"
     },
     "LocalTranslatorMode": {
         "message": "模式",
         "description": "AI 翻譯提供者模式"
-    },
-    "LocalTranslatorModeEndpoint": {
-        "message": "Endpoint API",
-        "description": "使用使用者設定的 HTTP 翻譯 endpoint。"
     },
     "LocalTranslatorModeChromeBuiltin": {
         "message": "Chrome Gemini Nano（裝置端）",

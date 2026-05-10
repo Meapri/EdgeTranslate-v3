@@ -439,6 +439,846 @@
         "message": "실행 동작",
         "description": "실행 동작"
     },
+    "English": {
+        "message": "영어",
+        "description": "영어"
+    },
+    "ChineseSimplified": {
+        "message": "중국어 간체",
+        "description": "중국어 간체"
+    },
+    "ChineseTraditional": {
+        "message": "중국어 번체",
+        "description": "중국어 번체"
+    },
+    "French": {
+        "message": "프랑스어",
+        "description": "프랑스어"
+    },
+    "Spanish": {
+        "message": "스페인어",
+        "description": "스페인어"
+    },
+    "Russian": {
+        "message": "러시아어",
+        "description": "러시아어"
+    },
+    "Arabic": {
+        "message": "아랍어",
+        "description": "아랍어"
+    },
+    "German": {
+        "message": "독일어",
+        "description": "독일어"
+    },
+    "Japanese": {
+        "message": "일본어",
+        "description": "일본어"
+    },
+    "Portuguese": {
+        "message": "포르투갈어",
+        "description": "포르투갈어"
+    },
+    "Hindi": {
+        "message": "힌디어",
+        "description": "힌디어"
+    },
+    "Urdu": {
+        "message": "우르두어",
+        "description": "우르두어"
+    },
+    "Achinese": {
+        "message": "아콜리어",
+        "description": "아콜리어"
+    },
+    "Afrikaans": {
+        "message": "아프리칸스어",
+        "description": "아프리칸스어"
+    },
+    "Akan": {
+        "message": "아칸어",
+        "description": "아칸어"
+    },
+    "Albanian": {
+        "message": "알바니아어",
+        "description": "알바니아어"
+    },
+    "Amharic": {
+        "message": "암하라어",
+        "description": "암하라어"
+    },
+    "Aragonese": {
+        "message": "아라곤어",
+        "description": "아라곤어"
+    },
+    "Armenian": {
+        "message": "아르메니아어",
+        "description": "아르메니아어"
+    },
+    "Assamese": {
+        "message": "아삼어",
+        "description": "아삼어"
+    },
+    "Asturian": {
+        "message": "아스투리아어",
+        "description": "아스투리아어"
+    },
+    "Aymara": {
+        "message": "아이마라어",
+        "description": "아이마라어"
+    },
+    "Azerbaijani": {
+        "message": "아제르바이잔어",
+        "description": "아제르바이잔어"
+    },
+    "Baluchi": {
+        "message": "발루치어",
+        "description": "발루치어"
+    },
+    "BasaSunda": {
+        "message": "순다어",
+        "description": "순다어"
+    },
+    "Bashkir": {
+        "message": "바슈키르어",
+        "description": "바슈키르어"
+    },
+    "Basque": {
+        "message": "바스크어",
+        "description": "바스크어"
+    },
+    "Belarusian": {
+        "message": "벨라루스어",
+        "description": "벨라루스어"
+    },
+    "Bemba": {
+        "message": "벰바어",
+        "description": "벰바어"
+    },
+    "Bengali": {
+        "message": "벵골어",
+        "description": "벵골어"
+    },
+    "Berberlanguages": {
+        "message": "Berber languages",
+        "description": "Berber languages"
+    },
+    "Bhojpuri": {
+        "message": "호즈푸리어",
+        "description": "호즈푸리어"
+    },
+    "Bislama": {
+        "message": "비슬라마어",
+        "description": "비슬라마어"
+    },
+    "Blin": {
+        "message": "Blin",
+        "description": "Blin"
+    },
+    "Bokmal": {
+        "message": "노르웨이어(보크말)",
+        "description": "노르웨이어(보크말)"
+    },
+    "Bosnian": {
+        "message": "보스니아어",
+        "description": "보스니아어"
+    },
+    "Breton": {
+        "message": "브르타뉴어",
+        "description": "브르타뉴어"
+    },
+    "Bulgarian": {
+        "message": "불가리아어",
+        "description": "불가리아어"
+    },
+    "Burmese": {
+        "message": "버마어",
+        "description": "버마어"
+    },
+    "Cantonese": {
+        "message": "광둥어",
+        "description": "광둥어"
+    },
+    "Catalan": {
+        "message": "카탈로니아어",
+        "description": "카탈로니아어"
+    },
+    "Cebuano": {
+        "message": "세부아노어",
+        "description": "세부아노어"
+    },
+    "Cherokee": {
+        "message": "체로키어",
+        "description": "체로키어"
+    },
+    "Chichewa": {
+        "message": "냔자어",
+        "description": "냔자어"
+    },
+    "Chuvash": {
+        "message": "추바시어",
+        "description": "추바시어"
+    },
+    "ClassicalChinese": {
+        "message": "고전 중국어",
+        "description": "고전 중국어"
+    },
+    "Cornish": {
+        "message": "콘월어",
+        "description": "콘월어"
+    },
+    "Corsican": {
+        "message": "코르시카어",
+        "description": "코르시카어"
+    },
+    "Creek": {
+        "message": "크리어",
+        "description": "크리어"
+    },
+    "CrimeanTatar": {
+        "message": "크림 타타르어",
+        "description": "크림 타타르어"
+    },
+    "Croatian": {
+        "message": "크로아티아어",
+        "description": "크로아티아어"
+    },
+    "Czech": {
+        "message": "체코어",
+        "description": "체코어"
+    },
+    "Danish": {
+        "message": "덴마크어",
+        "description": "덴마크어"
+    },
+    "Dari": {
+        "message": "다리어",
+        "description": "다리어"
+    },
+    "Divehi": {
+        "message": "디베히어",
+        "description": "디베히어"
+    },
+    "Dutch": {
+        "message": "네덜란드어",
+        "description": "네덜란드어"
+    },
+    "Esperanto": {
+        "message": "에스페란토어",
+        "description": "에스페란토어"
+    },
+    "Estonian": {
+        "message": "에스토니아어",
+        "description": "에스토니아어"
+    },
+    "Faroese": {
+        "message": "페로어",
+        "description": "페로어"
+    },
+    "Fiji": {
+        "message": "피지어",
+        "description": "피지어"
+    },
+    "Filipino": {
+        "message": "필리핀어",
+        "description": "필리핀어"
+    },
+    "Finnish": {
+        "message": "핀란드어",
+        "description": "핀란드어"
+    },
+    "Frisian": {
+        "message": "서부 프리지아어",
+        "description": "서부 프리지아어"
+    },
+    "Friulian": {
+        "message": "프리울리어",
+        "description": "프리울리어"
+    },
+    "Fulani": {
+        "message": "풀라어",
+        "description": "풀라어"
+    },
+    "Gaelic": {
+        "message": "스코틀랜드 게일어",
+        "description": "스코틀랜드 게일어"
+    },
+    "Galician": {
+        "message": "갈리시아어",
+        "description": "갈리시아어"
+    },
+    "Georgian": {
+        "message": "조지아어",
+        "description": "조지아어"
+    },
+    "Greek": {
+        "message": "그리스어",
+        "description": "그리스어"
+    },
+    "Guarani": {
+        "message": "과라니어",
+        "description": "과라니어"
+    },
+    "Gujarati": {
+        "message": "구자라트어",
+        "description": "구자라트어"
+    },
+    "HaitianCreole": {
+        "message": "아이티어",
+        "description": "아이티어"
+    },
+    "HakhaChin": {
+        "message": "하카어",
+        "description": "하카어"
+    },
+    "Hausa": {
+        "message": "하우사어",
+        "description": "하우사어"
+    },
+    "Hawaiian": {
+        "message": "하와이어",
+        "description": "하와이어"
+    },
+    "Hebrew": {
+        "message": "히브리어",
+        "description": "히브리어"
+    },
+    "Hiligaynon": {
+        "message": "헤리가뇬어",
+        "description": "헤리가뇬어"
+    },
+    "Hmong": {
+        "message": "히몸어",
+        "description": "히몸어"
+    },
+    "Hungarian": {
+        "message": "헝가리어",
+        "description": "헝가리어"
+    },
+    "Hupa": {
+        "message": "후파어",
+        "description": "후파어"
+    },
+    "Icelandic": {
+        "message": "아이슬란드어",
+        "description": "아이슬란드어"
+    },
+    "Ido": {
+        "message": "이도어",
+        "description": "이도어"
+    },
+    "Igbo": {
+        "message": "이그보어",
+        "description": "이그보어"
+    },
+    "Indonesian": {
+        "message": "인도네시아어",
+        "description": "인도네시아어"
+    },
+    "Ingush": {
+        "message": "인구시어",
+        "description": "인구시어"
+    },
+    "interlingua": {
+        "message": "인터링구아",
+        "description": "인터링구아"
+    },
+    "Inuktitut": {
+        "message": "이눅티투트어",
+        "description": "이눅티투트어"
+    },
+    "Irish": {
+        "message": "아일랜드어",
+        "description": "아일랜드어"
+    },
+    "Italian": {
+        "message": "이탈리아어",
+        "description": "이탈리아어"
+    },
+    "Javanese": {
+        "message": "자바어",
+        "description": "자바어"
+    },
+    "Kabyle": {
+        "message": "커바일어",
+        "description": "커바일어"
+    },
+    "Kalaallisut": {
+        "message": "그린란드어",
+        "description": "그린란드어"
+    },
+    "Kannada": {
+        "message": "칸나다어",
+        "description": "칸나다어"
+    },
+    "Kanuri": {
+        "message": "칸누리어",
+        "description": "칸누리어"
+    },
+    "Kashmiri": {
+        "message": "카슈미르어",
+        "description": "카슈미르어"
+    },
+    "Kashubian": {
+        "message": "카슈브어",
+        "description": "카슈브어"
+    },
+    "Kazakh": {
+        "message": "카자흐어",
+        "description": "카자흐어"
+    },
+    "Khmer": {
+        "message": "크메르어",
+        "description": "크메르어"
+    },
+    "Kinyarwanda": {
+        "message": "르완다어",
+        "description": "르완다어"
+    },
+    "Klingon": {
+        "message": "클링온어",
+        "description": "클링온어"
+    },
+    "Kongo": {
+        "message": "콩고어",
+        "description": "콩고어"
+    },
+    "Konkani": {
+        "message": "코카니어",
+        "description": "코카니어"
+    },
+    "Kurdish": {
+        "message": "쿠르드어",
+        "description": "쿠르드어"
+    },
+    "KurdishNorthern": {
+        "message": "쿠르드어",
+        "description": "쿠르드어"
+    },
+    "Kyrgyz": {
+        "message": "키르기스어",
+        "description": "키르기스어"
+    },
+    "Lao": {
+        "message": "라오어",
+        "description": "라오어"
+    },
+    "Latgalian": {
+        "message": "랑기어",
+        "description": "랑기어"
+    },
+    "Latin": {
+        "message": "라틴어",
+        "description": "라틴어"
+    },
+    "Latvian": {
+        "message": "라트비아어",
+        "description": "라트비아어"
+    },
+    "Limburgish": {
+        "message": "림버거어",
+        "description": "림버거어"
+    },
+    "Lingala": {
+        "message": "링갈라어",
+        "description": "링갈라어"
+    },
+    "Lithuanian": {
+        "message": "리투아니아어",
+        "description": "리투아니아어"
+    },
+    "Lojban": {
+        "message": "로지반",
+        "description": "로지반"
+    },
+    "Luganda": {
+        "message": "간다어",
+        "description": "간다어"
+    },
+    "Luxembourgish": {
+        "message": "룩셈부르크어",
+        "description": "룩셈부르크어"
+    },
+    "Macedonian": {
+        "message": "마케도니아어",
+        "description": "마케도니아어"
+    },
+    "Maithili": {
+        "message": "마이틸리어",
+        "description": "마이틸리어"
+    },
+    "Malagasy": {
+        "message": "말라가시어",
+        "description": "말라가시어"
+    },
+    "Malay": {
+        "message": "말레이어",
+        "description": "말레이어"
+    },
+    "Malayalam": {
+        "message": "말라얄람어",
+        "description": "말라얄람어"
+    },
+    "Maltese": {
+        "message": "몰타어",
+        "description": "몰타어"
+    },
+    "Manx": {
+        "message": "맹크스어",
+        "description": "맹크스어"
+    },
+    "Maori": {
+        "message": "마오리어",
+        "description": "마오리어"
+    },
+    "Marathi": {
+        "message": "마라티어",
+        "description": "마라티어"
+    },
+    "Marshallese": {
+        "message": "마셜어",
+        "description": "마셜어"
+    },
+    "MauritianCreole": {
+        "message": "모리셔스 크리올어",
+        "description": "모리셔스 크리올어"
+    },
+    "MiddleFrench": {
+        "message": "중세 프랑스어",
+        "description": "중세 프랑스어"
+    },
+    "Mongolian": {
+        "message": "몽골어",
+        "description": "몽골어"
+    },
+    "Montenegrin": {
+        "message": "몬테네그로어",
+        "description": "몬테네그로어"
+    },
+    "Myanmar": {
+        "message": "버마어",
+        "description": "버마어"
+    },
+    "Neapolitan": {
+        "message": "나폴리어",
+        "description": "나폴리어"
+    },
+    "Nepali": {
+        "message": "네팔어",
+        "description": "네팔어"
+    },
+    "NorthernSami": {
+        "message": "북부 사미어",
+        "description": "북부 사미어"
+    },
+    "NorthernSotho": {
+        "message": "북부 소토어",
+        "description": "북부 소토어"
+    },
+    "Norwegian": {
+        "message": "노르웨이어",
+        "description": "노르웨이어"
+    },
+    "Nynorsk": {
+        "message": "노르웨이어(니노르스크)",
+        "description": "노르웨이어(니노르스크)"
+    },
+    "Occitan": {
+        "message": "오크어",
+        "description": "오크어"
+    },
+    "Ojibwa": {
+        "message": "오지브와어",
+        "description": "오지브와어"
+    },
+    "OldEnglish": {
+        "message": "고대 영어",
+        "description": "고대 영어"
+    },
+    "Oriya": {
+        "message": "오리야어",
+        "description": "오리야어"
+    },
+    "Oromo": {
+        "message": "오로모어",
+        "description": "오로모어"
+    },
+    "Ossetian": {
+        "message": "오세트어",
+        "description": "오세트어"
+    },
+    "Pampanga": {
+        "message": "팜팡가어",
+        "description": "팜팡가어"
+    },
+    "Papiamento": {
+        "message": "파피아먼토어",
+        "description": "파피아먼토어"
+    },
+    "Pashto": {
+        "message": "파슈토어",
+        "description": "파슈토어"
+    },
+    "Persian": {
+        "message": "페르시아어",
+        "description": "페르시아어"
+    },
+    "Polish": {
+        "message": "폴란드어",
+        "description": "폴란드어"
+    },
+    "Punjabi": {
+        "message": "펀자브어",
+        "description": "펀자브어"
+    },
+    "Quechua": {
+        "message": "케추아어",
+        "description": "케추아어"
+    },
+    "QueretaroOttomi": {
+        "message": "케레타로 오토미어",
+        "description": "케레타로 오토미어"
+    },
+    "Romanian": {
+        "message": "루마니아어",
+        "description": "루마니아어"
+    },
+    "Romansh": {
+        "message": "로만시어",
+        "description": "로만시어"
+    },
+    "Romany": {
+        "message": "집시어",
+        "description": "집시어"
+    },
+    "Rusyn": {
+        "message": "루신어",
+        "description": "루신어"
+    },
+    "Samoan": {
+        "message": "사모아어",
+        "description": "사모아어"
+    },
+    "Sanskrit": {
+        "message": "산스크리트어",
+        "description": "산스크리트어"
+    },
+    "Sardinian": {
+        "message": "사르디니아어",
+        "description": "사르디니아어"
+    },
+    "Scots": {
+        "message": "스코틀랜드어",
+        "description": "스코틀랜드어"
+    },
+    "ScotsGaelic": {
+        "message": "스코틀랜드 게일어",
+        "description": "스코틀랜드 게일어"
+    },
+    "SerbCyrillic": {
+        "message": "세르비아어(키릴 문자)",
+        "description": "세르비아어(키릴 문자)"
+    },
+    "Serbian": {
+        "message": "세르비아어",
+        "description": "세르비아어"
+    },
+    "SerbianCyrillic": {
+        "message": "세르비아어(키릴 문자)",
+        "description": "세르비아어(키릴 문자)"
+    },
+    "SerbianLatin": {
+        "message": "세르비아어(로마자)",
+        "description": "세르비아어(로마자)"
+    },
+    "SerboCroatian": {
+        "message": "세르보크로아티아어",
+        "description": "세르보크로아티아어"
+    },
+    "Sesotho": {
+        "message": "남부 소토어",
+        "description": "남부 소토어"
+    },
+    "Shan": {
+        "message": "샨어",
+        "description": "샨어"
+    },
+    "Shona": {
+        "message": "쇼나어",
+        "description": "쇼나어"
+    },
+    "Silesian": {
+        "message": "실레지아어",
+        "description": "실레지아어"
+    },
+    "Sindhi": {
+        "message": "신디어",
+        "description": "신디어"
+    },
+    "Sinhala": {
+        "message": "싱할라어",
+        "description": "싱할라어"
+    },
+    "Slovak": {
+        "message": "슬로바키아어",
+        "description": "슬로바키아어"
+    },
+    "Slovenian": {
+        "message": "슬로베니아어",
+        "description": "슬로베니아어"
+    },
+    "Somali": {
+        "message": "소말리아어",
+        "description": "소말리아어"
+    },
+    "Songhailanguages": {
+        "message": "송가이어군",
+        "description": "송가이어군"
+    },
+    "SouthernNdebele": {
+        "message": "남부 은데벨레어",
+        "description": "남부 은데벨레어"
+    },
+    "SouthernSotho": {
+        "message": "남부 소토어",
+        "description": "남부 소토어"
+    },
+    "Sundanese": {
+        "message": "순다어",
+        "description": "순다어"
+    },
+    "Swahili": {
+        "message": "스와힐리어",
+        "description": "스와힐리어"
+    },
+    "Swedish": {
+        "message": "스웨덴어",
+        "description": "스웨덴어"
+    },
+    "Syriac": {
+        "message": "시리아어",
+        "description": "시리아어"
+    },
+    "Tagalog": {
+        "message": "필리핀어",
+        "description": "필리핀어"
+    },
+    "Tahiti": {
+        "message": "타히티어",
+        "description": "타히티어"
+    },
+    "Tajik": {
+        "message": "타지크어",
+        "description": "타지크어"
+    },
+    "Tamil": {
+        "message": "타밀어",
+        "description": "타밀어"
+    },
+    "Tatar": {
+        "message": "타타르어",
+        "description": "타타르어"
+    },
+    "Telugu": {
+        "message": "텔루구어",
+        "description": "텔루구어"
+    },
+    "Tetum": {
+        "message": "테툼어",
+        "description": "테툼어"
+    },
+    "Thai": {
+        "message": "태국어",
+        "description": "태국어"
+    },
+    "Tigrinya": {
+        "message": "티그리냐어",
+        "description": "티그리냐어"
+    },
+    "Tongan": {
+        "message": "통가어",
+        "description": "통가어"
+    },
+    "Tsonga": {
+        "message": "총가어",
+        "description": "총가어"
+    },
+    "Turkish": {
+        "message": "튀르키예어",
+        "description": "튀르키예어"
+    },
+    "Turkmen": {
+        "message": "투르크멘어",
+        "description": "투르크멘어"
+    },
+    "Twi": {
+        "message": "아칸어",
+        "description": "아칸어"
+    },
+    "Uyghur": {
+        "message": "위구르어",
+        "description": "위구르어"
+    },
+    "Ukrainian": {
+        "message": "우크라이나어",
+        "description": "우크라이나어"
+    },
+    "UpperSorbian": {
+        "message": "고지 소르브어",
+        "description": "고지 소르브어"
+    },
+    "Uzbek": {
+        "message": "우즈베크어",
+        "description": "우즈베크어"
+    },
+    "Venda": {
+        "message": "벤다어",
+        "description": "벤다어"
+    },
+    "Vietnamese": {
+        "message": "베트남어",
+        "description": "베트남어"
+    },
+    "Walloon": {
+        "message": "왈론어",
+        "description": "왈론어"
+    },
+    "Welsh": {
+        "message": "웨일스어",
+        "description": "웨일스어"
+    },
+    "WesternFrisian": {
+        "message": "서부 프리지아어",
+        "description": "서부 프리지아어"
+    },
+    "Wolof": {
+        "message": "월로프어",
+        "description": "월로프어"
+    },
+    "Xhosa": {
+        "message": "코사어",
+        "description": "코사어"
+    },
+    "Yiddish": {
+        "message": "이디시어",
+        "description": "이디시어"
+    },
+    "Yoruba": {
+        "message": "요루바어",
+        "description": "요루바어"
+    },
+    "YukatanMayan": {
+        "message": "유카탄 마야어",
+        "description": "유카탄 마야어"
+    },
+    "Zaza": {
+        "message": "자자어",
+        "description": "자자어"
+    },
+    "Zulu": {
+        "message": "줄루어",
+        "description": "줄루어"
+    },
     "Korean": {
         "message": "한국어",
         "description": "언어 이름"

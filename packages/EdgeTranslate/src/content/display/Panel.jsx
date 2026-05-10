@@ -1266,9 +1266,9 @@ const Body = styled.div`
 `;
 
 const SourceOption = styled(Dropdown)`
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
-    max-width: min(55%, 210px);
+    max-width: min(55%, 180px);
     font-weight: normal;
     font-size: 13px;
     cursor: pointer;
