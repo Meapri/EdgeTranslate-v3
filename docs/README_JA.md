@@ -1,118 +1,243 @@
-## EdgeTranslate-v3（MV3）
+# EdgeTranslate-v3
 
-他言語版はこちら：
+EdgeTranslate-v3 は、元の [Edge Translate](https://github.com/EdgeTranslate/EdgeTranslate)
+プロジェクトをベースにした Manifest V3 対応のブラウザー翻訳拡張機能です。このフォークは、
+慣れた選択テキスト翻訳の流れを保ちながら、現在の Chrome、Firefox、Safari の拡張機能ポリシーに
+合わせて近代化されています。
+
+4.x 系では、Material 風の新しい UI、大幅に更新された pdf.js ビューアー、ダークモード、
+翻訳パネルの使いやすさ、そしてブラウザーが対応している場合の実験的な Chrome オンデバイス
+AI 翻訳、つまり Gemini Nano 経路に重点を置いています。
+
+- 現在のリポジトリ：[Meapri/EdgeTranslate-v3](https://github.com/Meapri/EdgeTranslate-v3)
+- 元プロジェクト：[EdgeTranslate/EdgeTranslate](https://github.com/EdgeTranslate/EdgeTranslate)
+- 最新リリース：[v4.0.1](https://github.com/Meapri/EdgeTranslate-v3/releases/tag/v4.0.1)
+
+## 他の言語
+
 - [English](../README.md)
 - [简体中文](./README_CN.md)
 - [繁體中文](./README_TW.md)
-- [日本語](./README_JA.md)
 - [한국어](./README_KO.md)
+- [Русский](./README_RU.md)
 
-本プロジェクトは Edge Translate のフォークで、Manifest V3 に合わせて全面的にリファクタリングし、最新のブラウザー方針とビルド体制に適合させています。元の MV2 版がストアから削除された後も、同様のユーザー体験を維持しつつ安定性を高めるために近代化しました。
+## 主な特徴
 
-- 元リポジトリ: [EdgeTranslate/EdgeTranslate](https://github.com/EdgeTranslate/EdgeTranslate)
-- 現在のリポジトリ: [Meapri/EdgeTranslate-v3](https://github.com/Meapri/EdgeTranslate-v3)
+- サイドパネルでの選択テキスト翻訳。コピー、編集、固定、サイズ変更、TTS に対応。
+- 選択したプロバイダーが対応している場合、単語の翻訳、詳細な意味、定義、例文を表示。
+- 通常のテキスト翻訳と単語翻訳フローで Chrome 内蔵 AI 翻訳をサポート。
+- Google などの実用的なエンジンは、引き続きページ全体の翻訳に利用可能。
+- 内蔵 pdf.js ビューアーにより、PDF 内の選択テキスト翻訳に対応。
+- Material 風に整理された PDF ツールバー、メニュー、ダイアログ、ページサイドバー、ダークモード。
+- PDF ビューアー、翻訳パネル、ポップアップ、設定ページでダークモードをサポート。
+- 設定ページを整理し、プロバイダー名を分かりやすくし、視覚的なノイズを削減。
+- キーボードショートカット、ブラックリスト、翻訳ボタンの動作設定に対応。
 
-### 主な機能
-- 選択翻訳とサイドポップアップ: 選択したテキストの結果をサイドパネルに表示し、読書の流れを妨げません。表示項目（一般的な意味、発音、定義/詳細説明、例文 など）をカスタマイズでき、パネルのピン留めも可能です。
-- PDF 翻訳/ビューア: 内蔵の pdf.js ビューアで PDF 内の単語/文章翻訳をサポート。ページのダークモード（色反転）や UI 改善で可読性を向上。
-- ページ全体の翻訳（Chrome のみ）: 必要時にコンテキストメニューから実行します。自動では実行されません。Safari/Firefox では非対応。
-- ショートカット: キーボードのみで選択翻訳、パネルのピン留め/解除、パネル展開などを素早く操作。
-- ブラックリスト: 現在のページ/ドメインをブロックリストに追加し、そのページでの選択/ダブルクリック翻訳を無効化。
-- 音声読み上げ（TTS）: より高品質な音声を優先して自然な読み上げを提供。
+## AI 翻訳について
 
-### ダウンロード
-- [Chrome ウェブストア](https://chromewebstore.google.com/detail/edge-translate/pljeedmkegkcfkgdicjnalbllhifnnnj)
+Chrome のオンデバイス Gemini Nano 経路は、ブラウザーが `LanguageModel` API を提供している場合に
+AI 翻訳プロバイダーとして表示されます。短い選択テキストや単語補助には便利ですが、このフォークでは
+ページ全体の翻訳エンジンとしては使用しません。
+
+重要な挙動：
+
+- 現在のオンデバイス性能ではページ全体の翻訳に実用的ではないため、Gemini Nano ページ翻訳は
+  ユーザー向けのページ翻訳オプションから削除されています。
+- 通常の AI 翻訳は、応答性と CPU 温度のバランスを取るために同時実行数を制限しています。
+- 不正な JSON が翻訳パネルにそのまま表示されないよう、出力を防御的に解析します。
+- AI モデルが残しがちな未翻訳断片は、遅い 2 回目のモデル呼び出しを行わずに後処理します。
+- 結果カードから可視の発音テキストは削除されました。TTS 再生は引き続き利用できます。
+
+Chrome の `LanguageModel` API と Gemini Nano の可用性は、Chrome のバージョン、端末、機能フラグ、
+モデルのダウンロード状態によって異なります。利用できない場合、拡張機能は設定済みのプロバイダー経路に
+フォールバックし、AI 翻訳を必須の実行条件として扱いません。
+
+## PDF ビューアー
+
+EdgeTranslate-v3 は、対応する PDF リンクを内蔵 pdf.js ビューアーで開き、文書内のテキスト選択と翻訳を
+利用できるようにします。4.x のビューアーは pdf.js `5.7.284` を使用し、多くのレイアウトと操作性の修正を含みます。
+
+PDF の挙動：
+
+- Web 上の PDF リンクを拡張機能のビューアーへリダイレクトして翻訳できます。
+- Chrome の拡張機能設定で「ファイルの URL へのアクセスを許可する」を有効にすると、ローカル PDF を開けます。
+- ドラッグされた PDF ファイルや blob ベースのビューアー URL は、pdf.js が確実に読み込めるよう事前読み込みまたは修復されます。
+- 現在の文書を EdgeTranslate の外側で開きたいユーザー向けに、ネイティブビューアーへ回避する操作を用意しています。
+- PDF 検出のフォールバックは無関係な非 PDF ページを探査しないため、Chrome Web Store 開発者コンソールなどで不要な CORS エラーを抑えます。
+
+## ブラウザー対応
+
+### Chrome
+
+- 選択テキスト翻訳
+- PDF ビューアーと PDF 選択テキスト翻訳
+- Google ページ全体翻訳
+- ブラウザーと端末が対応している場合の Chrome 内蔵 AI 翻訳
+- 拡張機能コンテキストでの AI 翻訳を支える offscreen document
+
+### Firefox
+
+- 選択テキスト翻訳
+- PDF ビューアーと PDF 選択テキスト翻訳。ただしブラウザー固有の制限があります。
+- Chrome 内蔵 AI 翻訳には非対応
+- Chrome 専用のページ全体翻訳挙動には非対応
+
+### Safari
+
+- Safari 拡張機能のビルド経路を通じた選択テキスト翻訳と PDF ビューアー対応
+- Chrome 内蔵 AI 翻訳には非対応
+- Safari のリリースには Xcode プロジェクトと Apple 認証情報が必要
+
+## ダウンロード
+
 - [GitHub Releases](https://github.com/Meapri/EdgeTranslate-v3/releases)
+- [Chrome Web Store](https://chromewebstore.google.com/detail/edge-translate/pljeedmkegkcfkgdicjnalbllhifnnnj)
 
-### 対応ブラウザーと制限
-- Chrome: 選択翻訳、PDF ビューア、ページ全体の翻訳
-- Firefox: 選択翻訳、PDF ビューア（ブラウザーの問題により一部制限あり）、ページ全体の翻訳は非対応
-- Safari（macOS）: 選択翻訳、PDF ビューア、ページ全体の翻訳は非対応（プラットフォームの方針/制限）
+通常、リリースアセットには次のファイルが含まれます。
 
-### PDF ビューアの注意事項
-- PDF リンクは意図的に EdgeTranslate 内蔵の pdf.js ビューアで開きます。これにより PDF 内でも選択翻訳を利用できます。
-- ローカル/ダウンロード済み PDF（`file://`）も、Chrome で「ファイルの URL へのアクセスを許可」が有効な場合は拡張機能ビューアで処理されます。ローカルファイルは blob として事前読み込みせず、PDF.js が直接読み込むようにして空白ページ問題を抑えています。
-- 現在の文書だけを元の/ブラウザー標準 PDF ビューアで開きたい場合は、PDF ビューアのツールバーにある **Open original PDF** ボタンを使用してください。この操作ではリダイレクトループを避けるため、一時的なバイパスマーカーを URL に追加します。
+- `edge_translate_chrome.zip`
+- `edge_translate_firefox.xpi`
 
-### プライバシーとセキュリティ
-- 分析/統計は収集せず、トラッキングもしません
-- 最小権限の原則
-- Chrome の `file://` ページでは「ファイルの URL へのアクセスを許可」を有効にする必要がある場合があります
+## 開発環境
 
-### インストール（開発/テスト向け）
-Chrome（デベロッパーモード）
-1）`chrome://extensions` を開き、デベロッパーモードを有効化
-2）ビルド後、「パッケージ化されていない拡張機能を読み込む」→ `build/chrome` を選択
+リポジトリのルートを作業ディレクトリとして使用します。
 
-Firefox（一時的に読み込み）
-1）`about:debugging` → 一時的なアドオンを読み込む → `build/firefox` 内の任意のファイルを選択
-
-Safari（macOS）
-1）Xcode プロジェクトで実行（リソース同期が必要。開発/ビルド参照）
-
-### 開発 / ビルド
-作業ディレクトリ: リポジトリのルート。
-
-1）依存関係のインストール
-```
+```bash
 npm ci
 ```
 
-2）テストの実行
-```
+ユニットテストを実行します。
+
+```bash
 npm test
 ```
 
-3）デフォルトビルド
-```
-npm run build
-```
-共有 translators パッケージと、主要ターゲットである Chrome 拡張機能をビルドします。
+EdgeTranslate ワークスペースのテストを直接実行します。
 
-ブラウザー別ビルド
+```bash
+npm test -w edge_translate -- --runInBand
 ```
+
+## ビルドコマンド
+
+デフォルトの Chrome ターゲットをビルドします。
+
+```bash
+npm run build:chrome
+```
+
+個別ターゲットをビルドします。
+
+```bash
 npm run build:chrome
 npm run build:firefox
 npm run build:safari
 ```
 
-Firefox インストール用パッケージと検証
+ブラウザーパッケージを作成します。
+
+```bash
+npm run pack:chrome -w edge_translate
+npm run pack:firefox -w edge_translate
 ```
-npm run pack:firefox
+
+Firefox パッケージを検証します。
+
+```bash
 npm run lint:firefox
 ```
 
-全ブラウザーのパッケージング/ビルド
+ビルド出力：
+
+- Chrome の展開済みビルド：`packages/EdgeTranslate/build/chrome/`
+- Firefox の展開済みビルド：`packages/EdgeTranslate/build/firefox/`
+- Chrome パッケージ：`packages/EdgeTranslate/build/edge_translate_chrome.zip`
+- Firefox パッケージ：`packages/EdgeTranslate/build/edge_translate_firefox.xpi`
+- Safari ビルド出力：`packages/EdgeTranslate/build/safari/`
+
+## ローカルビルドの読み込み
+
+### Chrome
+
+1. `chrome://extensions` を開きます。
+2. デベロッパーモードを有効にします。
+3. 「パッケージ化されていない拡張機能を読み込む」をクリックします。
+4. `packages/EdgeTranslate/build/chrome/` を選択します。
+5. ローカル PDF やファイルの翻訳が必要な場合は、「ファイルの URL へのアクセスを許可する」を有効にします。
+
+### Firefox
+
+1. `about:debugging` を開きます。
+2. 「This Firefox」を選択します。
+3. 「Load Temporary Add-on」をクリックします。
+4. `packages/EdgeTranslate/build/firefox/` 内の任意のファイル、または生成された
+   `edge_translate_firefox.xpi` を選択します。
+
+### Safari
+
+Safari ビルドは `packages/EdgeTranslate/safari-xcode/` にあります。
+
+便利なコマンド：
+
+```bash
+npm run build:safari
+npm run safari:sync -w edge_translate
+npm run safari:release -w edge_translate
 ```
-npm run build:all
-```
 
-Safari の注意事項
-- `npm run build:safari` は `packages/EdgeTranslate/build/safari/` のみを生成し、Xcode の `Resources/` ディレクトリは変更しません。
-- Xcode プロジェクトへ明示的に同期する必要がある場合のみ `npm run safari:sync -w edge_translate` を実行してください。
-- `npm run safari:release -w edge_translate` は build、sync、archive、export、upload を実行し、App Store 認証情報の環境変数が必要です。
+`safari:release` は、ビルド、Xcode プロジェクトへのリソース同期、アーカイブ、エクスポート、
+アップロードを行います。有効な App Store 認証情報が必要です。
 
-ビルド出力
-- Chrome: `packages/EdgeTranslate/build/chrome/`
-- Firefox 展開済みビルド: `packages/EdgeTranslate/build/firefox/`
-- Firefox インストール用パッケージ: `packages/EdgeTranslate/build/edge_translate_firefox.xpi`
-- Safari ビルド出力: `packages/EdgeTranslate/build/safari/`
-- Safari Xcode リソース: 明示的な sync/release 後に `packages/EdgeTranslate/safari-xcode/EdgeTranslate/EdgeTranslate Extension/Resources/`
+## 権限
 
-### ホスト権限
-常駐コンテンツスクリプト（選択翻訳 等）のためにグローバルなホスト権限が必要です。Chrome は `host_permissions: ["*://*/*"]`、Firefox/Safari は `<all_urls>` にマッチするコンテンツスクリプトを使用します。拡張機能は最小権限の方針に従います。
+この拡張機能は、ユーザーページ上で選択テキスト翻訳、PDF 検出、コンテンツスクリプトを動作させるために
+ホストアクセスを使用します。Chrome ビルドでは、拡張機能の PDF ビューアー内など、ページ注入が利用できない場面で
+拡張機能ドキュメントコンテキストから Gemini Nano 翻訳を実行するために `offscreen` も要求します。
 
- 
+主な権限カテゴリ：
 
-### ドキュメント
-- 元プロジェクトのドキュメント（全体機能の参考）:
-  - Instructions: [Edge Translate Instructions](https://github.com/EdgeTranslate/EdgeTranslate/blob/master/docs/wiki/en/Instructions.md)
-  - Precautions: [Edge Translate Precautions](https://github.com/EdgeTranslate/EdgeTranslate/blob/master/docs/wiki/en/Precautions.md)
+- `activeTab`、`tabs`、`scripting` は選択テキスト翻訳とページ操作に使用します。
+- `contextMenus` と `storage` はコマンドとユーザー設定に使用します。
+- `webNavigation` と `webRequest` は PDF 検出とビューアールーティングに使用します。
+- Chrome の `offscreen` は拡張機能コンテキストでの AI 翻訳に使用します。
 
-### ライセンス
-- 元プロジェクトと同じ: MIT および NPL
-- ライセンスファイル: [LICENSE.MIT](../LICENSE.MIT) / [LICENSE.NPL](../LICENSE.NPL)
+## プライバシー
 
-### クレジット
-- 元の Edge Translate と全ての貢献者に感謝します。
-- 本フォークは、元の UX を維持しつつ、MV3 と最新ブラウザー向けに再構築しています。
+- このフォークは分析やテレメトリー収集を追加しません。
+- 翻訳テキストは、ユーザーが選択または設定したプロバイダーにのみ送信されます。
+- Chrome オンデバイス AI 翻訳は、利用可能な場合に Chrome 内蔵のローカルモデル経路で実行されます。
+- ファイル URL へのアクセスは任意であり、ブラウザーの拡張機能設定で制御されます。
+
+## リリースチェックリスト
+
+通常のリリース手順：
+
+1. `packages/EdgeTranslate/package.json` を更新します。
+2. `package-lock.json` を更新します。
+3. `packages/EdgeTranslate/src/manifest.json` を更新します。
+4. テストとブラウザーパッケージ作成を実行します。
+5. 例として `v4.0.1` のようなリリースコミットとタグを作成します。
+6. Chrome と Firefox のパッケージアーティファクトを GitHub Releases にアップロードします。
+
+古いプロジェクト用のチェックリストは [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) を参照してください。
+
+## ドキュメント
+
+元プロジェクトの古い機能リファレンスは、一般的な挙動の参考として引き続き役立ちます。
+
+- [Instructions](./wiki/en/Instructions.md)
+- [Precautions](./wiki/en/Precautions.md)
+- [Privacy Policy](./wiki/en/PrivacyPolicy.md)
+- [Local LLM Translate Proxy](./local-llm-translate-proxy.md)
+
+## ライセンス
+
+このプロジェクトは、元の Edge Translate プロジェクトと同じライセンス構成に従います。
+
+- [LICENSE.MIT](../LICENSE.MIT)
+- [LICENSE.NPL](../LICENSE.NPL)
+
+## クレジット
+
+元の Edge Translate のメンテナーとコントリビューターに感謝します。EdgeTranslate-v3 はその基盤を引き継ぎ、
+Manifest V3 ブラウザー、現代のブラウザー API、PDF ワークフロー、AI 支援翻訳に合わせて継続的に適応しています。
