@@ -54,6 +54,7 @@ const DEFAULT_PROMPT_API_OUTPUT_LANGUAGE = "en";
 const GEMINI_NANO_CREATE_TIMEOUT_MS = 45000;
 const GEMINI_NANO_PROMPT_TIMEOUT_MS = 60000;
 const GEMINI_NANO_PROMPT_VERSION = "gemini-nano-prompt-2026-06-25-01";
+const GEMINI_NANO_MAX_CHUNK_CHARS = 800;
 
 const DICTIONARY_RESULT_SCHEMA = JSON.stringify({
     translation: "...",
@@ -384,7 +385,7 @@ function withTimeout(promise, timeoutMs, message, abortController) {
 }
 
 function buildGeminiNanoSystemPrompt() {
-    return "You are a professional translator. Translate accurately and naturally. Do NOT hallucinate, invent extra information, or replace proper nouns with random titles. Preserve the exact meaning of brands, names, and titles. Beware of literal Japanese Kanji to Korean Hanja translations; e.g. translate '国勢調査' as '인구총조사' (not '국세조사').";
+    return "You are a professional translator. Translate accurately and naturally. Do NOT hallucinate or invent information. Preserve proper nouns, brands, and titles exactly. Avoid literal Kanji→Hanja readings (e.g. 国勢調査→인구총조사, not 국세조사).";
 }
 
 async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
@@ -639,14 +640,55 @@ function applyPostTranslationRules(translatedText, targetLanguage) {
     let text = String(translatedText || "");
     const lang = toChromeTranslatorLanguage(targetLanguage);
     if (lang === "ko") {
-        // Fix known false friends that Gemini Nano struggles with
         text = text.replace(/국세\s*조사/g, "인구총조사");
     }
     return text;
 }
 
-
-
+// Smart text splitting: paragraphs → lines → sentences → hard split
+function smartSplitText(text, maxLen) {
+    const chunks = [];
+    let current = "";
+    const paragraphs = text.split(/(?<=\n\n)/);
+    for (const p of paragraphs) {
+        if (current.length + p.length <= maxLen) {
+            current += p;
+        } else {
+            if (current) { chunks.push(current); current = ""; }
+            if (p.length > maxLen) {
+                const lines = p.split(/(?<=\n)/);
+                for (const l of lines) {
+                    if (current.length + l.length <= maxLen) {
+                        current += l;
+                    } else {
+                        if (current) chunks.push(current);
+                        current = l;
+                        if (current.length > maxLen) {
+                            const sentences = current.split(/(?<=[.!?。！？](?:\s+|$))/);
+                            current = "";
+                            for (const s of sentences) {
+                                if (current.length + s.length <= maxLen) {
+                                    current += s;
+                                } else {
+                                    if (current) chunks.push(current);
+                                    current = s;
+                                    while (current.length > maxLen) {
+                                        chunks.push(current.slice(0, maxLen));
+                                        current = current.slice(maxLen);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                current = p;
+            }
+        }
+    }
+    if (current) chunks.push(current);
+    return chunks;
+}
 async function translateWithGeminiNano(text, from, to, options = {}) {
     if (!text || !String(text).trim()) {
         return {
@@ -694,7 +736,10 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                 {
                     preferStreaming: true,
                     onUpdate: (partial) => {
-                        const normalized = applyPostTranslationRules(normalizeGeminiNanoPartialOutput(partial), targetLanguage);
+                        const normalized = applyPostTranslationRules(
+                            normalizeGeminiNanoPartialOutput(partial),
+                            targetLanguage
+                        );
                         if (normalized) onPartial?.(normalized);
                     },
                 }
@@ -702,81 +747,34 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
             GEMINI_NANO_PROMPT_TIMEOUT_MS,
             "Chrome Gemini Nano prompt timed out."
         );
-        let parsed = parseResult(output, text, asDictionary);
+        const parsed = parseResult(output, text, asDictionary);
         if (parsed && parsed.translatedText) {
-            parsed.translatedText = applyPostTranslationRules(parsed.translatedText, targetLanguage);
+            parsed.translatedText = applyPostTranslationRules(
+                parsed.translatedText,
+                targetLanguage
+            );
         }
         return parsed;
     };
 
     const promptAndParseChunked = async (inputText, asDictionary, onPartial) => {
-        const MAX_LEN = 800; // Optimal context size for Gemini Nano
-        if (asDictionary || inputText.length <= MAX_LEN) {
+        if (asDictionary || inputText.length <= GEMINI_NANO_MAX_CHUNK_CHARS) {
             return promptAndParse(inputText, asDictionary, onPartial);
         }
-
-        const chunks = [];
-        let currentChunk = "";
-        
-        // Smart splitting: paragraphs -> lines -> sentences -> hard split
-        const paragraphs = inputText.split(/(?<=\n\n)/);
-        
-        for (const p of paragraphs) {
-            if (currentChunk.length + p.length <= MAX_LEN) {
-                currentChunk += p;
-            } else {
-                if (currentChunk) {
-                    chunks.push(currentChunk);
-                    currentChunk = "";
-                }
-                if (p.length > MAX_LEN) {
-                    const lines = p.split(/(?<=\n)/);
-                    for (const l of lines) {
-                        if (currentChunk.length + l.length <= MAX_LEN) {
-                            currentChunk += l;
-                        } else {
-                            if (currentChunk) chunks.push(currentChunk);
-                            currentChunk = l;
-                            if (currentChunk.length > MAX_LEN) {
-                                const sentences = currentChunk.split(/(?<=[.!?。！？](?:\s+|$))/);
-                                currentChunk = "";
-                                for (const s of sentences) {
-                                    if (currentChunk.length + s.length <= MAX_LEN) {
-                                        currentChunk += s;
-                                    } else {
-                                        if (currentChunk) chunks.push(currentChunk);
-                                        currentChunk = s;
-                                        while (currentChunk.length > MAX_LEN) {
-                                            chunks.push(currentChunk.slice(0, MAX_LEN));
-                                            currentChunk = currentChunk.slice(MAX_LEN);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    currentChunk = p;
-                }
-            }
-        }
-        if (currentChunk) chunks.push(currentChunk);
-
+        const chunks = smartSplitText(inputText, GEMINI_NANO_MAX_CHUNK_CHARS);
         let fullTranslated = "";
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const segResult = await promptAndParse(chunk, false, (partial) => {
+        for (const chunk of chunks) {
+            const result = await promptAndParse(chunk, false, (partial) => {
                 onPartial?.(fullTranslated + partial);
             });
-            if (segResult && segResult.translatedText) {
-                fullTranslated += segResult.translatedText;
+            if (result && result.translatedText) {
+                fullTranslated += result.translatedText;
             }
         }
-        
         return {
             originalText: inputText,
             mainMeaning: fullTranslated,
-            translatedText: fullTranslated
+            translatedText: fullTranslated,
         };
     };
 
