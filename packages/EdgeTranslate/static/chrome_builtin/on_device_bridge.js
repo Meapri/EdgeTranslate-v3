@@ -677,7 +677,7 @@
         );
 
         const promptAndParse = async (inputText, onPartial) => {
-            const output = await promptGeminiNano(
+            let output = await promptGeminiNano(
                 session,
                 buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {}),
                 {
@@ -687,7 +687,35 @@
                     },
                 }
             );
-            return extractGeminiNanoTranslationText(output);
+            let parsed = extractGeminiNanoTranslationText(output);
+
+            if (parsed) {
+                const targetName = toLanguageName(targetLanguage);
+                const refinePrompt = [
+                    `Review the following translation into ${targetName}.`,
+                    `Original text: ${inputText}`,
+                    `Translation: ${parsed}`,
+                    `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
+                    "Return ONLY the refined text. Do not omit any part.",
+                ].join("\n");
+
+                try {
+                    const refinedOutput = await promptGeminiNano(session, refinePrompt, {
+                        onUpdate(partial) {
+                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            if (normalized) onPartial?.(normalized);
+                        },
+                    });
+                    const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
+                    if (refinedParsed) {
+                        parsed = refinedParsed;
+                    }
+                } catch (e) {
+                    // Ignore refinement failures
+                }
+            }
+
+            return parsed;
         };
 
         const segments = parseMarkedSegments(text);

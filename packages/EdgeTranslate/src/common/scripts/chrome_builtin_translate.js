@@ -673,7 +673,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
     );
 
     const promptAndParse = async (inputText, asDictionary, onPartial) => {
-        const output = await withTimeout(
+        let output = await withTimeout(
             readGeminiNanoPromptOutput(
                 session,
                 buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {
@@ -690,7 +690,40 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
             GEMINI_NANO_PROMPT_TIMEOUT_MS,
             "Chrome Gemini Nano prompt timed out."
         );
-        return parseResult(output, text, asDictionary);
+        let parsed = parseResult(output, text, asDictionary);
+
+        if (!asDictionary && parsed && parsed.translatedText) {
+            const targetName = toLanguageName(targetLanguage);
+            const refinePrompt = [
+                `Review the following translation into ${targetName}.`,
+                `Original text: ${inputText}`,
+                `Translation: ${parsed.translatedText}`,
+                `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
+                "Return ONLY the refined text. Do not omit any part.",
+            ].join("\n");
+
+            try {
+                const refinedOutput = await withTimeout(
+                    readGeminiNanoPromptOutput(session, refinePrompt, {
+                        preferStreaming: true,
+                        onUpdate: (partial) => {
+                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            if (normalized) onPartial?.(normalized);
+                        },
+                    }),
+                    GEMINI_NANO_PROMPT_TIMEOUT_MS,
+                    "Chrome Gemini Nano refinement prompt timed out."
+                );
+                const refinedParsed = parseResult(refinedOutput, text, false);
+                if (refinedParsed && refinedParsed.translatedText) {
+                    parsed = refinedParsed;
+                }
+            } catch (e) {
+                // If refinement fails, just fall back to the first pass result
+            }
+        }
+
+        return parsed;
     };
 
     let parsedResult;
