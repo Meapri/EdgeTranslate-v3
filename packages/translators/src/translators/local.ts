@@ -87,9 +87,10 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
 );
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
-const GOOGLE_AI_STUDIO_ENDPOINT_BASE =
-    "https://generativelanguage.googleapis.com/v1beta/models";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-06-25-01";
+const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
+
 
 class RequestLimiter {
     private active = 0;
@@ -146,12 +147,66 @@ function toChromeTranslatorLanguage(language: string) {
     return CHROME_TRANSLATOR_LANGUAGE_MAP[base] || base || raw;
 }
 
+function getPrimaryScript(language: string) {
+    const normalized = toChromeTranslatorLanguage(language || "");
+    const base = normalized.split("-")[0];
+    const scriptMap: Record<string, string> = {
+        ko: "Hangul",
+        ja: "Hiragana, Katakana, and Kanji",
+        zh: "Simplified Chinese",
+        "zh-Hant": "Traditional Chinese",
+        ru: "Cyrillic",
+        uk: "Cyrillic",
+        bg: "Cyrillic",
+        ar: "Arabic",
+        iw: "Hebrew",
+        he: "Hebrew",
+        th: "Thai",
+        el: "Greek",
+        hi: "Devanagari",
+        bn: "Bengali",
+        ta: "Tamil",
+        te: "Telugu",
+        kn: "Kannada",
+        mr: "Devanagari",
+    };
+    return scriptMap[normalized] || scriptMap[base] || "Latin alphabet";
+}
+
+function getTextFormPreservationRules() {
+    return ["Do not shorten or summarize. Translate the complete text."];
+}
+
+function getTargetLanguageScriptRule(language: string) {
+    const targetLanguage = toLanguageName(language);
+    const primaryScript = getPrimaryScript(language);
+    return [
+        `Translate naturally into ${targetLanguage}. Adapt institutional, administrative, and cultural terms to their proper local equivalents (avoid literal character-by-character translation).`,
+        `Every word in the output must be written exclusively in the ${primaryScript} script.`,
+        "Never leave any source script (e.g., Hanja, Kanji) mixed in the output.",
+        `Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}.`,
+        `If unsure, transliterate into ${primaryScript} rather than keeping the source script.`,
+    ].join(" ");
+}
+
+function getTargetLanguageFinalCheck(language: string) {
+    const targetLanguage = toLanguageName(language);
+    return `Final check: output must be pure ${targetLanguage}.`;
+}
+
 function isDictionaryCandidate(text: string) {
     const trimmed = String(text || "").trim();
     if (!trimmed || trimmed.length > 64) return false;
     if (/https?:\/\//i.test(trimmed)) return false;
-    if (/<<<EDGE_TRANSLATE_SEGMENT_\d+>>>/.test(trimmed)) return false;
+    if (/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(trimmed)) return false;
     if (/[.!?。！？\n\r\t]/.test(trimmed)) return false;
+    if (/^[「『“"'].*[」』”"']\s*\S+/.test(trimmed)) return false;
+
+    const cjkChars = trimmed.match(
+        /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF]/g
+    );
+    if (cjkChars && cjkChars.length > 8) return false;
+
     return trimmed.split(/\s+/).length <= 2;
 }
 
@@ -162,6 +217,65 @@ function stripCodeFence(text: string) {
         .replace(/```$/i, "")
         .trim();
 }
+
+function unescapeLooseJsonString(value: string) {
+    return String(value || "")
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\n")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, String.fromCharCode(34))
+        .replace(/\\\\/g, "\\")
+        .trim();
+}
+
+function extractLooseJsonStringField(text: string, field: string, nextFields: string[] = []) {
+    const source = String(text || "");
+    const keyMatch = new RegExp(`["']${field}["']\\s*:\\s*["']`, "i").exec(source);
+    if (!keyMatch) return "";
+
+    const valueStart = keyMatch.index + keyMatch[0].length;
+    const nextFieldPattern = nextFields.length
+        ? nextFields.map((key) => `["']${key}["']\\s*:`).join("|")
+        : "$^";
+    const rest = source.slice(valueStart);
+    const endPattern = new RegExp(`["']\\s*,\\s*(?:${nextFieldPattern})|["']\\s*[,}]\\s*$`, "i");
+    const endMatch = endPattern.exec(rest);
+    const raw = endMatch ? rest.slice(0, endMatch.index) : rest.replace(/["'}\s]*$/g, "");
+    return unescapeLooseJsonString(raw);
+}
+
+function parsePlainTranslationOutput(output: string) {
+    const cleaned = stripCodeFence(output);
+    if (!cleaned) return "";
+
+    const jsonStart = cleaned.indexOf("{");
+    const jsonEnd = cleaned.lastIndexOf("}");
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+        try {
+            const payload = JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1));
+            const translated = String(
+                payload.translation || payload.mainMeaning || payload.translatedText || ""
+            ).trim();
+            if (translated) return translated;
+        } catch {
+            // Fall through to loose JSON field extraction.
+        }
+    }
+
+    return (
+        extractLooseJsonStringField(cleaned, "translation", [
+            "mainMeaning",
+            "translatedText",
+            "tPronunciation",
+            "sPronunciation",
+            "detailedMeanings",
+            "definitions",
+            "examples",
+        ]) || cleaned.trim()
+    );
+}
+
+
 
 function asArray(value: any) {
     return Array.isArray(value) ? value : [];
@@ -271,11 +385,20 @@ class LocalTranslator {
                 errorType: "CONFIG_ERR",
                 errorCode: "GOOGLE_AI_STUDIO_API_KEY_MISSING",
                 errorMsg: "Google AI Studio API key is not configured.",
-                errorAct: { api: "local", mode: "googleAiStudio", action: "translate", text, from, to },
+                errorAct: {
+                    api: "local",
+                    mode: "googleAiStudio",
+                    action: "translate",
+                    text,
+                    from,
+                    to,
+                },
             };
         }
 
-        const key = `L|${this.mode}|${from}|${to}|${fnv1a32(text)}`;
+        const key = `L|${LOCAL_TRANSLATOR_PROMPT_VERSION}|${this.mode}|${from}|${to}|${fnv1a32(
+            text
+        )}`;
         const cached = this.cache.get(key);
         if (cached) return cached;
 
@@ -398,6 +521,7 @@ class LocalTranslator {
             return [
                 "You are a bilingual dictionary and translation engine.",
                 `Translate the user's word or short term from ${sourceLanguage} to ${targetLanguage}.`,
+                getTargetLanguageScriptRule(to),
                 "Return strict JSON only. Do not use markdown.",
                 "Schema:",
                 '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
@@ -407,12 +531,29 @@ class LocalTranslator {
                 text,
             ].join("\n");
         }
+        if (/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(text)) {
+            return [
+                "You are a translation engine.",
+                `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
+                "Return only the translated marked text. Do not add explanations, quotes, markdown, or alternatives.",
+                getTargetLanguageScriptRule(to),
+                "Copy each <<<EDGE_TRANSLATE_SEGMENT_N role=...>>> marker exactly once, then translate only the text that follows it.",
+                "Use role metadata only for form: role=title stays a concise noun-style heading, not a polite sentence; role=date translates only the date.",
+                "Keep the source layout inside each segment, including line breaks, blank lines, list items, bullets or numbering, and heading/body separation.",
+                ...getTextFormPreservationRules(),
+                getTargetLanguageFinalCheck(to),
+                "",
+                text,
+            ].join("\n");
+        }
         return [
             "You are a translation engine.",
             `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
             "Return only the translated text. Do not add explanations, quotes, markdown, or alternatives.",
-            "Preserve line breaks and formatting where possible.",
-            "If the text contains segment marker lines like <<<EDGE_TRANSLATE_SEGMENT_1>>>, keep those marker lines unchanged and translate only the text between them.",
+            getTargetLanguageScriptRule(to),
+            "Preserve the visible source layout: paragraph breaks, line breaks, list item boundaries, bullets or numbering, and heading/body separation.",
+            ...getTextFormPreservationRules(),
+            getTargetLanguageFinalCheck(to),
             "",
             text,
         ].join("\n");
@@ -431,13 +572,17 @@ class LocalTranslator {
 
     private buildGoogleAiStudioGenerationConfig() {
         const generationConfig: Record<string, any> = {
+            candidateCount: 1,
             temperature: 0,
+            topK: 1,
         };
         if (!/^gemma-/i.test(this.model)) {
             generationConfig.thinkingConfig = { thinkingBudget: 0 };
         }
         return generationConfig;
     }
+
+
 
     private async requestGoogleAiStudioTranslation(text: string, from: string, to: string) {
         const controller = new AbortController();
@@ -469,7 +614,8 @@ class LocalTranslator {
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) {
                 throw new Error(
-                    payload?.error?.message || `Google AI Studio request failed with ${response.status}`
+                    payload?.error?.message ||
+                        `Google AI Studio request failed with ${response.status}`
                 );
             }
 
@@ -486,7 +632,7 @@ class LocalTranslator {
                 } as TranslationResult;
             }
 
-            const translated = rawOutput.trim();
+            const translated = parsePlainTranslationOutput(rawOutput);
             if (!translated) {
                 throw new Error("Google AI Studio returned an empty translation.");
             }
@@ -500,8 +646,7 @@ class LocalTranslator {
         } catch (error: any) {
             throw {
                 errorType: "API_ERR",
-                errorCode:
-                    error?.name === "AbortError" ? "TIMEOUT" : "GOOGLE_AI_STUDIO_ERROR",
+                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "GOOGLE_AI_STUDIO_ERROR",
                 errorMsg: error?.message || "Google AI Studio request failed.",
                 errorAct: {
                     api: "local",
