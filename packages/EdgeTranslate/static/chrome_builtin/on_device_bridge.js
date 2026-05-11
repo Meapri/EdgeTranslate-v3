@@ -366,7 +366,7 @@
     }
 
     function buildGeminiNanoSystemPrompt() {
-        return "You are a professional translator. Translate naturally and accurately into the target language. Localize institutional and cultural terms to their natural equivalents in the target language (avoid literal translations).";
+        return "You are a professional translator. Translate naturally and accurately into the target language. Localize institutional and cultural terms to their natural equivalents in the target language. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations) that result in false friends or unnatural terms.";
     }
 
     async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
