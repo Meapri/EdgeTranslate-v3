@@ -147,44 +147,22 @@ function toChromeTranslatorLanguage(language: string) {
     return CHROME_TRANSLATOR_LANGUAGE_MAP[base] || base || raw;
 }
 
-function getPrimaryScript(language: string) {
+function getScriptConstraint(language: string) {
     const normalized = toChromeTranslatorLanguage(language || "");
     const base = normalized.split("-")[0];
-    const scriptMap: Record<string, string> = {
+    const scripts: Record<string, string> = {
         ko: "Hangul",
-        ja: "Hiragana, Katakana, and Kanji",
+        ja: "Japanese script",
         zh: "Simplified Chinese",
         "zh-Hant": "Traditional Chinese",
         ru: "Cyrillic",
         uk: "Cyrillic",
-        bg: "Cyrillic",
         ar: "Arabic",
-        iw: "Hebrew",
-        he: "Hebrew",
         th: "Thai",
-        el: "Greek",
         hi: "Devanagari",
-        bn: "Bengali",
-        ta: "Tamil",
-        te: "Telugu",
-        kn: "Kannada",
-        mr: "Devanagari",
     };
-    return scriptMap[normalized] || scriptMap[base] || "Latin alphabet";
-}
-
-function getTextFormPreservationRules() {
-    return ["Do not shorten or summarize. Translate the complete text."];
-}
-
-function getTargetLanguageScriptRule(language: string) {
-    const primaryScript = getPrimaryScript(language);
-    return `Localize institutional and cultural terms to their natural equivalents in the target language. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations) that result in false friends or unnatural terms. Every word in the output must be exclusively in the ${primaryScript} script. Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}. If unsure, transliterate into ${primaryScript} rather than keeping the source script.`;
-}
-
-function getTargetLanguageFinalCheck(language: string) {
-    const targetLanguage = toLanguageName(language);
-    return `Final check: output must be pure ${targetLanguage}.`;
+    const script = scripts[normalized] || scripts[base];
+    return script ? `Output must use ${script} script only.` : "";
 }
 
 function isDictionaryCandidate(text: string) {
@@ -267,8 +245,6 @@ function parsePlainTranslationOutput(output: string) {
         ]) || cleaned.trim()
     );
 }
-
-
 
 function asArray(value: any) {
     return Array.isArray(value) ? value : [];
@@ -510,46 +486,39 @@ class LocalTranslator {
     private buildGoogleAiStudioPrompt(text: string, from: string, to: string) {
         const sourceLanguage = toLanguageName(from);
         const targetLanguage = toLanguageName(to);
+        const scriptRule = getScriptConstraint(to);
+
         if (isDictionaryCandidate(text)) {
-            return [
-                "You are a bilingual dictionary and translation engine.",
-                `Translate the user's word or short term from ${sourceLanguage} to ${targetLanguage}.`,
-                getTargetLanguageScriptRule(to),
-                "Return strict JSON only. Do not use markdown.",
-                "Schema:",
+            const parts = [
+                `Translate from ${sourceLanguage} to ${targetLanguage}. Return strict JSON only.`,
                 '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
-                "Keep details concise. Write meanings, definitions, and translated examples in the target language.",
-                "If a field is unknown, use an empty array.",
+                scriptRule,
                 "",
                 text,
-            ].join("\n");
+            ];
+            return parts.filter(Boolean).join("\n");
         }
+
         if (/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(text)) {
-            return [
-                "You are a translation engine.",
-                `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
-                "Return only the translated marked text. Do not add explanations, quotes, markdown, or alternatives.",
-                getTargetLanguageScriptRule(to),
-                "Copy each <<<EDGE_TRANSLATE_SEGMENT_N role=...>>> marker exactly once, then translate only the text that follows it.",
-                "Use role metadata only for form: role=title stays a concise noun-style heading, not a polite sentence; role=date translates only the date.",
-                "Keep the source layout inside each segment, including line breaks, blank lines, list items, bullets or numbering, and heading/body separation.",
-                ...getTextFormPreservationRules(),
-                getTargetLanguageFinalCheck(to),
+            const parts = [
+                `Translate from ${sourceLanguage} to ${targetLanguage}. Return translated text only.`,
+                "Copy each <<<EDGE_TRANSLATE_SEGMENT_N role=...>>> marker exactly, then translate the text after it.",
+                "Preserve layout: line breaks, list items, bullets, numbering. Do not shorten or summarize.",
+                scriptRule,
                 "",
                 text,
-            ].join("\n");
+            ];
+            return parts.filter(Boolean).join("\n");
         }
-        return [
-            "You are a translation engine.",
-            `Translate the user's text from ${sourceLanguage} to ${targetLanguage}.`,
-            "Return only the translated text. Do not add explanations, quotes, markdown, or alternatives.",
-            getTargetLanguageScriptRule(to),
-            "Preserve the visible source layout: paragraph breaks, line breaks, list item boundaries, bullets or numbering, and heading/body separation.",
-            ...getTextFormPreservationRules(),
-            getTargetLanguageFinalCheck(to),
+
+        const parts = [
+            `Translate from ${sourceLanguage} to ${targetLanguage}. Return translated text only.`,
+            "Preserve layout: paragraph breaks, line breaks, list items, bullets, numbering. Do not shorten or summarize.",
+            scriptRule,
             "",
             text,
-        ].join("\n");
+        ];
+        return parts.filter(Boolean).join("\n");
     }
 
     private parseGoogleAiStudioResponse(payload: any) {
@@ -564,17 +533,14 @@ class LocalTranslator {
     }
 
     private buildGoogleAiStudioGenerationConfig() {
-        const generationConfig: Record<string, any> = {
-            candidateCount: 1,
+        const config: Record<string, any> = {
             temperature: 0,
-            topK: 1,
         };
         if (!/^gemma-/i.test(this.model)) {
-            generationConfig.thinkingConfig = { thinkingBudget: 0 };
+            config.thinkingConfig = { thinkingBudget: 0 };
         }
-        return generationConfig;
+        return config;
     }
-
 
 
     private async requestGoogleAiStudioTranslation(text: string, from: string, to: string) {
