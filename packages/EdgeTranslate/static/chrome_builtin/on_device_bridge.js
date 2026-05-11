@@ -688,25 +688,6 @@
 
         const promptAndParse = async (inputText, onPartial) => {
             let needsRefine = false;
-            let frozenText = "";
-            let spinnerInterval = null;
-
-            const cleanupSpinner = () => {
-                if (spinnerInterval) {
-                    clearInterval(spinnerInterval);
-                    spinnerInterval = null;
-                }
-            };
-
-            const startSpinner = (baseText) => {
-                if (spinnerInterval) return;
-                let spinnerIdx = 0;
-                const spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-                spinnerInterval = setInterval(() => {
-                    onPartial?.(baseText + " " + spinners[spinnerIdx]);
-                    spinnerIdx = (spinnerIdx + 1) % spinners.length;
-                }, 80);
-            };
 
             try {
                 let output = await promptGeminiNano(
@@ -716,23 +697,17 @@
                         onUpdate(partial) {
                             if (!needsRefine && needsRefinement(partial, targetLanguage)) {
                                 needsRefine = true;
-                                frozenText = normalizeGeminiNanoPartialOutput(partial) || "";
-                                startSpinner(frozenText);
                             }
-                            if (!needsRefine) {
-                                const normalized = normalizeGeminiNanoPartialOutput(partial);
-                                if (normalized) onPartial?.(normalized);
-                            }
+                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            if (normalized) onPartial?.(normalized);
                         },
                     }
                 );
                 let parsed = extractGeminiNanoTranslationText(output);
 
                 if (parsed && (needsRefine || needsRefinement(parsed, targetLanguage))) {
-                    if (!needsRefine) {
-                        frozenText = parsed;
-                        startSpinner(frozenText);
-                    }
+                    onPartial?.(parsed + " ✨");
+
                     const targetName = toLanguageName(targetLanguage);
                     const refinePrompt = [
                         `Review the following translation into ${targetName}.`,
@@ -755,7 +730,6 @@
 
                 return parsed;
             } finally {
-                cleanupSpinner();
             }
         };
 

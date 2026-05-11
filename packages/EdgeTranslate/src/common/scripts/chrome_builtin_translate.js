@@ -684,94 +684,67 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
 
     const promptAndParse = async (inputText, asDictionary, onPartial) => {
         let needsRefine = false;
-        let frozenText = "";
-        let spinnerInterval = null;
 
-        const cleanupSpinner = () => {
-            if (spinnerInterval) {
-                clearInterval(spinnerInterval);
-                spinnerInterval = null;
-            }
-        };
-
-        const startSpinner = (baseText) => {
-            if (spinnerInterval) return;
-            let spinnerIdx = 0;
-            const spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            spinnerInterval = setInterval(() => {
-                onPartial?.(baseText + " " + spinners[spinnerIdx]);
-                spinnerIdx = (spinnerIdx + 1) % spinners.length;
-            }, 80);
-        };
-
-        try {
-            const output = await withTimeout(
-                readGeminiNanoPromptOutput(
-                    session,
-                    buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {
-                        allowDictionary: asDictionary,
-                    }),
-                    {
-                        preferStreaming: true,
-                        onUpdate: (partial) => {
-                            if (
-                                !asDictionary &&
-                                !needsRefine &&
-                                needsRefinement(partial, targetLanguage)
-                            ) {
-                                needsRefine = true;
-                                frozenText = normalizeGeminiNanoPartialOutput(partial) || "";
-                                startSpinner(frozenText);
-                            }
-                            if (!needsRefine) {
-                                const normalized = normalizeGeminiNanoPartialOutput(partial);
-                                if (normalized) onPartial?.(normalized);
-                            }
-                        },
-                    }
-                ),
-                GEMINI_NANO_PROMPT_TIMEOUT_MS,
-                "Chrome Gemini Nano prompt timed out."
-            );
-            let parsed = parseResult(output, text, asDictionary);
-
-            if (!asDictionary && parsed && parsed.translatedText) {
-                if (needsRefine || needsRefinement(parsed.translatedText, targetLanguage)) {
-                    if (!needsRefine) {
-                        frozenText = parsed.translatedText;
-                        startSpinner(frozenText);
-                    }
-                    const targetName = toLanguageName(targetLanguage);
-                    const refinePrompt = [
-                        `Review the following translation into ${targetName}.`,
-                        `Original text: ${inputText}`,
-                        `Translation: ${parsed.translatedText}`,
-                        `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
-                        "Return ONLY the refined text. Do not omit any part.",
-                    ].join("\n");
-
-                    try {
-                        const refinedOutput = await withTimeout(
-                            readGeminiNanoPromptOutput(session, refinePrompt, {
-                                preferStreaming: false,
-                            }),
-                            GEMINI_NANO_PROMPT_TIMEOUT_MS,
-                            "Chrome Gemini Nano refinement prompt timed out."
-                        );
-                        const refinedParsed = parseResult(refinedOutput, text, false);
-                        if (refinedParsed && refinedParsed.translatedText) {
-                            parsed = refinedParsed;
+        const output = await withTimeout(
+            readGeminiNanoPromptOutput(
+                session,
+                buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {
+                    allowDictionary: asDictionary,
+                }),
+                {
+                    preferStreaming: true,
+                    onUpdate: (partial) => {
+                        if (
+                            !asDictionary &&
+                            !needsRefine &&
+                            needsRefinement(partial, targetLanguage)
+                        ) {
+                            needsRefine = true;
                         }
-                    } catch (e) {
-                        // If refinement fails, just fall back to the first pass result
+                        // Always stream the first pass smoothly to the end
+                        const normalized = normalizeGeminiNanoPartialOutput(partial);
+                        if (normalized) onPartial?.(normalized);
+                    },
+                }
+            ),
+            GEMINI_NANO_PROMPT_TIMEOUT_MS,
+            "Chrome Gemini Nano prompt timed out."
+        );
+        let parsed = parseResult(output, text, asDictionary);
+
+        if (!asDictionary && parsed && parsed.translatedText) {
+            if (needsRefine || needsRefinement(parsed.translatedText, targetLanguage)) {
+                // Show a subtle AI polish indicator while refining in the background
+                onPartial?.(parsed.translatedText + " ✨");
+
+                const targetName = toLanguageName(targetLanguage);
+                const refinePrompt = [
+                    `Review the following translation into ${targetName}.`,
+                    `Original text: ${inputText}`,
+                    `Translation: ${parsed.translatedText}`,
+                    `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
+                    "Return ONLY the refined text. Do not omit any part.",
+                ].join("\n");
+
+                try {
+                    const refinedOutput = await withTimeout(
+                        readGeminiNanoPromptOutput(session, refinePrompt, {
+                            preferStreaming: false,
+                        }),
+                        GEMINI_NANO_PROMPT_TIMEOUT_MS,
+                        "Chrome Gemini Nano refinement prompt timed out."
+                    );
+                    const refinedParsed = parseResult(refinedOutput, text, false);
+                    if (refinedParsed && refinedParsed.translatedText) {
+                        parsed = refinedParsed;
                     }
+                } catch (e) {
+                    // If refinement fails, just fall back to the first pass result
                 }
             }
-
-            return parsed;
-        } finally {
-            cleanupSpinner();
         }
+
+        return parsed;
     };
 
     let parsedResult;
