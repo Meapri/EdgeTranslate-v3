@@ -397,11 +397,17 @@ describe("Chrome built-in translator helper", () => {
 
 
     it("instructs Korean Gemini Nano output to avoid mixed-script Japanese or Chinese fragments", async () => {
-        const promptMock = jest.fn().mockResolvedValueOnce(
-            JSON.stringify({
-                translation: "국세조사 사칭 의심스러운 이메일",
-            })
-        );
+        const promptMock = jest.fn()
+            .mockResolvedValueOnce(
+                JSON.stringify({
+                    translation: "国勢調査 사칭 의심스러운 이메일",
+                })
+            )
+            .mockResolvedValueOnce(
+                JSON.stringify({
+                    translation: "인구총조사 사칭 의심스러운 이메일",
+                })
+            );
         mockGeminiNano(promptMock);
 
         const result = await translateWithChromeOnDevice(
@@ -410,7 +416,7 @@ describe("Chrome built-in translator helper", () => {
             "ko"
         );
 
-        expect(result.mainMeaning).toBe("국세조사 사칭 의심스러운 이메일");
+        expect(result.mainMeaning).toBe("인구총조사 사칭 의심스러운 이메일");
         expect(promptMock).toHaveBeenCalledTimes(2);
         expect(promptMock.mock.calls[0][0]).toContain(
             "→ Korean"

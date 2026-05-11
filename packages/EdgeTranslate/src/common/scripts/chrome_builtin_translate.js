@@ -699,6 +699,8 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                             needsRefinement(partial, targetLanguage)
                         ) {
                             needsRefine = true;
+                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            if (normalized) onPartial?.(normalized + " 🔄");
                         }
                         if (!needsRefine) {
                             const normalized = normalizeGeminiNanoPartialOutput(partial);
@@ -726,11 +728,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                 try {
                     const refinedOutput = await withTimeout(
                         readGeminiNanoPromptOutput(session, refinePrompt, {
-                            preferStreaming: true,
-                            onUpdate: (partial) => {
-                                const normalized = normalizeGeminiNanoPartialOutput(partial);
-                                if (normalized) onPartial?.(normalized);
-                            },
+                            preferStreaming: false,
                         }),
                         GEMINI_NANO_PROMPT_TIMEOUT_MS,
                         "Chrome Gemini Nano refinement prompt timed out."

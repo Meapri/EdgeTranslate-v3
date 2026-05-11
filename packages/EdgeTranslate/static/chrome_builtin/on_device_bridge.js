@@ -695,6 +695,8 @@
                     onUpdate(partial) {
                         if (!needsRefine && needsRefinement(partial, targetLanguage)) {
                             needsRefine = true;
+                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            if (normalized) onPartial?.(normalized + " 🔄");
                         }
                         if (!needsRefine) {
                             const normalized = normalizeGeminiNanoPartialOutput(partial);
@@ -716,12 +718,7 @@
                 ].join("\n");
 
                 try {
-                    const refinedOutput = await promptGeminiNano(session, refinePrompt, {
-                        onUpdate(partial) {
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized);
-                        },
-                    });
+                    const refinedOutput = await promptGeminiNano(session, refinePrompt);
                     const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
                     if (refinedParsed) {
                         parsed = refinedParsed;
