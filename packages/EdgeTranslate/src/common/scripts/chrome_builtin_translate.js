@@ -326,10 +326,10 @@ function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage, options = {
     const allowDictionary = options.allowDictionary !== false;
 
     if (allowDictionary && isDictionaryCandidate(text)) {
-        return `${direction}. Use proper local terms and strictly native script.\n${DICTIONARY_RESULT_SCHEMA}\n\n${promptBody}`;
+        return `${direction}. One word or short term.\n${DICTIONARY_RESULT_SCHEMA}\n\n${promptBody}`;
     }
 
-    return `${direction}. Use proper local terms and strictly native script. Do not omit.\n${TRANSLATION_RESULT_SCHEMA}\n\n${promptBody}`;
+    return `${direction}. Full translation. Do not omit.\n${TRANSLATION_RESULT_SCHEMA}\n\n${promptBody}`;
 }
 
 function getPromptApiLanguage(language) {
@@ -384,7 +384,7 @@ function withTimeout(promise, timeoutMs, message, abortController) {
 }
 
 function buildGeminiNanoSystemPrompt() {
-    return "Professional translator. Translate naturally into the target language. Adapt institutional, administrative, and cultural terms to their proper local equivalents (avoid literal character-by-character translation). Use ONLY the target language's native script. Never leave any source script (e.g., Hanja, Kanji) mixed in the output.";
+    return "You are a professional translator. Translate naturally and accurately into the target language.";
 }
 
 async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
@@ -643,7 +643,8 @@ function needsRefinement(translatedText, targetLanguage) {
         if (cjkRegex.test(text)) return true;
     }
     if (lang === "ko") {
-        const suspiciousKoreanTerms = /국세조사|총무성|문부과학성|후생노동성|경제산업성|국토교통성/i;
+        const suspiciousKoreanTerms =
+            /국세조사|총무성|문부과학성|후생노동성|경제산업성|국토교통성/i;
         if (suspiciousKoreanTerms.test(text)) return true;
     }
     return false;
@@ -687,7 +688,8 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
     );
 
     const promptAndParse = async (inputText, asDictionary, onPartial) => {
-        let output = await withTimeout(
+        let needsRefine = false;
+        const output = await withTimeout(
             readGeminiNanoPromptOutput(
                 session,
                 buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {
@@ -696,8 +698,17 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                 {
                     preferStreaming: true,
                     onUpdate: (partial) => {
-                        const normalized = normalizeGeminiNanoPartialOutput(partial);
-                        if (normalized) onPartial?.(normalized);
+                        if (
+                            !asDictionary &&
+                            !needsRefine &&
+                            needsRefinement(partial, targetLanguage)
+                        ) {
+                            needsRefine = true;
+                        }
+                        if (!needsRefine) {
+                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            if (normalized) onPartial?.(normalized);
+                        }
                     },
                 }
             ),
@@ -707,7 +718,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
         let parsed = parseResult(output, text, asDictionary);
 
         if (!asDictionary && parsed && parsed.translatedText) {
-            if (needsRefinement(parsed.translatedText, targetLanguage)) {
+            if (needsRefine || needsRefinement(parsed.translatedText, targetLanguage)) {
                 const targetName = toLanguageName(targetLanguage);
                 const refinePrompt = [
                     `Review the following translation into ${targetName}.`,
@@ -721,6 +732,10 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                     const refinedOutput = await withTimeout(
                         readGeminiNanoPromptOutput(session, refinePrompt, {
                             preferStreaming: true,
+                            onUpdate: (partial) => {
+                                const normalized = normalizeGeminiNanoPartialOutput(partial);
+                                if (normalized) onPartial?.(normalized);
+                            },
                         }),
                         GEMINI_NANO_PROMPT_TIMEOUT_MS,
                         "Chrome Gemini Nano refinement prompt timed out."
