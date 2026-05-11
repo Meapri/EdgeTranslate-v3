@@ -626,7 +626,7 @@ function extractPassthroughPunctuation(text) {
 function restorePassthroughPunctuation(text, chars) {
     if (!chars.length) return text;
     return String(text || "").replace(/\{\{P(\d+)\}\}/g, (_, id) => {
-        return chars[parseInt(id)] || "";
+        return chars[parseInt(id, 10)] || "";
     });
 }
 
@@ -747,12 +747,20 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
             GEMINI_NANO_PROMPT_TIMEOUT_MS,
             "Chrome Gemini Nano prompt timed out."
         );
-        const parsed = parseResult(output, text, asDictionary);
-        if (parsed && parsed.translatedText) {
-            parsed.translatedText = applyPostTranslationRules(
-                parsed.translatedText,
-                targetLanguage
-            );
+        const parsed = parseResult(output, inputText, asDictionary);
+        if (parsed) {
+            if (parsed.translatedText) {
+                parsed.translatedText = applyPostTranslationRules(
+                    parsed.translatedText,
+                    targetLanguage
+                );
+            }
+            if (parsed.mainMeaning) {
+                parsed.mainMeaning = applyPostTranslationRules(
+                    parsed.mainMeaning,
+                    targetLanguage
+                );
+            }
         }
         return parsed;
     };

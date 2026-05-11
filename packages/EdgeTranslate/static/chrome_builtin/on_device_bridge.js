@@ -360,7 +360,7 @@
                 initialPrompts: [
                     {
                         role: "system",
-                        content: buildGeminiNanoSystemPrompt(sourceLanguage, targetLanguage),
+                        content: buildGeminiNanoSystemPrompt(),
                     },
                 ],
             }),
@@ -382,7 +382,7 @@
                 initialPrompts: [
                     {
                         role: "system",
-                        content: buildGeminiNanoSystemPrompt(sourceLanguage, targetLanguage),
+                        content: buildGeminiNanoSystemPrompt(),
                     },
                 ],
             });
@@ -534,7 +534,7 @@
     function restorePassthroughPunctuation(text, chars) {
         if (!chars.length) return text;
         return String(text || "").replace(/\{\{P(\d+)\}\}/g, (_, id) => {
-            return chars[parseInt(id)] || "";
+            return chars[parseInt(id, 10)] || "";
         });
     }
 
