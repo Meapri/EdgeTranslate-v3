@@ -49,10 +49,7 @@ const CHROME_TRANSLATOR_CACHE = new Map();
 const GEMINI_NANO_SESSION_CACHE = new Map();
 const LANGUAGE_DETECTION_CACHE = new Map();
 const LANGUAGE_DETECTION_CACHE_MAX = 200;
-const PROMPT_API_LANGUAGE_CODES = new Set([
-    "en", "ko", "ja", "es", "fr", "de", "it", "pt", "ru",
-    "zh", "vi", "th", "id", "ar", "hi", "tr", "nl", "pl", "uk",
-]);
+const PROMPT_API_LANGUAGE_CODES = new Set(["en", "es", "ja"]);
 const DEFAULT_PROMPT_API_OUTPUT_LANGUAGE = "en";
 const GEMINI_NANO_CREATE_TIMEOUT_MS = 45000;
 const GEMINI_NANO_PROMPT_TIMEOUT_MS = 60000;
