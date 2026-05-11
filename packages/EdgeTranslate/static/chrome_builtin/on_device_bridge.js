@@ -610,6 +610,16 @@
         return match ? match[1].trim() : text;
     }
 
+    function applyPostTranslationRules(translatedText, targetLanguage) {
+        let text = String(translatedText || "");
+        const lang = toChromeTranslatorLanguage(targetLanguage);
+        if (lang === "ko") {
+            // Fix known false friends that Gemini Nano struggles with
+            text = text.replace(/국세\s*조사/g, "인구총조사");
+        }
+        return text;
+    }
+
     function needsRefinement(translatedText, targetLanguage) {
         const text = String(translatedText || "");
         const lang = toChromeTranslatorLanguage(targetLanguage);
@@ -698,12 +708,15 @@
                             if (!needsRefine && needsRefinement(partial, targetLanguage)) {
                                 needsRefine = true;
                             }
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
+                            const normalized = applyPostTranslationRules(normalizeGeminiNanoPartialOutput(partial), targetLanguage);
                             if (normalized) onPartial?.(normalized);
                         },
                     }
                 );
                 let parsed = extractGeminiNanoTranslationText(output);
+                if (parsed) {
+                    parsed = applyPostTranslationRules(parsed, targetLanguage);
+                }
 
                 if (parsed && (needsRefine || needsRefinement(parsed, targetLanguage))) {
                     onPartial?.(parsed + " ✨");
@@ -719,8 +732,9 @@
 
                     try {
                         const refinedOutput = await promptGeminiNano(session, refinePrompt);
-                        const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
+                        let refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
                         if (refinedParsed) {
+                            refinedParsed = applyPostTranslationRules(refinedParsed, targetLanguage);
                             parsed = refinedParsed;
                         }
                     } catch (e) {

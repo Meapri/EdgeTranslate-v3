@@ -635,6 +635,16 @@ function unwrapSingleMarkedTranslation(translated) {
     return match ? match[1].trim() : text;
 }
 
+function applyPostTranslationRules(translatedText, targetLanguage) {
+    let text = String(translatedText || "");
+    const lang = toChromeTranslatorLanguage(targetLanguage);
+    if (lang === "ko") {
+        // Fix known false friends that Gemini Nano struggles with
+        text = text.replace(/국세\s*조사/g, "인구총조사");
+    }
+    return text;
+}
+
 function needsRefinement(translatedText, targetLanguage) {
     const text = String(translatedText || "");
     const lang = toChromeTranslatorLanguage(targetLanguage);
@@ -702,7 +712,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                             needsRefine = true;
                         }
                         // Always stream the first pass smoothly to the end
-                        const normalized = normalizeGeminiNanoPartialOutput(partial);
+                        const normalized = applyPostTranslationRules(normalizeGeminiNanoPartialOutput(partial), targetLanguage);
                         if (normalized) onPartial?.(normalized);
                     },
                 }
@@ -711,6 +721,9 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
             "Chrome Gemini Nano prompt timed out."
         );
         let parsed = parseResult(output, text, asDictionary);
+        if (parsed && parsed.translatedText) {
+            parsed.translatedText = applyPostTranslationRules(parsed.translatedText, targetLanguage);
+        }
 
         if (!asDictionary && parsed && parsed.translatedText) {
             if (needsRefine || needsRefinement(parsed.translatedText, targetLanguage)) {
@@ -736,6 +749,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                     );
                     const refinedParsed = parseResult(refinedOutput, text, false);
                     if (refinedParsed && refinedParsed.translatedText) {
+                        refinedParsed.translatedText = applyPostTranslationRules(refinedParsed.translatedText, targetLanguage);
                         parsed = refinedParsed;
                     }
                 } catch (e) {
