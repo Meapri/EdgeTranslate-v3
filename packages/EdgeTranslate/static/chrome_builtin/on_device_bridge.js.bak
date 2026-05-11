@@ -306,11 +306,13 @@
 
     function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage, options = {}) {
         const targetName = toLanguageName(targetLanguage);
-        const sourceName =
-            sourceLanguage && sourceLanguage !== "auto" ? toLanguageName(sourceLanguage) : null;
-        const direction = sourceName ? `${sourceName} → ${targetName}` : `→ ${targetName}`;
-        const promptBody = String(text || "").trim();
-        return `${direction}. Full translation. Do not omit.\n${TRANSLATION_RESULT_SCHEMA}\n\n${promptBody}`;
+        return [
+            `Translate to ${targetName}. Do not shorten or summarize.`,
+            "Return strict JSON only. No markdown.",
+            `Schema: ${TRANSLATION_RESULT_SCHEMA}`,
+            "",
+            String(text || "").trim(),
+        ].join("\n");
     }
 
 
@@ -366,7 +368,12 @@
     }
 
     function buildGeminiNanoSystemPrompt() {
-        return "You are a professional translator. Translate naturally and accurately into the target language.";
+        return [
+            "You are a translator.",
+            "Write entirely in the target language. Do not include source language characters in the output.",
+            "Use vocabulary and expressions natural to the target language.",
+            "Preserve the original meaning.",
+        ].join(" ");
     }
 
     async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
@@ -582,46 +589,12 @@
         return chunks;
     }
 
-    // Preserve non-translatable formatting characters through translation.
-    const PASSTHROUGH_PUNCTUATION = /[\p{So}\u30FB]/gu;
-
-    function extractPassthroughPunctuation(text) {
-        const chars = [];
-        const processed = String(text || "").replace(PASSTHROUGH_PUNCTUATION, (match) => {
-            const id = chars.length;
-            chars.push(match);
-            return `{{P${id}}}`;
-        });
-        return { processed, chars };
-    }
-
-    function restorePassthroughPunctuation(text, chars) {
-        if (!chars.length) return text;
-        return String(text || "").replace(/\{\{P(\d+)\}\}/g, (_, id) => {
-            return chars[parseInt(id)] || "";
-        });
-    }
-
     function unwrapSingleMarkedTranslation(translated) {
         const text = String(translated || "").trim();
         const match = /^<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>\s*([\s\S]+)$/i.exec(
             text
         );
         return match ? match[1].trim() : text;
-    }
-
-    function needsRefinement(translatedText, targetLanguage) {
-        const text = String(translatedText || "");
-        const lang = toChromeTranslatorLanguage(targetLanguage);
-        if (lang === "ko" || lang === "en") {
-            const cjkRegex = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
-            if (cjkRegex.test(text)) return true;
-        }
-        if (lang === "ko") {
-            const suspiciousKoreanTerms = /국세조사|총무성|문부과학성|후생노동성|경제산업성|국토교통성/i;
-            if (suspiciousKoreanTerms.test(text)) return true;
-        }
-        return false;
     }
 
     async function promptGeminiNano(session, prompt, options = {}) {
@@ -686,56 +659,58 @@
             });
         };
 
-        const { processed: safeText, chars: savedChars } = extractPassthroughPunctuation(
-            String(text || "").trim()
-        );
-
-        const promptAndParse = async (inputText, onPartial) => {
-            let needsRefine = false;
-            let output = await promptGeminiNano(
+        const translateChunk = async (chunkText, role = "text", onPartial) => {
+            const output = await promptGeminiNano(
                 session,
-                buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {}),
+                buildGeminiNanoPrompt(chunkText, sourceLanguage, targetLanguage, { role }),
                 {
                     onUpdate(partial) {
-                        if (!needsRefine && needsRefinement(partial, targetLanguage)) {
-                            needsRefine = true;
-                        }
-                        if (!needsRefine) {
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized);
-                        }
+                        if (!partial) return;
+                        if (onPartial) onPartial(partial, { streamState: "preview" });
+                        else emitPartialResult(partial, chunkText, { streamState: "preview" });
                     },
                 }
             );
-            let parsed = extractGeminiNanoTranslationText(output);
+            const translated = extractGeminiNanoTranslationText(output);
+            return translated;
+        };
 
-            if (parsed && (needsRefine || needsRefinement(parsed, targetLanguage))) {
-                const targetName = toLanguageName(targetLanguage);
-                const refinePrompt = [
-                    `Review the following translation into ${targetName}.`,
-                    `Original text: ${inputText}`,
-                    `Translation: ${parsed}`,
-                    `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
-                    "Return ONLY the refined text. Do not omit any part.",
-                ].join("\n");
-
-                try {
-                    const refinedOutput = await promptGeminiNano(session, refinePrompt, {
-                        onUpdate(partial) {
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized);
+        const translateParagraphChunks = async (sourceText, role = "text", onPartial) => {
+            const paragraphChunks = splitTextIntoParagraphChunks(sourceText);
+            if (!paragraphChunks.length) return "";
+            const translatedParts = [];
+            const chunkCount = paragraphChunks.length;
+            let lastPartial = "";
+            for (let chunkIndex = 0; chunkIndex < paragraphChunks.length; chunkIndex += 1) {
+                const paragraphChunk = paragraphChunks[chunkIndex];
+                const translated = await translateChunk(
+                    paragraphChunk.text,
+                    role,
+                    (partial, meta) => {
+                        lastPartial = `${translatedParts.join("")}${partial}`;
+                        onPartial?.(lastPartial, {
+                            ...meta,
+                            streamProgress: {
+                                current: chunkIndex + 1,
+                                total: chunkCount,
+                            },
+                        });
+                    }
+                );
+                translatedParts.push(`${translated}${paragraphChunk.separator}`);
+                const committed = translatedParts.join("").trim();
+                if (committed && committed !== lastPartial) {
+                    lastPartial = committed;
+                    onPartial?.(committed, {
+                        streamState: "committed",
+                        streamProgress: {
+                            current: chunkIndex + 1,
+                            total: chunkCount,
                         },
                     });
-                    const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
-                    if (refinedParsed) {
-                        parsed = refinedParsed;
-                    }
-                } catch (e) {
-                    // Ignore refinement failures
                 }
             }
-
-            return parsed;
+            return translatedParts.join("").trim();
         };
 
         const segments = parseMarkedSegments(text);
@@ -743,33 +718,27 @@
         if (segments.length) {
             const translatedSegments = [];
             for (const segment of segments) {
-                const { processed: segSafe, chars: segChars } = extractPassthroughPunctuation(
-                    segment.text
+                const translatedSegment = unwrapSingleMarkedTranslation(
+                    await translateParagraphChunks(segment.text, segment.role, (partial, meta) => {
+                        const partialSegment = `${segment.marker}\n${unwrapSingleMarkedTranslation(
+                            partial
+                        )}`;
+                        emitPartialResult(
+                            [...translatedSegments, partialSegment].join("\n"),
+                            text,
+                            meta
+                        );
+                    })
                 );
-                const segResult = await promptAndParse(segSafe, (partial) => {
-                    const restored = restorePassthroughPunctuation(partial, segChars);
-                    const partialSegment = `${segment.marker}\n${unwrapSingleMarkedTranslation(restored)}`;
-                    emitPartialResult([...translatedSegments, partialSegment].join("\n"));
-                });
-                if (!segResult) throw new Error("Chrome Gemini Nano returned an empty translation.");
-                const segTranslated = restorePassthroughPunctuation(
-                    String(segResult).trim(),
-                    segChars
-                );
-                translatedSegments.push(`${segment.marker}\n${unwrapSingleMarkedTranslation(segTranslated)}`);
+                translatedSegments.push(`${segment.marker}\n${translatedSegment}`);
             }
             translated = translatedSegments.join("\n");
         } else {
-            const parsedResult = await promptAndParse(safeText, (partial) =>
-                emitPartialResult(restorePassthroughPunctuation(partial, savedChars))
+            translated = await translateParagraphChunks(text, "text", (partial, meta) =>
+                emitPartialResult(partial, text, meta)
             );
-            if (parsedResult) {
-                translated = restorePassthroughPunctuation(parsedResult, savedChars);
-            }
         }
-
         if (!translated) throw new Error("Chrome Gemini Nano returned an empty translation.");
-
         return {
             originalText: text,
             mainMeaning: translated,

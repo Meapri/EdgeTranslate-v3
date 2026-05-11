@@ -331,6 +331,22 @@ export default function ResultPanel() {
             }
         });
 
+        channel.on("translating_stream", (detail) => {
+            if (checkTimestamp(detail.timestamp)) {
+                window.translateResult = detail;
+                if (detail.position && Array.isArray(detail.position)) {
+                    lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
+                }
+                setOpen(true);
+                setContentType("RESULT");
+                setContent((previous) => ({
+                    ...(previous || {}),
+                    ...detail,
+                    isStreaming: true,
+                }));
+            }
+        });
+
         channel.on("translating_error", (detail) => {
             if (checkTimestamp(detail.timestamp)) {
                 if (detail.position && Array.isArray(detail.position)) {

@@ -3,6 +3,7 @@ import { detectSelect } from "../common.js";
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 import { wrapConsoleForFiltering } from "common/scripts/logger.js";
+import { inferDomPageTextRole } from "../dom_page_translate_context.js";
 
 wrapConsoleForFiltering();
 
@@ -231,6 +232,8 @@ function getSelection() {
     let selection = window.getSelection();
     let text = "";
     let position;
+    let textRole = "text";
+    let textSegments = [];
     if (selection.rangeCount > 0) {
         text = selection.toString().trim();
 
@@ -243,13 +246,191 @@ function getSelection() {
         }
 
         const lastRange = selection.getRangeAt(selection.rangeCount - 1);
+        textRole = inferSelectionTextRole(lastRange);
+        textSegments = isPdfViewer ? [] : getSelectionTextSegments(selection);
+        const structuredText = isPdfViewer ? "" : buildSelectionTextFromSegments(textSegments);
+        if (structuredText) {
+            text = structuredText;
+        }
         // If the user selects something in a shadow dom, the endContainer will be the HTML element and the position will be [0,0]. In this situation, we set the position undefined to avoid relocating the result panel.
         if (lastRange.endContainer !== document.documentElement) {
             let rect = selection.getRangeAt(selection.rangeCount - 1).getBoundingClientRect();
             position = [rect.left, rect.top];
         }
     }
-    return { text, position };
+    return { text, position, textRole, textSegments: textSegments || [] };
+}
+
+function getRangeElement(node) {
+    if (!node) return null;
+    if (node.nodeType === Node.ELEMENT_NODE) return node;
+    return node.parentElement || null;
+}
+
+function inferSelectionTextRole(range) {
+    if (!range) return "text";
+    const startRole = inferDomPageTextRole(getRangeElement(range.startContainer));
+    if (startRole && startRole !== "text") return startRole;
+    const ancestorRole = inferDomPageTextRole(getRangeElement(range.commonAncestorContainer));
+    return ancestorRole || "text";
+}
+
+function getSelectionTextSegments(selection) {
+    if (!selection || !selection.rangeCount) return [];
+    const segments = [];
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+        collectRangeTextSegments(selection.getRangeAt(index), segments);
+    }
+    return segments
+        .map((segment) => ({
+            role: segment.role || "text",
+            text: normalizeSelectionSegmentText(segment.text),
+        }))
+        .filter((segment) => segment.text);
+}
+
+function normalizeSelectionSegmentText(text) {
+    return String(text || "")
+        .replace(/\r\n?/g, "\n")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\u3000/g, " ")
+        .replace(/[ \t\f\v]+/g, " ")
+        .replace(/ *\n */g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+function buildSelectionTextFromSegments(segments) {
+    return (segments || [])
+        .map((segment) => normalizeSelectionSegmentText(segment?.text))
+        .filter(Boolean)
+        .join("\n\n")
+        .trim();
+}
+
+function isBlockLikeSelectionElement(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    const blockTags = new Set([
+        "ADDRESS",
+        "ARTICLE",
+        "ASIDE",
+        "BLOCKQUOTE",
+        "DD",
+        "DETAILS",
+        "DIV",
+        "DL",
+        "DT",
+        "FIGCAPTION",
+        "FIGURE",
+        "FOOTER",
+        "FORM",
+        "HEADER",
+        "LI",
+        "MAIN",
+        "NAV",
+        "OL",
+        "P",
+        "PRE",
+        "SECTION",
+        "TABLE",
+        "TBODY",
+        "TD",
+        "TFOOT",
+        "TH",
+        "THEAD",
+        "TR",
+        "UL",
+    ]);
+    if (blockTags.has(element.tagName)) return true;
+    const display = window.getComputedStyle?.(element)?.display || "";
+    return /^(block|flow-root|flex|grid|list-item|table|table-row|table-cell|table-caption)/.test(
+        display
+    );
+}
+
+function getSelectionSegmentBlock(element) {
+    if (!element || !element.closest) return element;
+    const semanticBlock = element.closest(
+        "h1,h2,h3,h4,h5,h6,[role='heading'],time,[datetime],p,blockquote,dd,dt,li,button,label,option,nav,[role='navigation'],th,caption,figcaption"
+    );
+    if (semanticBlock) return semanticBlock;
+
+    let current = element;
+    while (current && current !== document.body && current !== document.documentElement) {
+        if (isBlockLikeSelectionElement(current)) return current;
+        current = current.parentElement;
+    }
+    return element;
+}
+
+function appendSelectionSegment(segments, block, role, text) {
+    const normalized = normalizeSelectionSegmentText(text);
+    if (!normalized) return;
+    const previous = segments[segments.length - 1];
+    if (previous && previous.block === block && previous.role === role) {
+        previous.text = normalizeSelectionSegmentText(`${previous.text} ${normalized}`);
+        return;
+    }
+    segments.push({ block, role, text: normalized });
+}
+
+function appendSelectionLineBreak(segments) {
+    const previous = segments[segments.length - 1];
+    if (!previous || !previous.text || previous.text.endsWith("\n")) return;
+    previous.text = `${previous.text}\n`;
+}
+
+function collectRangeTextSegments(range, segments) {
+    if (!range) return;
+    const root =
+        range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+            ? range.commonAncestorContainer.parentElement
+            : range.commonAncestorContainer;
+    if (!root) return;
+
+    const nodes =
+        range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+            ? [range.commonAncestorContainer]
+            : collectTextNodesAndBreaksInRange(root, range);
+
+    for (const node of nodes) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "BR") {
+            appendSelectionLineBreak(segments);
+            continue;
+        }
+        const text = getSelectedTextForNode(range, node);
+        if (!text) continue;
+        const element = getRangeElement(node);
+        const block = getSelectionSegmentBlock(element);
+        appendSelectionSegment(segments, block, inferDomPageTextRole(block || element), text);
+    }
+}
+
+function collectTextNodesAndBreaksInRange(root, range) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+        if (node.nodeType !== Node.TEXT_NODE && node.tagName !== "BR") continue;
+        try {
+            if (range.intersectsNode(node)) nodes.push(node);
+        } catch (error) {
+            // Some browser/shadow DOM edge cases can throw for detached nodes.
+            void error;
+        }
+    }
+    return nodes;
+}
+
+function getSelectedTextForNode(range, node) {
+    if (!node || node.nodeType !== Node.TEXT_NODE) return "";
+    let start = 0;
+    let end = node.nodeValue.length;
+    if (node === range.startContainer) start = range.startOffset;
+    if (node === range.endContainer) end = range.endOffset;
+    if (end <= start) return "";
+    return node.nodeValue.slice(start, end);
 }
 
 /**

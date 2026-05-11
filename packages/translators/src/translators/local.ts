@@ -178,15 +178,8 @@ function getTextFormPreservationRules() {
 }
 
 function getTargetLanguageScriptRule(language: string) {
-    const targetLanguage = toLanguageName(language);
     const primaryScript = getPrimaryScript(language);
-    return [
-        `Translate naturally into ${targetLanguage}. Adapt institutional, administrative, and cultural terms to their proper local equivalents (avoid literal character-by-character translation).`,
-        `Every word in the output must be written exclusively in the ${primaryScript} script.`,
-        "Never leave any source script (e.g., Hanja, Kanji) mixed in the output.",
-        `Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}.`,
-        `If unsure, transliterate into ${primaryScript} rather than keeping the source script.`,
-    ].join(" ");
+    return `Every word in the output must be exclusively in the ${primaryScript} script. Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}. If unsure, transliterate into ${primaryScript} rather than keeping the source script.`;
 }
 
 function getTargetLanguageFinalCheck(language: string) {

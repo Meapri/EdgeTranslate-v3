@@ -85,6 +85,34 @@ describe("DOM page translation banner", () => {
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 5000, maxItems: 6 });
     });
 
+    it("wraps single AI page translation fallbacks with DOM role metadata", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "ja", tl: "ko" };
+        const group = {
+            role: "title",
+            sourceText: "「会員アカウント」に対する不正ログインの発生のご報告",
+            nodes: [],
+            texts: [],
+        };
+        const entry = controller.createDomPageTranslationEntry(group);
+
+        expect(controller.buildDomPageRoleSegmentText(entry)).toBe(
+            [
+                "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>",
+                "「会員アカウント」に対する不正ログインの発生のご報告",
+            ].join("\n")
+        );
+        expect(
+            controller.unwrapDomPageRoleSegmentText(
+                [
+                    "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>",
+                    "회원 계정 무단 로그인 발생 보고",
+                ].join("\n"),
+                1
+            )
+        ).toBe("회원 계정 무단 로그인 발생 보고");
+    });
+
     it("prioritizes article viewport text before deferred page text", () => {
         document.body.innerHTML = `
             <nav>Skip navigation text</nav>

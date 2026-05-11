@@ -23,6 +23,43 @@ let lastClickTime = 0;
 const channel = new Channel();
 const notifier = new Notifier("center");
 
+function normalizeStreamPreviewText(value) {
+    return String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function getStreamPreviewSuffix(mainMeaning, streamPreviewText) {
+    const stable = String(mainMeaning || "").trim();
+    const preview = String(streamPreviewText || "").trim();
+    if (!preview) return "";
+    if (!stable) return preview;
+
+    const stableComparable = normalizeStreamPreviewText(stable);
+    const previewComparable = normalizeStreamPreviewText(preview);
+    if (!previewComparable || previewComparable === stableComparable) return "";
+    if (preview.startsWith(stable)) return preview.slice(stable.length).replace(/^[ \t\f\v]+/, "");
+    if (!previewComparable.startsWith(stableComparable)) return preview;
+
+    let comparable = "";
+    let lastWasSpace = false;
+    for (let index = 0; index < preview.length; index += 1) {
+        const char = preview[index];
+        if (/\s/.test(char)) {
+            if (!lastWasSpace && comparable) comparable += " ";
+            lastWasSpace = true;
+        } else {
+            comparable += char;
+            lastWasSpace = false;
+        }
+
+        if (comparable.trim() === stableComparable) {
+            return preview.slice(index + 1).replace(/^[ \t\f\v]+/, "");
+        }
+    }
+    return "";
+}
+
 /**
  * @param {{
  *   mainMeaning: string;
@@ -87,11 +124,16 @@ export default function Result(props) {
     // Indicate whether user is editing the original text
     const [editing, setEditing] = useReducer(_setEditing, false);
     const originalTextElRef = useRef();
+    const mainMeaning = props.mainMeaning || "";
+    const streamPreviewText =
+        props.isStreaming && props.streamPreviewText
+            ? getStreamPreviewSuffix(mainMeaning, props.streamPreviewText)
+            : "";
 
     const TargetContent = (
         <Fragment key={"mainMeaning"}>
-            {props.mainMeaning?.length > 0 && (
-                <Target>
+            {(mainMeaning.length > 0 || streamPreviewText.length > 0) && (
+                <Target $isStreaming={props.isStreaming}>
                     <TextLine>
                         <div
                             dir={textDirection}
@@ -100,7 +142,12 @@ export default function Result(props) {
                             ref={translateResultElRef}
                             style={{ paddingLeft: 3 }}
                         >
-                            {props.mainMeaning}
+                            {mainMeaning}
+                            {streamPreviewText && (
+                                <StreamPreview aria-hidden="true">
+                                    {streamPreviewText}
+                                </StreamPreview>
+                            )}
                         </div>
                         <StyledCopyIcon
                             role="button"
@@ -583,12 +630,57 @@ const Target = styled(Block)`
     background: #ffffff;
     --drawer-handle-surface: #ffffff;
     --drawer-handle-fade: rgba(255, 255, 255, 0.44);
+    position: relative;
+    overflow: hidden;
+    border-color: ${(props) => (props.$isStreaming ? "rgba(11, 87, 208, 0.32)" : OutlineVariant)};
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
         background: ${DarkSurfaceContainer};
         --drawer-handle-surface: ${DarkSurfaceContainer};
         --drawer-handle-fade: rgba(32, 38, 45, 0.52);
+        border-color: ${(props) =>
+            props.$isStreaming ? "rgba(168, 199, 250, 0.38)" : DarkOutline};
+    }
+`;
+
+const StreamPreview = styled.span`
+    display: block;
+    margin-top: 2px;
+    color: ${Gray};
+    opacity: 0.72;
+    transition: opacity ${MotionFast};
+
+    &::after {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin-left: 6px;
+        border-radius: 999px;
+        background: ${LightPrimary};
+        vertical-align: middle;
+        animation: stream-preview-pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes stream-preview-pulse {
+        0%,
+        100% {
+            opacity: 0.35;
+            transform: scale(0.82);
+        }
+        50% {
+            opacity: 0.95;
+            transform: scale(1);
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
+
+        &::after {
+            background: ${DarkPrimary};
+        }
     }
 `;
 

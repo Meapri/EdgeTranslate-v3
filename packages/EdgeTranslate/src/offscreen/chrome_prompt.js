@@ -36,7 +36,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (parsed.type !== "chrome_prompt_translate") return undefined;
 
-    translateWithChromeOnDevice(parsed.text, parsed.from, parsed.to).then(
+    translateWithChromeOnDevice(parsed.text, parsed.from, parsed.to, {
+        onUpdate(result) {
+            if (!parsed.streamId) return;
+            chrome.runtime.sendMessage(
+                JSON.stringify({
+                    type: "event",
+                    event: "chrome_prompt_stream",
+                    detail: {
+                        streamId: parsed.streamId,
+                        result,
+                    },
+                })
+            );
+        },
+    }).then(
         (result) => sendResponse({ ok: true, result }),
         (error) => sendResponse({ ok: false, error: serializeError(error) })
     );

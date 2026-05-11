@@ -105,7 +105,8 @@ class BannerController {
             const text = params && params.text ? params.text : "";
             const from = (params && params.sl) || (params && params.from) || "auto";
             const to = (params && params.tl) || (params && params.to) || "en";
-            return this.translateWithOnDeviceEngine(text, from, to);
+            const streamId = params && params.streamId;
+            return this.translateWithOnDeviceEngine(text, from, to, streamId);
         });
 
         // Kick off DOM fallback/on-device page translation on explicit request
@@ -386,6 +387,17 @@ class BannerController {
 
     handleOnDeviceBridgeResponse(event) {
         if (event.source !== window || !event.data) return;
+        if (event.data.type === "edge_translate_on_device_stream") {
+            const pending = this._onDeviceBridgePending.get(event.data.requestId);
+            if (!pending) return;
+            if (event.data.streamId) {
+                this.channel.emit("chrome_prompt_stream", {
+                    streamId: event.data.streamId,
+                    result: event.data.result,
+                });
+            }
+            return;
+        }
         if (event.data.type !== "edge_translate_on_device_response") return;
 
         const pending = this._onDeviceBridgePending.get(event.data.requestId);
@@ -402,7 +414,7 @@ class BannerController {
         }
     }
 
-    async translateWithOnDeviceEngine(text, from, to) {
+    async translateWithOnDeviceEngine(text, from, to, streamId) {
         try {
             await this.ensureOnDeviceBridge();
             return await this.requestOnDeviceBridge({
@@ -410,6 +422,7 @@ class BannerController {
                 sl: from,
                 tl: to,
                 engine: this._domPageTranslateOptions.engine || "geminiNano",
+                streamId,
             });
         } catch (bridgeError) {
             try {
@@ -471,6 +484,25 @@ class BannerController {
         if (this._domBatchFailureCount > 0) this._domBatchFailureCount -= 1;
     }
 
+    shouldUseDomPageRoleSegment() {
+        return (
+            this._domPageTranslateOptions.engine === "googleAiStudio" ||
+            this._domPageTranslateOptions.engine === "geminiNano" ||
+            this._domPageTranslateOptions.engine === "chromeBuiltin"
+        );
+    }
+
+    buildDomPageRoleSegmentText(entry) {
+        if (!this.shouldUseDomPageRoleSegment()) return entry.sourceText;
+        return buildSegmentedTranslationText([entry]);
+    }
+
+    unwrapDomPageRoleSegmentText(translated, entryCount = 1) {
+        if (!this.shouldUseDomPageRoleSegment()) return translated;
+        const parts = splitSegmentedTranslationText(translated, entryCount);
+        return parts && parts.length === entryCount ? parts[0] : translated;
+    }
+
     createDomPageTranslationEntry(group) {
         const { tl } = this._domPageTranslateOptions;
         const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
@@ -481,9 +513,12 @@ class BannerController {
         const sourceText = readableBlockReplacement
             ? readableBlockReplacement.sourceText
             : group.sourceText;
+        const role = readableBlockReplacement
+            ? readableBlockReplacement.role || group.role
+            : group.role;
         const cacheMode = readableBlockReplacement ? "readable-block" : "context";
-        const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${sl}|${tl}|${sourceText}`;
-        return { group, readableBlockReplacement, sourceText, cacheKey };
+        const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${role}|${sl}|${tl}|${sourceText}`;
+        return { group, readableBlockReplacement, role, sourceText, cacheKey };
     }
 
     applyDomPageTranslatedEntry(entry, translated) {
@@ -955,8 +990,7 @@ class BannerController {
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
-                const sourceTexts = entries.map((entry) => entry.sourceText);
-                const batchedSourceText = buildSegmentedTranslationText(sourceTexts);
+                const batchedSourceText = buildSegmentedTranslationText(entries);
                 const result = await this.translateWithDomPageEngine(batchedSourceText, sl, tl);
                 const translated = result.mainMeaning || result.translatedText;
                 const translatedParts = splitSegmentedTranslationText(translated, entries.length);
@@ -1001,20 +1035,17 @@ class BannerController {
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
-                const readableBlockReplacement = createReadableBlockReplacement(
-                    group,
-                    this.getReadableBlockReplacementOptions()
-                );
-                const sourceText = readableBlockReplacement
-                    ? readableBlockReplacement.sourceText
-                    : group.sourceText;
-                const cacheMode = readableBlockReplacement ? "readable-block" : "context";
-                const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${sl}|${tl}|${sourceText}`;
-                let translated = this._domTranslationCache.get(cacheKey);
+                const entry = this.createDomPageTranslationEntry(group);
+                const { readableBlockReplacement } = entry;
+                let translated = this._domTranslationCache.get(entry.cacheKey);
                 if (!translated) {
-                    const result = await this.translateWithDomPageEngine(sourceText, sl, tl);
-                    translated = result.mainMeaning || result.translatedText;
-                    if (translated) this._domTranslationCache.set(cacheKey, translated);
+                    const requestText = this.buildDomPageRoleSegmentText(entry);
+                    const result = await this.translateWithDomPageEngine(requestText, sl, tl);
+                    translated = this.unwrapDomPageRoleSegmentText(
+                        result.mainMeaning || result.translatedText,
+                        1
+                    );
+                    if (translated) this._domTranslationCache.set(entry.cacheKey, translated);
                 }
 
                 if (readableBlockReplacement) {

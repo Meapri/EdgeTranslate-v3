@@ -62,8 +62,8 @@ describe("Chrome built-in translator helper", () => {
         // 2 creates for the first language pair (warmup + real), then reused
         expect(createMock).toHaveBeenCalledTimes(2);
         // The second create (real session) should have the system prompt
-        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toContain(
-            "Professional translator"
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toMatch(
+            /professional translator/i
         );
         expect(promptMock.mock.calls[0][0]).toContain("hello");
         expect(promptMock.mock.calls[1][0]).toContain("world");

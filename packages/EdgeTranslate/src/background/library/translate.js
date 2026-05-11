@@ -12,6 +12,7 @@ import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
 const GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS = 2;
+const LOCAL_AI_TRANSLATION_CACHE_VERSION = "local-ai-prompt-2026-06-25-01";
 
 function stripPronunciationDisplaySelections(config = {}) {
     const selections = { ...(config.selections || {}) };
@@ -59,6 +60,10 @@ class TranslatorManager {
                 this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate,
                 configs.LocalTranslatorConfig
             );
+            // Keep a direct reference to the real LocalTranslator instance
+            // BEFORE replacing the slot with the proxy, so clearCaches can
+            // reach its internal LRU cache.
+            this.realLocalTranslator = this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate;
             this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate = this.localTranslatorProxy;
             this.HYBRID_TRANSLATOR_CONFIG = hybridTranslatorConfig;
             this.LOCAL_TRANSLATOR_CONFIG = configs.LocalTranslatorConfig;
@@ -97,6 +102,8 @@ class TranslatorManager {
         this.inflightDetect = new Map(); // key -> Promise
         this.inflightTranslate = new Map(); // key -> Promise
         this.currentChromeBuiltinTabId = null;
+        this.currentTranslationStreamContext = null;
+        this.chromePromptStreamContexts = new Map();
         this.geminiNanoMaxConcurrentTranslations = GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS;
         this.geminiNanoActiveTranslations = 0;
         this.geminiNanoTranslationQueue = [];
@@ -185,38 +192,92 @@ class TranslatorManager {
     }
 
     async translateWithGeminiNanoPrompt(text, from, to) {
+        const streamContext = this.currentTranslationStreamContext;
         return this.runGeminiNanoPromptTask(async () => {
+            const streamId = streamContext
+                ? this.registerChromePromptStreamContext(streamContext)
+                : null;
+            const streamOptions = {
+                streamId,
+                onUpdate: streamContext
+                    ? (result) => this.emitTranslationStream(streamContext, result)
+                    : undefined,
+            };
+            const preferPromptApi = this.shouldPreferChromePromptApi();
             try {
-                const tabId = await this.getChromeBuiltinTargetTabId();
-                if (await this.shouldUseChromePromptTabBridge(tabId)) {
-                    return await this.translateWithChromePromptTab(tabId, text, from, to);
+                if (preferPromptApi) {
+                    try {
+                        return await this.translateWithChromePromptApi(
+                            text,
+                            from,
+                            to,
+                            streamOptions
+                        );
+                    } catch (backgroundError) {
+                        if (!this.isChromePromptApiUnavailableError(backgroundError)) {
+                            throw backgroundError;
+                        }
+                    }
                 }
-            } catch (tabBridgeError) {
-                if (!this.isChromePromptTabBridgeUnavailableError(tabBridgeError)) {
-                    throw tabBridgeError;
+
+                try {
+                    const tabId = await this.getChromeBuiltinTargetTabId();
+                    if (await this.shouldUseChromePromptTabBridge(tabId)) {
+                        return await this.translateWithChromePromptTab(
+                            tabId,
+                            text,
+                            from,
+                            to,
+                            streamOptions
+                        );
+                    }
+                } catch (tabBridgeError) {
+                    if (!this.isChromePromptTabBridgeUnavailableError(tabBridgeError)) {
+                        throw tabBridgeError;
+                    }
                 }
+
+                if (!preferPromptApi) {
+                    try {
+                        return await this.translateWithChromePromptApi(
+                            text,
+                            from,
+                            to,
+                            streamOptions
+                        );
+                    } catch (backgroundError) {
+                        if (!this.isChromePromptApiUnavailableError(backgroundError)) {
+                            throw backgroundError;
+                        }
+                    }
+                }
+                throw new Error(
+                    "Chrome Gemini Nano Prompt API is not available in this browser context."
+                );
+            } finally {
+                if (streamId) this.chromePromptStreamContexts.delete(streamId);
             }
-            try {
-                return await this.translateWithChromePromptApi(text, from, to);
-            } catch (backgroundError) {
-                if (!this.isChromePromptApiUnavailableError(backgroundError)) {
-                    throw backgroundError;
-                }
-            }
-            throw new Error(
-                "Chrome Gemini Nano Prompt API is not available in this browser context."
-            );
         });
     }
 
-    async translateWithChromePromptApi(text, from, to) {
+    shouldPreferChromePromptApi() {
+        return (
+            typeof chrome !== "undefined" &&
+            chrome.offscreen &&
+            typeof chrome.offscreen.createDocument === "function" &&
+            chrome.runtime &&
+            typeof chrome.runtime.sendMessage === "function"
+        );
+    }
+
+    async translateWithChromePromptApi(text, from, to, options = {}) {
         if (
             typeof chrome !== "undefined" &&
             chrome.offscreen &&
             chrome.runtime &&
             typeof chrome.runtime.sendMessage === "function"
         ) {
-            return this.translateWithChromePromptOffscreen(text, from, to);
+            return this.translateWithChromePromptOffscreen(text, from, to, options);
         }
 
         if (
@@ -229,7 +290,9 @@ class TranslatorManager {
             );
         }
 
-        const result = await translateWithChromeOnDevice(text, from, to);
+        const result = await translateWithChromeOnDevice(text, from, to, {
+            onUpdate: options.onUpdate,
+        });
         return {
             originalText: text,
             mainMeaning: result?.mainMeaning || result?.translatedText || "",
@@ -242,9 +305,9 @@ class TranslatorManager {
         };
     }
 
-    async translateWithChromePromptOffscreen(text, from, to) {
+    async translateWithChromePromptOffscreen(text, from, to, options = {}) {
         await this.ensureChromePromptOffscreenDocument();
-        const response = await this.requestChromePromptOffscreen(text, from, to);
+        const response = await this.requestChromePromptOffscreen(text, from, to, options.streamId);
         if (!response || !response.ok) {
             const detail =
                 response?.error?.message || "Chrome Gemini Nano offscreen request failed.";
@@ -283,12 +346,13 @@ class TranslatorManager {
         return warmupChromeOnDevice(from, to);
     }
 
-    async translateWithChromePromptTab(tabId, text, from, to) {
+    async translateWithChromePromptTab(tabId, text, from, to, options = {}) {
         const result = await this.channel.requestToTab(tabId, "chrome_builtin_translate", {
             text,
             sl: from,
             tl: to,
             engine: "geminiNano",
+            streamId: options.streamId,
         });
         return this.normalizeChromePromptResult(result, text, from, to);
     }
@@ -304,6 +368,228 @@ class TranslatorManager {
             definitions: result?.definitions,
             examples: result?.examples,
         };
+    }
+
+    registerChromePromptStreamContext(context) {
+        const streamId = `chrome-prompt-${context.timestamp}-${Math.random()
+            .toString(36)
+            .slice(2)}`;
+        this.chromePromptStreamContexts.set(streamId, context);
+        return streamId;
+    }
+
+    emitChromePromptStream(detail = {}) {
+        const streamId = detail.streamId;
+        if (!streamId) return;
+        const context = this.chromePromptStreamContexts.get(streamId);
+        if (!context) return;
+        this.emitTranslationStream(context, detail.result || detail);
+    }
+
+    normalizeTranslationStreamText(value) {
+        const text = String(value || "")
+            .trim()
+            .replace(/^```[a-zA-Z0-9_-]*\s*/g, "")
+            .replace(/```$/g, "")
+            .replace(/^translation\s*:\s*/i, "")
+            .trim();
+        if (!text) return "";
+
+        const translationValue = this.extractLooseJsonStringField(text, "translation", [
+            "mainMeaning",
+            "translatedText",
+            "tPronunciation",
+            "sPronunciation",
+            "detailedMeanings",
+            "definitions",
+            "examples",
+        ]);
+        if (translationValue) return translationValue;
+
+        const translationMatch = /["']translation["']\s*:\s*["']([\s\S]*)$/i.exec(text);
+        if (translationMatch) {
+            return translationMatch[1]
+                .replace(/["'}\s]*$/g, "")
+                .replace(/\\n/g, "\n")
+                .replace(/\\r/g, "\n")
+                .replace(/\\t/g, "\t")
+                .replace(/\\"/g, String.fromCharCode(34))
+                .replace(/\\\\/g, "\\")
+                .trim();
+        }
+
+        const withoutPrefix = text.replace(/^\{?\s*["']?translation["']?\s*:?\s*/i, "").trim();
+        if (!withoutPrefix || /^[{}"':,\s]+$/.test(withoutPrefix)) return "";
+        return withoutPrefix;
+    }
+
+    unescapeLooseJsonString(value) {
+        return String(value || "")
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "\n")
+            .replace(/\\t/g, "\t")
+            .replace(/\\"/g, String.fromCharCode(34))
+            .replace(/\\\\/g, "\\")
+            .trim();
+    }
+
+    extractLooseJsonStringField(text, field, nextFields = []) {
+        const source = String(text || "");
+        const keyMatch = new RegExp(`["']${field}["']\\s*:\\s*["']`, "i").exec(source);
+        if (!keyMatch) return "";
+
+        const valueStart = keyMatch.index + keyMatch[0].length;
+        const nextFieldPattern = nextFields.length
+            ? nextFields.map((key) => `["']${key}["']\\s*:`).join("|")
+            : "$^";
+        const rest = source.slice(valueStart);
+        const endPattern = new RegExp(
+            `["']\\s*,\\s*(?:${nextFieldPattern})|["']\\s*[,}]\\s*$`,
+            "i"
+        );
+        const endMatch = endPattern.exec(rest);
+        const raw = endMatch ? rest.slice(0, endMatch.index) : rest.replace(/["'}\s]*$/g, "");
+        return this.unescapeLooseJsonString(raw);
+    }
+
+    shouldEmitTranslationStreamText(context, text) {
+        const previous = context.lastEmittedTranslationStreamText || "";
+        if (!previous) return true;
+        if (text === previous) return false;
+        if (!text.startsWith(previous)) return false;
+
+        const appended = text.slice(previous.length);
+        const now = Date.now();
+        const elapsed = now - (context.lastTranslationStreamAt || 0);
+        if (appended.length >= 12) return true;
+        if (elapsed < 90 && !/[\n.!?。！？]$/.test(text)) return false;
+        if (appended.length >= 4) return true;
+        return /[\s\n.!?。！？,，、;；:：)\]}]$/.test(text);
+    }
+
+    shouldEmitTranslationPreview(context, text) {
+        const previous = context.lastEmittedTranslationPreviewText || "";
+        if (text === previous) return false;
+        if (previous && !text.startsWith(previous)) {
+            const now = Date.now();
+            return now - (context.lastTranslationPreviewAt || 0) >= 240;
+        }
+        const appended = previous ? text.slice(previous.length) : text;
+        const now = Date.now();
+        if (appended.length >= 18) return true;
+        if (now - (context.lastTranslationPreviewAt || 0) < 180) return false;
+        return appended.length >= 6 || /[\n.!?。！？]$/.test(text);
+    }
+
+    normalizeStreamPrefixText(value) {
+        return String(value || "")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    getTranslationPreviewSuffix(stableText, previewText) {
+        const stable = String(stableText || "").trim();
+        const preview = String(previewText || "").trim();
+        if (!preview) return "";
+        if (!stable) return preview;
+
+        const stableComparable = this.normalizeStreamPrefixText(stable);
+        const previewComparable = this.normalizeStreamPrefixText(preview);
+        if (!previewComparable || previewComparable === stableComparable) return "";
+
+        if (preview.startsWith(stable))
+            return preview.slice(stable.length).replace(/^[ \t\f\v]+/, "");
+        if (!previewComparable.startsWith(stableComparable)) return preview;
+
+        let comparable = "";
+        let lastWasSpace = false;
+        for (let index = 0; index < preview.length; index += 1) {
+            const char = preview[index];
+            if (/\s/.test(char)) {
+                if (comparable && !lastWasSpace) {
+                    comparable += " ";
+                    lastWasSpace = true;
+                }
+            } else {
+                comparable += char;
+                lastWasSpace = false;
+            }
+
+            if (comparable.trim() === stableComparable) {
+                return preview.slice(index + 1).replace(/^[ \t\f\v]+/, "");
+            }
+        }
+
+        return preview;
+    }
+
+    emitTranslationStream(context, result) {
+        const partialText =
+            typeof result === "string"
+                ? result
+                : result?.mainMeaning || result?.translatedText || result?.translation || "";
+        let normalizedPartialText = this.normalizeTranslationStreamText(partialText);
+        if (!context || !normalizedPartialText) return;
+
+        if (
+            context.shouldWrapRole &&
+            /<<<EDGE_TRANSLATE_SEGMENT_\d+/i.test(normalizedPartialText)
+        ) {
+            const unwrapped = this.unwrapRoleSegmentResult(
+                {
+                    originalText: context.originalText,
+                    mainMeaning: normalizedPartialText,
+                    translatedText: normalizedPartialText,
+                },
+                context.originalText,
+                context.expectedSegmentCount
+            );
+            normalizedPartialText = unwrapped.mainMeaning || unwrapped.translatedText || "";
+        }
+        normalizedPartialText = normalizedPartialText.trim();
+
+        if (!normalizedPartialText) return;
+        const isCommitted = result?.streamState === "committed";
+        if (isCommitted) {
+            if (!this.shouldEmitTranslationStreamText(context, normalizedPartialText)) return;
+            context.lastCommittedTranslationStreamText = normalizedPartialText;
+            context.lastEmittedTranslationStreamText = normalizedPartialText;
+            context.lastEmittedTranslationPreviewText = "";
+            context.lastTranslationStreamAt = Date.now();
+        } else {
+            if (!this.shouldEmitTranslationPreview(context, normalizedPartialText)) return;
+            context.lastEmittedTranslationPreviewText = normalizedPartialText;
+            context.lastTranslationPreviewAt = Date.now();
+        }
+
+        const streamProgress = result?.streamProgress;
+        const progressTotal = Number(streamProgress?.total || 0);
+        const progressCurrent = Number(streamProgress?.current || 0);
+        const stableText = context.lastCommittedTranslationStreamText || "";
+        const previewText = isCommitted
+            ? ""
+            : this.getTranslationPreviewSuffix(stableText, normalizedPartialText);
+        if (!isCommitted && stableText && !previewText) return;
+
+        this.channel.emitToTabs(context.tabId, "translating_stream", {
+            timestamp: context.timestamp,
+            originalText: context.originalText,
+            text: context.originalText,
+            position: context.position,
+            mainMeaning: isCommitted ? normalizedPartialText : stableText,
+            translatedText: isCommitted ? normalizedPartialText : stableText,
+            streamPreviewText: previewText,
+            sourceLanguage: result?.sourceLanguage || context.sourceLanguage,
+            targetLanguage: result?.targetLanguage || context.targetLanguage,
+            streamProgress:
+                progressTotal > 1 && progressCurrent > 0
+                    ? {
+                          current: Math.min(progressCurrent, progressTotal),
+                          total: progressTotal,
+                      }
+                    : undefined,
+            isStreaming: true,
+        });
     }
 
     async ensureChromePromptOffscreenDocument() {
@@ -334,12 +620,13 @@ class TranslatorManager {
         }
     }
 
-    requestChromePromptOffscreen(text, from, to) {
+    requestChromePromptOffscreen(text, from, to, streamId) {
         const message = JSON.stringify({
             type: "chrome_prompt_translate",
             text,
             from,
             to,
+            streamId,
         });
         return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage(message, (response) => {
@@ -415,11 +702,34 @@ class TranslatorManager {
     }
 
     /**
-     * Clear caches when configuration or language settings change
+     * Clear caches when configuration or language settings change.
+     * Also purges internal caches of HybridTranslator and LocalTranslator
+     * to prevent stale/poisoned results from leaking across translator switches.
      */
     clearCaches() {
         this.detectCache.clear();
         this.translationCache.clear();
+        // Purge HybridTranslator's internal LRU cache so stale mixed-script
+        // results from a different translator slot don't survive mode switches.
+        try {
+            if (this.HYBRID_TRANSLATOR && typeof this.HYBRID_TRANSLATOR.cleanup === "function") {
+                this.HYBRID_TRANSLATOR.cleanup();
+            }
+        } catch {
+            // best-effort
+        }
+        // Purge the real LocalTranslator's internal LRU cache.
+        // this.realLocalTranslator holds the original instance before proxy replacement.
+        try {
+            if (
+                this.realLocalTranslator &&
+                typeof this.realLocalTranslator.useConfig === "function"
+            ) {
+                this.realLocalTranslator.useConfig(this.LOCAL_TRANSLATOR_CONFIG || {});
+            }
+        } catch {
+            // best-effort
+        }
     }
 
     /**
@@ -444,7 +754,12 @@ class TranslatorManager {
 
     normalizeKeyText(text) {
         if (typeof text !== "string") return "";
-        const collapsed = text.trim().replace(/\s+/g, " ");
+        const collapsed = text
+            .replace(/\r\n?/g, "\n")
+            .trim()
+            .replace(/[ \t\f\v]+/g, " ")
+            .replace(/[ \t]*\n[ \t]*/g, "\n")
+            .replace(/\n{3,}/g, "\n\n");
         const maxLen = this.cacheOptions.maxKeyTextLength;
         if (collapsed.length <= maxLen) return collapsed;
         const prefix = collapsed.slice(0, Math.max(24, Math.floor(maxLen / 2)));
@@ -458,7 +773,104 @@ class TranslatorManager {
 
     makeTranslateKey(text, sl, tl, translatorId) {
         const norm = this.normalizeKeyText(text);
-        return `${translatorId}||${sl}||${tl}||${norm}`;
+        const version = this.usesLocalMainTranslator(translatorId)
+            ? `||${LOCAL_AI_TRANSLATION_CACHE_VERSION}`
+            : "";
+        return `${translatorId}||${sl}||${tl}${version}||${norm}`;
+    }
+
+    normalizeTextRole(role) {
+        const normalized = String(role || "")
+            .toLowerCase()
+            .replace(/[^a-z-]/g, "");
+        return normalized || "text";
+    }
+
+    normalizeSelectionSegments(segments) {
+        if (!Array.isArray(segments)) return [];
+        return segments
+            .map((segment) => ({
+                role: this.normalizeTextRole(segment?.role),
+                text: String(segment?.text || "").trim(),
+            }))
+            .filter((segment) => segment.text);
+    }
+
+    shouldWrapSelectionForRole(translatorId, textRole, textSegments) {
+        if (!this.usesLocalMainTranslator(translatorId)) return false;
+        const segments = this.normalizeSelectionSegments(textSegments);
+        if (segments.length > 1) return true;
+        const role = this.normalizeTextRole(textRole);
+        if (!role || role === "text") return false;
+        return true;
+    }
+
+    usesLocalMainTranslator(translatorId) {
+        if (translatorId === "LocalTranslate") return true;
+        return (
+            translatorId === "HybridTranslate" &&
+            this.HYBRID_TRANSLATOR_CONFIG?.selections?.mainMeaning === "LocalTranslate"
+        );
+    }
+
+    buildRoleSegmentText(text, role) {
+        const normalizedRole = this.normalizeTextRole(role);
+        return `<<<EDGE_TRANSLATE_SEGMENT_1 role=${normalizedRole}>>>\n${String(
+            text || ""
+        ).trim()}`;
+    }
+
+    buildSelectionRoleSegmentText(text, textRole, textSegments) {
+        const segments = this.normalizeSelectionSegments(textSegments);
+        const items =
+            segments.length > 1
+                ? segments
+                : [{ role: this.normalizeTextRole(textRole), text: String(text || "").trim() }];
+        return items
+            .map((segment, index) => {
+                const role = this.normalizeTextRole(segment.role);
+                return `<<<EDGE_TRANSLATE_SEGMENT_${index + 1} role=${role}>>>\n${segment.text}`;
+            })
+            .join("\n\n");
+    }
+
+    splitRoleSegmentResult(translated) {
+        const markerPattern = /<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>\s*/gi;
+        const matches = Array.from(String(translated || "").matchAll(markerPattern));
+        if (!matches.length) return [];
+
+        return matches
+            .map((match, index) => {
+                const start = match.index + match[0].length;
+                const next = matches[index + 1];
+                const end = next ? next.index : translated.length;
+                return {
+                    index: Number(match[1]),
+                    text: String(translated || "")
+                        .slice(start, end)
+                        .trim(),
+                };
+            })
+            .filter((segment) => segment.text);
+    }
+
+    unwrapRoleSegmentResult(result, fallbackText, expectedCount = 1) {
+        const translated = String(result?.mainMeaning || result?.translatedText || "").trim();
+        const segments = this.splitRoleSegmentResult(translated);
+        const orderedSegments = segments.sort((a, b) => a.index - b.index);
+        const unwrapped =
+            expectedCount > 1 && orderedSegments.length
+                ? orderedSegments
+                      .map((segment) => segment.text)
+                      .join("\n\n")
+                      .trim()
+                : orderedSegments[0]?.text || translated;
+        return {
+            ...(result || {}),
+            originalText: fallbackText,
+            mainMeaning: unwrapped,
+            translatedText: unwrapped,
+        };
     }
 
     getDetectionFromCache(text) {
@@ -490,7 +902,13 @@ class TranslatorManager {
     provideServices() {
         // Translate service.
         this.channel.provide("translate", (params, sender) =>
-            this.translate(params.text, params.position, sender)
+            this.translate(
+                params.text,
+                params.position,
+                sender,
+                params.textRole,
+                params.textSegments
+            )
         );
 
         // Quiet single-text translate service for DOM page translation (no UI events)
@@ -606,6 +1024,9 @@ class TranslatorManager {
         // Result frame closed event.
         this.channel.on("frame_closed", this.stopPronounce.bind(this));
 
+        // Streaming updates from offscreen Prompt API and tab bridge contexts.
+        this.channel.on("chrome_prompt_stream", this.emitChromePromptStream.bind(this));
+
         // Stop pronounce request.
         this.channel.on("stopPronounce", this.stopPronounce.bind(this));
 
@@ -660,6 +1081,12 @@ class TranslatorManager {
 
     applyLocalDefaultTranslatorPreference() {
         if (!this.LOCAL_TRANSLATOR_CONFIG?.enabled) return;
+
+        // When local AI is enabled, ensure the hybrid translator's main output
+        // uses LocalTranslate so that hybrid and AI modes produce identical
+        // mainMeaning translations.
+        this.ensureHybridUsesLocalForMainMeaning();
+
         if (this.HYBRID_TRANSLATOR_CONFIG?.selections?.mainMeaning !== "LocalTranslate") return;
         if (this.DEFAULT_TRANSLATOR === "HybridTranslate") return;
         if (this.DEFAULT_TRANSLATOR === "LocalTranslate") return;
@@ -669,6 +1096,35 @@ class TranslatorManager {
         this.clearCaches();
         this.inflightDetect?.clear();
         this.inflightTranslate?.clear();
+    }
+
+    /**
+     * Promote the hybrid translator's mainMeaning (and originalText) slot to
+     * LocalTranslate when the local AI engine is enabled.  This ensures that
+     * switching between "AI" and "Hybrid" modes produces the same main
+     * translation output, since both go through the Gemini Nano prompt pipeline.
+     */
+    ensureHybridUsesLocalForMainMeaning() {
+        const config = this.HYBRID_TRANSLATOR_CONFIG;
+        if (!config?.selections) return;
+        if (config.selections.mainMeaning === "LocalTranslate") return;
+
+        // Promote mainMeaning and originalText to LocalTranslate
+        config.selections.mainMeaning = "LocalTranslate";
+        config.selections.originalText = "LocalTranslate";
+
+        // Ensure LocalTranslate is in the translators array
+        if (!config.translators.includes("LocalTranslate")) {
+            config.translators.push("LocalTranslate");
+        }
+
+        // Persist the change so the UI reflects it
+        chrome.storage.sync.set({ HybridTranslatorConfig: config });
+
+        // Update the HybridTranslator instance with the new config
+        if (this.HYBRID_TRANSLATOR && typeof this.HYBRID_TRANSLATOR.useConfig === "function") {
+            this.HYBRID_TRANSLATOR.useConfig(config);
+        }
     }
 
     /**
@@ -801,7 +1257,7 @@ class TranslatorManager {
      *
      * @returns {Promise<void>} translate finished Promise
      */
-    async translate(text, position, sender) {
+    async translate(text, position, sender, textRole, textSegments) {
         // Ensure that configurations have been initialized.
         await this.config_loader;
 
@@ -849,22 +1305,51 @@ class TranslatorManager {
             }
 
             const translatorId = this.DEFAULT_TRANSLATOR;
-            const key = this.makeTranslateKey(text, sl, tl, translatorId);
+            const normalizedSegments = this.normalizeSelectionSegments(textSegments);
+            const shouldWrapRole = this.shouldWrapSelectionForRole(
+                translatorId,
+                textRole,
+                normalizedSegments
+            );
+            const requestText = shouldWrapRole
+                ? this.buildSelectionRoleSegmentText(text, textRole, normalizedSegments)
+                : text;
+            const expectedSegmentCount =
+                shouldWrapRole && normalizedSegments.length > 1 ? normalizedSegments.length : 1;
+            const key = this.makeTranslateKey(requestText, sl, tl, translatorId);
             const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
+            const previousTranslationStreamContext = this.currentTranslationStreamContext;
             this.currentChromeBuiltinTabId = currentTabId;
+            this.currentTranslationStreamContext = {
+                tabId: currentTabId,
+                timestamp,
+                originalText: text,
+                position,
+                sourceLanguage: sl,
+                targetLanguage: tl,
+                shouldWrapRole,
+                expectedSegmentCount,
+            };
 
             let result;
             try {
                 // Try translation cache first
-                result = this.getTranslationFromCache(text, sl, tl, translatorId);
+                result = this.getTranslationFromCache(requestText, sl, tl, translatorId);
                 if (!result) {
                     if (this.inflightTranslate.has(key)) {
                         result = await this.inflightTranslate.get(key);
                     } else {
                         const promise = this.TRANSLATORS[translatorId]
-                            .translate(text, sl, tl)
+                            .translate(requestText, sl, tl)
                             .then((res) => {
-                                if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
+                                if (res)
+                                    this.rememberTranslation(
+                                        requestText,
+                                        sl,
+                                        tl,
+                                        translatorId,
+                                        res
+                                    );
                                 return res;
                             })
                             .finally(() => this.inflightTranslate.delete(key));
@@ -872,8 +1357,11 @@ class TranslatorManager {
                         result = await promise;
                     }
                 }
+                if (shouldWrapRole)
+                    result = this.unwrapRoleSegmentResult(result, text, expectedSegmentCount);
             } finally {
                 this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
+                this.currentTranslationStreamContext = previousTranslationStreamContext;
             }
 
             // Ensure language information is always set correctly for TTS

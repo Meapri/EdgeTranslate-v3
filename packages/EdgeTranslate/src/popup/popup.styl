@@ -42,12 +42,32 @@ textarea {
     content: '\e8f8';
 }
 
+.translate-icon-arrow-up,
+.translate-icon-arrow-down {
+    position: relative;
+}
+
+.translate-icon-arrow-up::before,
+.translate-icon-arrow-down::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    display: block;
+    background-color: currentColor;
+    transform: translate(-50%, -50%);
+}
+
 .translate-icon-arrow-up::before {
-    content: '\e695';
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
 }
 
 .translate-icon-arrow-down::before {
-    content: '\e606';
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
 }
 
 html,
@@ -96,7 +116,7 @@ select,
     box-sizing: border-box;
     padding: 8px 12px;
     color: material-on-surface;
-    background: #fff;
+    background-color: #fff;
     border: 1px solid material-outline;
     border-radius: 8px;
     font-size: 14px;
@@ -105,13 +125,20 @@ select,
 }
 
 select {
-    padding-right: 38px;
-    padding-inline-end: 38px;
+    padding-right: 48px;
+    padding-inline-end: 48px;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 20px center;
+    background-size: 16px 16px;
 }
 
 select:hover,
 #translate_input:hover {
-    background: material-hover;
+    background-color: material-hover;
 }
 
 select:focus,
@@ -186,6 +213,7 @@ select:focus,
     justify-content: center;
     color: material-muted;
     border-radius: 18px;
+    line-height: 1;
 }
 
 #arrow-up {
@@ -255,25 +283,20 @@ select,
 #translate_input {
     min-height: 44px;
     border: 0;
-    background: #f1f4f8;
+    background-color: #f1f4f8;
     border-radius: 8px;
     box-shadow: inset 0 0 0 1px #dde6ef;
     font-weight: 500;
 }
 
-select {
-    border-right: 12px solid transparent;
-    background-clip: padding-box;
-}
-
 select:hover,
 #translate_input:hover {
-    background: #e6edf4;
+    background-color: #e6edf4;
 }
 
 select:focus,
 #translate_input:focus {
-    background: #fff;
+    background-color: #fff;
     border-color: transparent;
     box-shadow: inset 0 0 0 2px material-primary, 0 0 0 4px rgba(11, 87, 208, 0.12);
 }
@@ -353,22 +376,22 @@ footer {
     select,
     #translate_input {
         color: #e8eaed;
-        background: #242a31;
+        background-color: #242a31;
         box-shadow: inset 0 0 0 1px #3d4651;
     }
 
     select {
-        border-right-color: transparent;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bdc1c6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     }
 
     select:hover,
     #translate_input:hover {
-        background: #2a3038;
+        background-color: #2a3038;
     }
 
     select:focus,
     #translate_input:focus {
-        background: #1b2026;
+        background-color: #1b2026;
         box-shadow: inset 0 0 0 2px #8ab4f8, 0 0 0 4px rgba(138, 180, 248, 0.18);
     }
 

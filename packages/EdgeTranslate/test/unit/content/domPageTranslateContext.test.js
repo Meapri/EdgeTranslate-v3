@@ -2,6 +2,7 @@ import {
     buildContextTranslationGroups,
     buildSegmentedTranslationText,
     createReadableBlockReplacement,
+    inferDomPageTextRole,
     splitSegmentedTranslationText,
     splitTranslatedContext,
 } from "../../../src/content/dom_page_translate_context.js";
@@ -27,6 +28,7 @@ describe("DOM page translation context grouping", () => {
 
         expect(groups).toHaveLength(1);
         expect(groups[0].nodes).toEqual(nodes);
+        expect(groups[0].role).toBe("paragraph");
         expect(groups[0].sourceText).toBe(
             [
                 "Out of the box, the Kindle is good at only one thing.",
@@ -35,6 +37,22 @@ describe("DOM page translation context grouping", () => {
                 "That simplicity works well for most people, but I want customization and an experience that goes beyond the core functionality.",
             ].join("\n")
         );
+    });
+
+    it("infers DOM text roles for page translation hints", () => {
+        document.body.innerHTML = `
+            <article>
+                <h1 id="title">Notice title</h1>
+                <p class="time" id="date">2025年07月03日（木）</p>
+                <p id="body">Article body text.</p>
+                <button id="button">Translate</button>
+            </article>
+        `;
+
+        expect(inferDomPageTextRole(document.getElementById("title"))).toBe("title");
+        expect(inferDomPageTextRole(document.getElementById("date"))).toBe("date");
+        expect(inferDomPageTextRole(document.getElementById("body"))).toBe("paragraph");
+        expect(inferDomPageTextRole(document.getElementById("button"))).toBe("label");
     });
 
     it("splits translated context lines back to matching source text nodes", () => {
@@ -117,21 +135,21 @@ describe("DOM page translation context grouping", () => {
 
         expect(source).toBe(
             [
-                "<<<EDGE_TRANSLATE_SEGMENT_1>>>",
+                "<<<EDGE_TRANSLATE_SEGMENT_1 role=text>>>",
                 "First paragraph.",
-                "<<<EDGE_TRANSLATE_SEGMENT_2>>>",
+                "<<<EDGE_TRANSLATE_SEGMENT_2 role=text>>>",
                 "Second paragraph with more text.",
-                "<<<EDGE_TRANSLATE_SEGMENT_3>>>",
+                "<<<EDGE_TRANSLATE_SEGMENT_3 role=text>>>",
                 "Third paragraph.",
             ].join("\n")
         );
 
         const translated = [
-            "<<<EDGE_TRANSLATE_SEGMENT_1>>>",
+            "<<<EDGE_TRANSLATE_SEGMENT_1 role=text>>>",
             "첫 번째 문단입니다.",
-            "<<<EDGE_TRANSLATE_SEGMENT_2>>>",
+            "<<<EDGE_TRANSLATE_SEGMENT_2 role=text>>>",
             "두 번째 문단입니다.",
-            "<<<EDGE_TRANSLATE_SEGMENT_3>>>",
+            "<<<EDGE_TRANSLATE_SEGMENT_3 role=text>>>",
             "세 번째 문단입니다.",
         ].join("\n");
 
@@ -140,5 +158,38 @@ describe("DOM page translation context grouping", () => {
             "두 번째 문단입니다.",
             "세 번째 문단입니다.",
         ]);
+    });
+
+    it("builds segmented batches with role metadata and splits legacy markers too", () => {
+        const source = buildSegmentedTranslationText([
+            { text: "Notice title", role: "title" },
+            { text: "2025年07月03日（木）", role: "date" },
+            { text: "Article body text.", role: "paragraph" },
+        ]);
+
+        expect(source).toBe(
+            [
+                "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>",
+                "Notice title",
+                "<<<EDGE_TRANSLATE_SEGMENT_2 role=date>>>",
+                "2025年07月03日（木）",
+                "<<<EDGE_TRANSLATE_SEGMENT_3 role=paragraph>>>",
+                "Article body text.",
+            ].join("\n")
+        );
+
+        expect(
+            splitSegmentedTranslationText(
+                [
+                    "<<<EDGE_TRANSLATE_SEGMENT_1>>>",
+                    "공지 제목",
+                    "<<<EDGE_TRANSLATE_SEGMENT_2>>>",
+                    "2025년 07월 03일(목)",
+                    "<<<EDGE_TRANSLATE_SEGMENT_3>>>",
+                    "본문입니다.",
+                ].join("\n"),
+                3
+            )
+        ).toEqual(["공지 제목", "2025년 07월 03일(목)", "본문입니다."]);
     });
 });
