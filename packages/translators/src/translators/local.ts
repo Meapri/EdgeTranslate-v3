@@ -179,7 +179,7 @@ function getTextFormPreservationRules() {
 
 function getTargetLanguageScriptRule(language: string) {
     const primaryScript = getPrimaryScript(language);
-    return `Every word in the output must be exclusively in the ${primaryScript} script. Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}. If unsure, transliterate into ${primaryScript} rather than keeping the source script.`;
+    return `Localize institutional and cultural terms to their natural equivalents in the target language (avoid literal translations). Every word in the output must be exclusively in the ${primaryScript} script. Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}. If unsure, transliterate into ${primaryScript} rather than keeping the source script.`;
 }
 
 function getTargetLanguageFinalCheck(language: string) {

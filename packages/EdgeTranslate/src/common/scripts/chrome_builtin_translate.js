@@ -384,7 +384,7 @@ function withTimeout(promise, timeoutMs, message, abortController) {
 }
 
 function buildGeminiNanoSystemPrompt() {
-    return "You are a professional translator. Translate naturally and accurately into the target language.";
+    return "You are a professional translator. Translate naturally and accurately into the target language. Localize institutional and cultural terms to their natural equivalents in the target language (avoid literal translations).";
 }
 
 async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
@@ -641,11 +641,6 @@ function needsRefinement(translatedText, targetLanguage) {
     if (lang === "ko" || lang === "en") {
         const cjkRegex = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
         if (cjkRegex.test(text)) return true;
-    }
-    if (lang === "ko") {
-        const suspiciousKoreanTerms =
-            /국세조사|총무성|문부과학성|후생노동성|경제산업성|국토교통성/i;
-        if (suspiciousKoreanTerms.test(text)) return true;
     }
     return false;
 }
