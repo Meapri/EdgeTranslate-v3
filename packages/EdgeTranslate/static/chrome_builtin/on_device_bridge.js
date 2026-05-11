@@ -747,6 +747,73 @@
             }
         };
 
+        const promptAndParseChunked = async (inputText, onPartial) => {
+            const MAX_LEN = 800; // Optimal context size for Gemini Nano
+            if (inputText.length <= MAX_LEN) {
+                return promptAndParse(inputText, onPartial);
+            }
+
+            const chunks = [];
+            let currentChunk = "";
+            
+            // Smart splitting: paragraphs -> lines -> sentences -> hard split
+            const paragraphs = inputText.split(/(?<=\n\n)/);
+            
+            for (const p of paragraphs) {
+                if (currentChunk.length + p.length <= MAX_LEN) {
+                    currentChunk += p;
+                } else {
+                    if (currentChunk) {
+                        chunks.push(currentChunk);
+                        currentChunk = "";
+                    }
+                    if (p.length > MAX_LEN) {
+                        const lines = p.split(/(?<=\n)/);
+                        for (const l of lines) {
+                            if (currentChunk.length + l.length <= MAX_LEN) {
+                                currentChunk += l;
+                            } else {
+                                if (currentChunk) chunks.push(currentChunk);
+                                currentChunk = l;
+                                if (currentChunk.length > MAX_LEN) {
+                                    const sentences = currentChunk.split(/(?<=[.!?。！？](?:\s+|$))/);
+                                    currentChunk = "";
+                                    for (const s of sentences) {
+                                        if (currentChunk.length + s.length <= MAX_LEN) {
+                                            currentChunk += s;
+                                        } else {
+                                            if (currentChunk) chunks.push(currentChunk);
+                                            currentChunk = s;
+                                            while (currentChunk.length > MAX_LEN) {
+                                                chunks.push(currentChunk.slice(0, MAX_LEN));
+                                                currentChunk = currentChunk.slice(MAX_LEN);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        currentChunk = p;
+                    }
+                }
+            }
+            if (currentChunk) chunks.push(currentChunk);
+
+            let fullTranslated = "";
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                const segResult = await promptAndParse(chunk, (partial) => {
+                    onPartial?.(fullTranslated + partial);
+                });
+                if (segResult) {
+                    fullTranslated += segResult;
+                }
+            }
+            
+            return fullTranslated;
+        };
+
         const segments = parseMarkedSegments(text);
         let translated;
         if (segments.length) {
@@ -755,7 +822,7 @@
                 const { processed: segSafe, chars: segChars } = extractPassthroughPunctuation(
                     segment.text
                 );
-                const segResult = await promptAndParse(segSafe, (partial) => {
+                const segResult = await promptAndParseChunked(segSafe, (partial) => {
                     const restored = restorePassthroughPunctuation(partial, segChars);
                     const partialSegment = `${segment.marker}\n${unwrapSingleMarkedTranslation(restored)}`;
                     emitPartialResult([...translatedSegments, partialSegment].join("\n"));
@@ -769,7 +836,7 @@
             }
             translated = translatedSegments.join("\n");
         } else {
-            const parsedResult = await promptAndParse(safeText, (partial) =>
+            const parsedResult = await promptAndParseChunked(safeText, (partial) =>
                 emitPartialResult(restorePassthroughPunctuation(partial, savedChars))
             );
             if (parsedResult) {

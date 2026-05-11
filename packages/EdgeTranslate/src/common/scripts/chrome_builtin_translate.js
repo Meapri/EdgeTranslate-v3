@@ -761,6 +761,77 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
         return parsed;
     };
 
+    const promptAndParseChunked = async (inputText, asDictionary, onPartial) => {
+        const MAX_LEN = 800; // Optimal context size for Gemini Nano
+        if (asDictionary || inputText.length <= MAX_LEN) {
+            return promptAndParse(inputText, asDictionary, onPartial);
+        }
+
+        const chunks = [];
+        let currentChunk = "";
+        
+        // Smart splitting: paragraphs -> lines -> sentences -> hard split
+        const paragraphs = inputText.split(/(?<=\n\n)/);
+        
+        for (const p of paragraphs) {
+            if (currentChunk.length + p.length <= MAX_LEN) {
+                currentChunk += p;
+            } else {
+                if (currentChunk) {
+                    chunks.push(currentChunk);
+                    currentChunk = "";
+                }
+                if (p.length > MAX_LEN) {
+                    const lines = p.split(/(?<=\n)/);
+                    for (const l of lines) {
+                        if (currentChunk.length + l.length <= MAX_LEN) {
+                            currentChunk += l;
+                        } else {
+                            if (currentChunk) chunks.push(currentChunk);
+                            currentChunk = l;
+                            if (currentChunk.length > MAX_LEN) {
+                                const sentences = currentChunk.split(/(?<=[.!?。！？](?:\s+|$))/);
+                                currentChunk = "";
+                                for (const s of sentences) {
+                                    if (currentChunk.length + s.length <= MAX_LEN) {
+                                        currentChunk += s;
+                                    } else {
+                                        if (currentChunk) chunks.push(currentChunk);
+                                        currentChunk = s;
+                                        while (currentChunk.length > MAX_LEN) {
+                                            chunks.push(currentChunk.slice(0, MAX_LEN));
+                                            currentChunk = currentChunk.slice(MAX_LEN);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    currentChunk = p;
+                }
+            }
+        }
+        if (currentChunk) chunks.push(currentChunk);
+
+        let fullTranslated = "";
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const segResult = await promptAndParse(chunk, false, (partial) => {
+                onPartial?.(fullTranslated + partial);
+            });
+            if (segResult && segResult.translatedText) {
+                fullTranslated += segResult.translatedText;
+            }
+        }
+        
+        return {
+            originalText: inputText,
+            mainMeaning: fullTranslated,
+            translatedText: fullTranslated
+        };
+    };
+
     let parsedResult;
     if (dictionaryCandidate) {
         parsedResult = await promptAndParse(safeText, true, (partial) =>
@@ -774,7 +845,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                 const { processed: segSafe, chars: segChars } = extractPassthroughPunctuation(
                     segment.text
                 );
-                const segResult = await promptAndParse(segSafe, false, (partial) => {
+                const segResult = await promptAndParseChunked(segSafe, false, (partial) => {
                     const restored = restorePassthroughPunctuation(partial, segChars);
                     const partialSegment = `${segment.marker}\n${unwrapSingleMarkedTranslation(
                         restored
@@ -798,7 +869,7 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                 translatedText,
             };
         } else {
-            parsedResult = await promptAndParse(safeText, false, (partial) =>
+            parsedResult = await promptAndParseChunked(safeText, false, (partial) =>
                 emitPartialResult(restorePassthroughPunctuation(partial, savedChars))
             );
             if (parsedResult) {
