@@ -11,7 +11,7 @@ translation through Gemini Nano where the browser supports it.
 
 - Current repository: [Meapri/EdgeTranslate-v3](https://github.com/Meapri/EdgeTranslate-v3)
 - Original project: [EdgeTranslate/EdgeTranslate](https://github.com/EdgeTranslate/EdgeTranslate)
-- Latest release: [v4.0.1](https://github.com/Meapri/EdgeTranslate-v3/releases/tag/v4.0.1)
+- Latest release: [v4.1](https://github.com/Meapri/EdgeTranslate-v3/releases/tag/v4.1)
 
 ## Other Languages
 
@@ -54,17 +54,27 @@ Chrome's on-device Gemini Nano path is exposed as an AI translation provider whe
 browser makes the `LanguageModel` API available. It is useful for smaller selections and
 word-assistance tasks, but it is not used as a full-page translation engine in this fork.
 
-Important behavior:
+Google AI Studio (Gemini 2.5 Flash Lite) is also available as a server-side AI translation
+provider with streamlined prompts optimized for minimal token usage.
 
-- Gemini Nano page translation was removed from the user-facing page translation options
-  because current on-device performance is not practical for full pages.
-- Regular AI translation is concurrency-limited to keep responsiveness reasonable without
-  making CPU temperature worse than necessary.
-- Prompt output is parsed defensively so malformed JSON does not leak into the translation
-  panel.
-- Common untranslated fragments from the AI model are cleaned up without running a slow
-  second model pass.
-- Visible pronunciation text was removed from result cards; TTS playback remains.
+On-device pipeline (v4.1):
+
+- Single-pass streaming translation — no redundant refinement passes.
+- Smart text chunking splits long inputs at paragraph, line, and sentence boundaries
+  (800-character optimal window) to maintain quality and formatting.
+- System prompt enforces proper noun preservation and prevents literal Kanji→Hanja
+  hallucinations.
+- Post-translation rules catch known false-friend errors as a final safety net.
+- Passthrough punctuation system preserves decorative symbols (※, →, ★, etc.) that
+  models tend to drop during translation.
+
+AI Studio pipeline (v4.1):
+
+- Concise prompts tuned for Gemini 2.5 Flash Lite with thinking disabled
+  (`thinkingBudget: 0`) for maximum speed.
+- Script constraint rules ensure output uses the correct writing system.
+- Dictionary mode returns structured JSON with meanings, definitions, and examples
+  for single-word queries.
 
 Chrome's `LanguageModel` API and Gemini Nano availability depend on the user's Chrome
 version, device, feature flags, and model download state. When unavailable, the extension
