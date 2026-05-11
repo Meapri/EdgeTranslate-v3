@@ -688,47 +688,75 @@
 
         const promptAndParse = async (inputText, onPartial) => {
             let needsRefine = false;
-            let output = await promptGeminiNano(
-                session,
-                buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {}),
-                {
-                    onUpdate(partial) {
-                        if (!needsRefine && needsRefinement(partial, targetLanguage)) {
-                            needsRefine = true;
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized + " 🔄");
-                        }
-                        if (!needsRefine) {
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized);
-                        }
-                    },
+            let frozenText = "";
+            let spinnerInterval = null;
+
+            const cleanupSpinner = () => {
+                if (spinnerInterval) {
+                    clearInterval(spinnerInterval);
+                    spinnerInterval = null;
                 }
-            );
-            let parsed = extractGeminiNanoTranslationText(output);
+            };
 
-            if (parsed && (needsRefine || needsRefinement(parsed, targetLanguage))) {
-                const targetName = toLanguageName(targetLanguage);
-                const refinePrompt = [
-                    `Review the following translation into ${targetName}.`,
-                    `Original text: ${inputText}`,
-                    `Translation: ${parsed}`,
-                    `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
-                    "Return ONLY the refined text. Do not omit any part.",
-                ].join("\n");
+            const startSpinner = (baseText) => {
+                if (spinnerInterval) return;
+                let spinnerIdx = 0;
+                const spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                spinnerInterval = setInterval(() => {
+                    onPartial?.(baseText + " " + spinners[spinnerIdx]);
+                    spinnerIdx = (spinnerIdx + 1) % spinners.length;
+                }, 80);
+            };
 
-                try {
-                    const refinedOutput = await promptGeminiNano(session, refinePrompt);
-                    const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
-                    if (refinedParsed) {
-                        parsed = refinedParsed;
+            try {
+                let output = await promptGeminiNano(
+                    session,
+                    buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {}),
+                    {
+                        onUpdate(partial) {
+                            if (!needsRefine && needsRefinement(partial, targetLanguage)) {
+                                needsRefine = true;
+                                frozenText = normalizeGeminiNanoPartialOutput(partial) || "";
+                                startSpinner(frozenText);
+                            }
+                            if (!needsRefine) {
+                                const normalized = normalizeGeminiNanoPartialOutput(partial);
+                                if (normalized) onPartial?.(normalized);
+                            }
+                        },
                     }
-                } catch (e) {
-                    // Ignore refinement failures
-                }
-            }
+                );
+                let parsed = extractGeminiNanoTranslationText(output);
 
-            return parsed;
+                if (parsed && (needsRefine || needsRefinement(parsed, targetLanguage))) {
+                    if (!needsRefine) {
+                        frozenText = parsed;
+                        startSpinner(frozenText);
+                    }
+                    const targetName = toLanguageName(targetLanguage);
+                    const refinePrompt = [
+                        `Review the following translation into ${targetName}.`,
+                        `Original text: ${inputText}`,
+                        `Translation: ${parsed}`,
+                        `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
+                        "Return ONLY the refined text. Do not omit any part.",
+                    ].join("\n");
+
+                    try {
+                        const refinedOutput = await promptGeminiNano(session, refinePrompt);
+                        const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
+                        if (refinedParsed) {
+                            parsed = refinedParsed;
+                        }
+                    } catch (e) {
+                        // Ignore refinement failures
+                    }
+                }
+
+                return parsed;
+            } finally {
+                cleanupSpinner();
+            }
         };
 
         const segments = parseMarkedSegments(text);
