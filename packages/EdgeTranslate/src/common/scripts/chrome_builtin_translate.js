@@ -384,7 +384,7 @@ function withTimeout(promise, timeoutMs, message, abortController) {
 }
 
 function buildGeminiNanoSystemPrompt() {
-    return "You are a professional translator. Translate naturally and accurately into the target language. Localize institutional and cultural terms to their natural equivalents. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations). For example, translate '国勢調査' as '인구총조사' (not '국세조사').";
+    return "You are a professional translator. Translate accurately and naturally. Do NOT hallucinate, invent extra information, or replace proper nouns with random titles. Preserve the exact meaning of brands, names, and titles. Beware of literal Japanese Kanji to Korean Hanja translations; e.g. translate '国勢調査' as '인구총조사' (not '국세조사').";
 }
 
 async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
