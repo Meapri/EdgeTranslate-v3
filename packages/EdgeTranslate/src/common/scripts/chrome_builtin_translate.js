@@ -635,6 +635,20 @@ function unwrapSingleMarkedTranslation(translated) {
     return match ? match[1].trim() : text;
 }
 
+function needsRefinement(translatedText, targetLanguage) {
+    const text = String(translatedText || "");
+    const lang = toChromeTranslatorLanguage(targetLanguage);
+    if (lang === "ko" || lang === "en") {
+        const cjkRegex = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+        if (cjkRegex.test(text)) return true;
+    }
+    if (lang === "ko") {
+        const suspiciousKoreanTerms = /국세조사|총무성|문부과학성|후생노동성|경제산업성|국토교통성/i;
+        if (suspiciousKoreanTerms.test(text)) return true;
+    }
+    return false;
+}
+
 async function translateWithGeminiNano(text, from, to, options = {}) {
     if (!text || !String(text).trim()) {
         return {
@@ -693,33 +707,35 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
         let parsed = parseResult(output, text, asDictionary);
 
         if (!asDictionary && parsed && parsed.translatedText) {
-            const targetName = toLanguageName(targetLanguage);
-            const refinePrompt = [
-                `Review the following translation into ${targetName}.`,
-                `Original text: ${inputText}`,
-                `Translation: ${parsed.translatedText}`,
-                `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
-                "Return ONLY the refined text. Do not omit any part.",
-            ].join("\n");
+            if (needsRefinement(parsed.translatedText, targetLanguage)) {
+                const targetName = toLanguageName(targetLanguage);
+                const refinePrompt = [
+                    `Review the following translation into ${targetName}.`,
+                    `Original text: ${inputText}`,
+                    `Translation: ${parsed.translatedText}`,
+                    `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
+                    "Return ONLY the refined text. Do not omit any part.",
+                ].join("\n");
 
-            try {
-                const refinedOutput = await withTimeout(
-                    readGeminiNanoPromptOutput(session, refinePrompt, {
-                        preferStreaming: true,
-                        onUpdate: (partial) => {
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized);
-                        },
-                    }),
-                    GEMINI_NANO_PROMPT_TIMEOUT_MS,
-                    "Chrome Gemini Nano refinement prompt timed out."
-                );
-                const refinedParsed = parseResult(refinedOutput, text, false);
-                if (refinedParsed && refinedParsed.translatedText) {
-                    parsed = refinedParsed;
+                try {
+                    const refinedOutput = await withTimeout(
+                        readGeminiNanoPromptOutput(session, refinePrompt, {
+                            preferStreaming: true,
+                            onUpdate: (partial) => {
+                                const normalized = normalizeGeminiNanoPartialOutput(partial);
+                                if (normalized) onPartial?.(normalized);
+                            },
+                        }),
+                        GEMINI_NANO_PROMPT_TIMEOUT_MS,
+                        "Chrome Gemini Nano refinement prompt timed out."
+                    );
+                    const refinedParsed = parseResult(refinedOutput, text, false);
+                    if (refinedParsed && refinedParsed.translatedText) {
+                        parsed = refinedParsed;
+                    }
+                } catch (e) {
+                    // If refinement fails, just fall back to the first pass result
                 }
-            } catch (e) {
-                // If refinement fails, just fall back to the first pass result
             }
         }
 

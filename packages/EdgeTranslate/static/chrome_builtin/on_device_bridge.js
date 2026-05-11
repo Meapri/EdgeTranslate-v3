@@ -610,6 +610,20 @@
         return match ? match[1].trim() : text;
     }
 
+    function needsRefinement(translatedText, targetLanguage) {
+        const text = String(translatedText || "");
+        const lang = toChromeTranslatorLanguage(targetLanguage);
+        if (lang === "ko" || lang === "en") {
+            const cjkRegex = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+            if (cjkRegex.test(text)) return true;
+        }
+        if (lang === "ko") {
+            const suspiciousKoreanTerms = /국세조사|총무성|문부과학성|후생노동성|경제산업성|국토교통성/i;
+            if (suspiciousKoreanTerms.test(text)) return true;
+        }
+        return false;
+    }
+
     async function promptGeminiNano(session, prompt, options = {}) {
         const { onUpdate } = options;
         const promptSession =
@@ -689,7 +703,7 @@
             );
             let parsed = extractGeminiNanoTranslationText(output);
 
-            if (parsed) {
+            if (parsed && needsRefinement(parsed, targetLanguage)) {
                 const targetName = toLanguageName(targetLanguage);
                 const refinePrompt = [
                     `Review the following translation into ${targetName}.`,

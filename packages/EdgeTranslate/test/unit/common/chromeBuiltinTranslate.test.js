@@ -411,7 +411,7 @@ describe("Chrome built-in translator helper", () => {
         );
 
         expect(result.mainMeaning).toBe("국세조사 사칭 의심스러운 이메일");
-        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(promptMock).toHaveBeenCalledTimes(2);
         expect(promptMock.mock.calls[0][0]).toContain(
             "→ Korean"
         );
