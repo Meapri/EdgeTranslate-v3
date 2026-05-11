@@ -714,12 +714,7 @@
                 ].join("\n");
 
                 try {
-                    const refinedOutput = await promptGeminiNano(session, refinePrompt, {
-                        onUpdate(partial) {
-                            const normalized = normalizeGeminiNanoPartialOutput(partial);
-                            if (normalized) onPartial?.(normalized);
-                        },
-                    });
+                    const refinedOutput = await promptGeminiNano(session, refinePrompt, {});
                     const refinedParsed = extractGeminiNanoTranslationText(refinedOutput);
                     if (refinedParsed) {
                         parsed = refinedParsed;
