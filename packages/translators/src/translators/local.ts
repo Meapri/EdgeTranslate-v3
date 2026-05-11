@@ -179,7 +179,7 @@ function getTextFormPreservationRules() {
 
 function getTargetLanguageScriptRule(language: string) {
     const primaryScript = getPrimaryScript(language);
-    return `Localize institutional and cultural terms to their natural equivalents in the target language. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations) that result in false friends or unnatural terms. Every word in the output must be exclusively in the ${primaryScript} script. Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}. If unsure, transliterate into ${primaryScript} rather than keeping the source script.`;
+    return `Localize institutional and cultural terms to their natural equivalents. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations). For example, translate '国勢調査' as '인구총조사' (not '국세조사'). Every word in the output must be exclusively in the ${primaryScript} script. Translate or transliterate all names, brands, terms, headings, and labels into ${primaryScript}. If unsure, transliterate into ${primaryScript} rather than keeping the source script.`;
 }
 
 function getTargetLanguageFinalCheck(language: string) {

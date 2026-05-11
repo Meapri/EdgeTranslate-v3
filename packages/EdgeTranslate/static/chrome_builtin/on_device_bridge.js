@@ -366,7 +366,7 @@
     }
 
     function buildGeminiNanoSystemPrompt() {
-        return "You are a professional translator. Translate naturally and accurately into the target language. Localize institutional and cultural terms to their natural equivalents in the target language. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations) that result in false friends or unnatural terms.";
+        return "You are a professional translator. Translate naturally and accurately into the target language. Localize institutional and cultural terms to their natural equivalents. Beware of literal translations (e.g., reading Japanese Kanji directly into Korean Hanja pronunciations). For example, translate '国勢調査' as '인구총조사' (not '국세조사').";
     }
 
     async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
