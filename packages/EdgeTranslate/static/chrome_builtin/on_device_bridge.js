@@ -719,7 +719,7 @@
                 }
 
                 if (parsed && (needsRefine || needsRefinement(parsed, targetLanguage))) {
-                    onPartial?.(parsed + " ✨");
+                    onPartial?.(parsed);
 
                     const targetName = toLanguageName(targetLanguage);
                     const refinePrompt = [

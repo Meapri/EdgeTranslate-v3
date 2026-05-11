@@ -727,8 +727,8 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
 
         if (!asDictionary && parsed && parsed.translatedText) {
             if (needsRefine || needsRefinement(parsed.translatedText, targetLanguage)) {
-                // Show a subtle AI polish indicator while refining in the background
-                onPartial?.(parsed.translatedText + " ✨");
+                // Optimistic UI: let the user read the 1st pass while background refinement happens
+                onPartial?.(parsed.translatedText);
 
                 const targetName = toLanguageName(targetLanguage);
                 const refinePrompt = [
