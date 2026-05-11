@@ -645,15 +645,7 @@ function applyPostTranslationRules(translatedText, targetLanguage) {
     return text;
 }
 
-function needsRefinement(translatedText, targetLanguage) {
-    const text = String(translatedText || "");
-    const lang = toChromeTranslatorLanguage(targetLanguage);
-    if (lang === "ko" || lang === "en") {
-        const cjkRegex = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
-        if (cjkRegex.test(text)) return true;
-    }
-    return false;
-}
+
 
 async function translateWithGeminiNano(text, from, to, options = {}) {
     if (!text || !String(text).trim()) {
@@ -693,8 +685,6 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
     );
 
     const promptAndParse = async (inputText, asDictionary, onPartial) => {
-        let needsRefine = false;
-
         const output = await withTimeout(
             readGeminiNanoPromptOutput(
                 session,
@@ -704,14 +694,6 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
                 {
                     preferStreaming: true,
                     onUpdate: (partial) => {
-                        if (
-                            !asDictionary &&
-                            !needsRefine &&
-                            needsRefinement(partial, targetLanguage)
-                        ) {
-                            needsRefine = true;
-                        }
-                        // Always stream the first pass smoothly to the end
                         const normalized = applyPostTranslationRules(normalizeGeminiNanoPartialOutput(partial), targetLanguage);
                         if (normalized) onPartial?.(normalized);
                     },
@@ -724,40 +706,6 @@ async function translateWithGeminiNano(text, from, to, options = {}) {
         if (parsed && parsed.translatedText) {
             parsed.translatedText = applyPostTranslationRules(parsed.translatedText, targetLanguage);
         }
-
-        if (!asDictionary && parsed && parsed.translatedText) {
-            if (needsRefine || needsRefinement(parsed.translatedText, targetLanguage)) {
-                // Optimistic UI: let the user read the 1st pass while background refinement happens
-                onPartial?.(parsed.translatedText);
-
-                const targetName = toLanguageName(targetLanguage);
-                const refinePrompt = [
-                    `Review the following translation into ${targetName}.`,
-                    `Original text: ${inputText}`,
-                    `Translation: ${parsed.translatedText}`,
-                    `Task: Rewrite the translation to use natural ${targetName} administrative and cultural terms. Replace any literal translations. Ensure NO source-language script (e.g. Hanja, Kanji) remains.`,
-                    "Return ONLY the refined text. Do not omit any part.",
-                ].join("\n");
-
-                try {
-                    const refinedOutput = await withTimeout(
-                        readGeminiNanoPromptOutput(session, refinePrompt, {
-                            preferStreaming: false,
-                        }),
-                        GEMINI_NANO_PROMPT_TIMEOUT_MS,
-                        "Chrome Gemini Nano refinement prompt timed out."
-                    );
-                    const refinedParsed = parseResult(refinedOutput, text, false);
-                    if (refinedParsed && refinedParsed.translatedText) {
-                        refinedParsed.translatedText = applyPostTranslationRules(refinedParsed.translatedText, targetLanguage);
-                        parsed = refinedParsed;
-                    }
-                } catch (e) {
-                    // If refinement fails, just fall back to the first pass result
-                }
-            }
-        }
-
         return parsed;
     };
 
