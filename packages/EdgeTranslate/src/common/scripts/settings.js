@@ -34,7 +34,9 @@ const DEFAULT_SETTINGS = {
         enabled: false,
         mode: "chromeBuiltin",
         apiKey: "",
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-2.5-flash-lite",
+        openaiApiKey: "",
+        openaiModel: "gpt-5.4-mini",
         timeoutMs: 120000,
     },
     HybridTranslatorConfig: {

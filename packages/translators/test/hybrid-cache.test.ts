@@ -48,4 +48,144 @@ describe("HybridTranslator cache bookkeeping", () => {
             cacheSize: 1,
         });
     });
+
+    it("does not reuse cached main translations after the main hybrid provider changes", async () => {
+        const translator = createTranslator();
+        jest.spyOn(translator.REAL_TRANSLATORS.GoogleTranslate, "translate").mockResolvedValue({
+            originalText: "notice",
+            mainMeaning: "구글 결과",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        jest.spyOn(translator.REAL_TRANSLATORS.LocalTranslate, "translate").mockResolvedValue({
+            originalText: "notice",
+            mainMeaning: "AI 결과",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+
+        await expect(translator.translate("notice", "en", "ko")).resolves.toMatchObject({
+            mainMeaning: "구글 결과",
+        });
+
+        translator.useConfig({
+            translators: ["LocalTranslate"],
+            selections: {
+                ...googleOnlyConfig.selections,
+                originalText: "LocalTranslate",
+                mainMeaning: "LocalTranslate",
+            },
+        });
+
+        await expect(translator.translate("notice", "en", "ko")).resolves.toMatchObject({
+            mainMeaning: "AI 결과",
+        });
+    });
+
+    it("keeps the main hybrid text identical to the selected AI provider without Google fallback", async () => {
+        const translator = new HybridTranslator(
+            {
+                translators: ["GoogleTranslate", "LocalTranslate"],
+                selections: {
+                    ...googleOnlyConfig.selections,
+                    originalText: "LocalTranslate",
+                    mainMeaning: "LocalTranslate",
+                    detailedMeanings: "GoogleTranslate",
+                },
+            },
+            {}
+        );
+        jest.spyOn(translator.REAL_TRANSLATORS.GoogleTranslate, "translate").mockResolvedValue({
+            originalText: "notice",
+            mainMeaning: "구글 결과",
+            detailedMeanings: [{ pos: "noun", meaning: "세부 의미" }],
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        jest.spyOn(translator.REAL_TRANSLATORS.LocalTranslate, "translate").mockResolvedValue({
+            originalText: "notice",
+            mainMeaning: "AI 결과",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+
+        const result = await translator.translate("notice", "en", "ko");
+
+        expect(result.mainMeaning).toBe("AI 결과");
+        expect(result.detailedMeanings).toEqual([{ pos: "noun", meaning: "세부 의미" }]);
+    });
+
+    it("prefers AI-provided dictionary sections when AI is the main hybrid provider", async () => {
+        const translator = new HybridTranslator(
+            {
+                translators: ["GoogleTranslate", "LocalTranslate"],
+                selections: {
+                    ...googleOnlyConfig.selections,
+                    originalText: "LocalTranslate",
+                    mainMeaning: "LocalTranslate",
+                    detailedMeanings: "GoogleTranslate",
+                    definitions: "GoogleTranslate",
+                    examples: "GoogleTranslate",
+                },
+            },
+            {}
+        );
+        jest.spyOn(translator.REAL_TRANSLATORS.GoogleTranslate, "translate").mockResolvedValue({
+            originalText: "run",
+            mainMeaning: "구글 결과",
+            detailedMeanings: [{ pos: "verb", meaning: "구글 상세" }],
+            definitions: [{ pos: "verb", meaning: "구글 정의" }],
+            examples: [{ source: "Google source.", target: "구글 예문." }],
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        jest.spyOn(translator.REAL_TRANSLATORS.LocalTranslate, "translate").mockResolvedValue({
+            originalText: "run",
+            mainMeaning: "달리다",
+            detailedMeanings: [{ pos: "verb", meaning: "AI 상세" }],
+            definitions: [{ pos: "verb", meaning: "AI 정의" }],
+            examples: [{ source: "I run.", target: "나는 달린다." }],
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+
+        const result = await translator.translate("run", "en", "ko");
+
+        expect(result).toMatchObject({
+            mainMeaning: "달리다",
+            detailedMeanings: [{ pos: "verb", meaning: "AI 상세" }],
+            definitions: [{ pos: "verb", meaning: "AI 정의" }],
+            examples: [{ source: "I run.", target: "나는 달린다." }],
+        });
+    });
+
+    it("does not replace an empty selected AI main result with another provider", async () => {
+        const translator = new HybridTranslator(
+            {
+                translators: ["GoogleTranslate", "LocalTranslate"],
+                selections: {
+                    ...googleOnlyConfig.selections,
+                    originalText: "LocalTranslate",
+                    mainMeaning: "LocalTranslate",
+                },
+            },
+            {}
+        );
+        jest.spyOn(translator.REAL_TRANSLATORS.GoogleTranslate, "translate").mockResolvedValue({
+            originalText: "notice",
+            mainMeaning: "구글 결과",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+        jest.spyOn(translator.REAL_TRANSLATORS.LocalTranslate, "translate").mockResolvedValue({
+            originalText: "notice",
+            mainMeaning: "",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+        });
+
+        await expect(translator.translate("notice", "en", "ko")).resolves.toMatchObject({
+            mainMeaning: "",
+        });
+    });
 });

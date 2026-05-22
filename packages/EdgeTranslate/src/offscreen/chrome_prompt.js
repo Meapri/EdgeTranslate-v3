@@ -37,6 +37,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (parsed.type !== "chrome_prompt_translate") return undefined;
 
     translateWithChromeOnDevice(parsed.text, parsed.from, parsed.to, {
+        draftTranslation: parsed.draftTranslation,
+        fastPostEdit: parsed.fastPostEdit,
         onUpdate(result) {
             if (!parsed.streamId) return;
             chrome.runtime.sendMessage(

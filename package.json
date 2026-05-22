@@ -31,7 +31,9 @@
         "test": "turbo run test",
         "pack:firefox": "npm run build -w @edge_translate/translators && npm run pack:firefox -w edge_translate",
         "lint:firefox": "npm run pack:firefox && npx --yes web-ext@8.9.0 lint -s packages/EdgeTranslate/build/firefox",
-        "local:translate-proxy": "node tools/local-llm-translate-proxy.mjs"
+        "local:translate-proxy": "node tools/local-llm-translate-proxy.mjs",
+        "bench:translation": "node tools/translation-quality-benchmark.mjs",
+        "smoke:chrome-translation": "node tools/chrome-extension-translation-smoke.mjs"
     },
     "devDependencies": {
         "@commitlint/cli": "^13.2.1",

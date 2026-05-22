@@ -347,6 +347,10 @@
         "message": "Google Translate",
         "description": "Google Translate."
     },
+    "GoogleTranslateDescription": {
+        "message": "Fast network translation.",
+        "description": "Short menu description for Google Translate."
+    },
     "GoogleTranslateShort": {
         "message": "Google",
         "description": "Abbreviation of Google Translate."
@@ -354,6 +358,10 @@
     "HybridTranslate": {
         "message": "Hybrid Translate",
         "description": "Translate with multiple translators."
+    },
+    "HybridTranslateDescription": {
+        "message": "Use different translators for result sections.",
+        "description": "Short menu description for Hybrid Translate."
     },
     "HybridTranslateShort": {
         "message": "Hybrid",
@@ -1287,6 +1295,10 @@
         "message": "AI Translate",
         "description": "User-configured on-device or Gemini translation provider."
     },
+    "LocalTranslateDescription": {
+        "message": "Use the selected AI provider directly.",
+        "description": "Short menu description for AI Translate."
+    },
     "LocalTranslateShort": {
         "message": "AI",
         "description": "Abbreviation of AI Translate."
@@ -1303,8 +1315,12 @@
         "message": "API key",
         "description": "API key for Google AI Studio mode."
     },
+    "LocalTranslatorOpenAIApiKey": {
+        "message": "OpenAI API key",
+        "description": "API key for OpenAI API mode."
+    },
     "LocalTranslatorHelp": {
-        "message": "Use Chrome Gemini Nano for on-device AI translation, or Google AI Studio with your own API key and selected Gemini model. Single-word AI translations include meanings, definitions, and examples when the model can provide them.",
+        "message": "Use Chrome Gemini Nano for on-device AI translation, Google AI Studio with your own Gemini API key, or OpenAI API with your own OpenAI API key. Single-word AI translations include meanings, definitions, and examples when the model can provide them.",
         "description": "AI translation help text."
     },
     "LocalTranslatorMode": {
@@ -1328,8 +1344,16 @@
         "message": "Google AI Studio",
         "description": "Use the Gemini API with a user-provided Google AI Studio API key."
     },
+    "LocalTranslatorModeOpenAI": {
+        "message": "OpenAI API",
+        "description": "Use the OpenAI API with a user-provided OpenAI API key."
+    },
     "LocalTranslatorModel": {
         "message": "AI model",
         "description": "Google AI Studio model name."
+    },
+    "LocalTranslatorOpenAIModel": {
+        "message": "OpenAI model",
+        "description": "OpenAI model name."
     }
 }

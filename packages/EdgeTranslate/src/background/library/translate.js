@@ -12,7 +12,7 @@ import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
 const GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS = 2;
-const LOCAL_AI_TRANSLATION_CACHE_VERSION = "local-ai-prompt-2026-06-25-01";
+const LOCAL_AI_TRANSLATION_CACHE_VERSION = "local-ai-prompt-2026-06-25-04";
 
 function stripPronunciationDisplaySelections(config = {}) {
     const selections = { ...(config.selections || {}) };
@@ -129,7 +129,8 @@ class TranslatorManager {
             getMode() {
                 if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
                     return "geminiNano";
-                if (config.mode === "googleAiStudio") return "googleAiStudio";
+                if (config.mode === "googleAiStudio" || config.mode === "openai")
+                    return config.mode;
                 return "geminiNano";
             },
             supportedLanguages() {
@@ -191,7 +192,7 @@ class TranslatorManager {
         }
     }
 
-    async translateWithGeminiNanoPrompt(text, from, to) {
+    async translateWithGeminiNanoPrompt(text, from, to, options = {}) {
         const streamContext = this.currentTranslationStreamContext;
         return this.runGeminiNanoPromptTask(async () => {
             const streamId = streamContext
@@ -205,14 +206,37 @@ class TranslatorManager {
             };
             const preferPromptApi = this.shouldPreferChromePromptApi();
             try {
-                if (preferPromptApi) {
-                    try {
+                if (options.disableRouteFallback) {
+                    const routeOptions = { ...streamOptions, ...options };
+                    if (preferPromptApi) {
                         return await this.translateWithChromePromptApi(
                             text,
                             from,
                             to,
-                            streamOptions
+                            routeOptions
                         );
+                    }
+                    const tabId = await this.getChromeBuiltinTargetTabId();
+                    if (await this.shouldUseChromePromptTabBridge(tabId)) {
+                        return await this.translateWithChromePromptTab(
+                            tabId,
+                            text,
+                            from,
+                            to,
+                            routeOptions
+                        );
+                    }
+                    throw new Error(
+                        "Chrome Gemini Nano Prompt API is not available in this browser context."
+                    );
+                }
+
+                if (preferPromptApi) {
+                    try {
+                        return await this.translateWithChromePromptApi(text, from, to, {
+                            ...streamOptions,
+                            ...options,
+                        });
                     } catch (backgroundError) {
                         if (!this.isChromePromptApiUnavailableError(backgroundError)) {
                             throw backgroundError;
@@ -223,13 +247,10 @@ class TranslatorManager {
                 try {
                     const tabId = await this.getChromeBuiltinTargetTabId();
                     if (await this.shouldUseChromePromptTabBridge(tabId)) {
-                        return await this.translateWithChromePromptTab(
-                            tabId,
-                            text,
-                            from,
-                            to,
-                            streamOptions
-                        );
+                        return await this.translateWithChromePromptTab(tabId, text, from, to, {
+                            ...streamOptions,
+                            ...options,
+                        });
                     }
                 } catch (tabBridgeError) {
                     if (!this.isChromePromptTabBridgeUnavailableError(tabBridgeError)) {
@@ -239,12 +260,10 @@ class TranslatorManager {
 
                 if (!preferPromptApi) {
                     try {
-                        return await this.translateWithChromePromptApi(
-                            text,
-                            from,
-                            to,
-                            streamOptions
-                        );
+                        return await this.translateWithChromePromptApi(text, from, to, {
+                            ...streamOptions,
+                            ...options,
+                        });
                     } catch (backgroundError) {
                         if (!this.isChromePromptApiUnavailableError(backgroundError)) {
                             throw backgroundError;
@@ -292,6 +311,8 @@ class TranslatorManager {
 
         const result = await translateWithChromeOnDevice(text, from, to, {
             onUpdate: options.onUpdate,
+            draftTranslation: options.draftTranslation,
+            fastPostEdit: options.fastPostEdit,
         });
         return {
             originalText: text,
@@ -307,7 +328,7 @@ class TranslatorManager {
 
     async translateWithChromePromptOffscreen(text, from, to, options = {}) {
         await this.ensureChromePromptOffscreenDocument();
-        const response = await this.requestChromePromptOffscreen(text, from, to, options.streamId);
+        const response = await this.requestChromePromptOffscreen(text, from, to, options);
         if (!response || !response.ok) {
             const detail =
                 response?.error?.message || "Chrome Gemini Nano offscreen request failed.";
@@ -353,6 +374,8 @@ class TranslatorManager {
             tl: to,
             engine: "geminiNano",
             streamId: options.streamId,
+            draftTranslation: options.draftTranslation,
+            fastPostEdit: options.fastPostEdit,
         });
         return this.normalizeChromePromptResult(result, text, from, to);
     }
@@ -548,10 +571,15 @@ class TranslatorManager {
         }
         normalizedPartialText = normalizedPartialText.trim();
 
-        if (!normalizedPartialText) return;
         const isCommitted = result?.streamState === "committed";
+        if (!isCommitted && context.suppressStreamPreview) return;
+        if (!normalizedPartialText) return;
         if (isCommitted) {
-            if (!this.shouldEmitTranslationStreamText(context, normalizedPartialText)) return;
+            if (
+                !result?.forceStreamUpdate &&
+                !this.shouldEmitTranslationStreamText(context, normalizedPartialText)
+            )
+                return;
             context.lastCommittedTranslationStreamText = normalizedPartialText;
             context.lastEmittedTranslationStreamText = normalizedPartialText;
             context.lastEmittedTranslationPreviewText = "";
@@ -620,13 +648,15 @@ class TranslatorManager {
         }
     }
 
-    requestChromePromptOffscreen(text, from, to, streamId) {
+    requestChromePromptOffscreen(text, from, to, options = {}) {
         const message = JSON.stringify({
             type: "chrome_prompt_translate",
             text,
             from,
             to,
-            streamId,
+            streamId: options.streamId,
+            draftTranslation: options.draftTranslation,
+            fastPostEdit: options.fastPostEdit,
         });
         return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage(message, (response) => {
@@ -794,6 +824,35 @@ class TranslatorManager {
                 text: String(segment?.text || "").trim(),
             }))
             .filter((segment) => segment.text);
+    }
+
+    normalizeSelectionComparisonText(text) {
+        return String(text || "")
+            .replace(/\r\n?/g, "\n")
+            .replace(/[\u200b-\u200d\ufeff]/g, "")
+            .replace(/\u00a0/g, " ")
+            .replace(/\u3000/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    buildPlainSelectionTextFromSegments(segments) {
+        return this.normalizeSelectionSegments(segments)
+            .map((segment) => segment.text)
+            .filter(Boolean)
+            .join("\n\n")
+            .trim();
+    }
+
+    getTrustedSelectionSegments(text, textSegments) {
+        const segments = this.normalizeSelectionSegments(textSegments);
+        if (!segments.length) return [];
+        const selectedText = this.normalizeSelectionComparisonText(text);
+        const segmentedText = this.normalizeSelectionComparisonText(
+            this.buildPlainSelectionTextFromSegments(segments)
+        );
+        if (!selectedText || !segmentedText || selectedText !== segmentedText) return [];
+        return segments;
     }
 
     shouldWrapSelectionForRole(translatorId, textRole, textSegments) {
@@ -1136,6 +1195,7 @@ class TranslatorManager {
     async getCurrentTabId() {
         let tabId = -1;
         const tabs = await promiseTabs.query({ active: true, currentWindow: true });
+        if (!tabs || !tabs.length) return tabId;
         tabId = tabs[0].id;
 
         // to test whether the current tab can receive message(display results)
@@ -1143,14 +1203,12 @@ class TranslatorManager {
             const shouldOpenNoticePage = await new Promise((resolve) => {
                 // The page is a local file page
                 if (/^file:\/\.*/.test(tabs[0].url)) {
-                    // Note: chrome.extension.isAllowedFileSchemeAccess is not available in Manifest v3
-                    // For now, we'll assume file scheme access is not available and show the notice page
-                    if (confirm(chrome.i18n.getMessage("PermissionRemind"))) {
-                        chrome.tabs.create({
-                            url: `chrome://extensions/?id=${chrome.runtime.id}`,
-                        });
-                        resolve(false);
-                    } else resolve(true);
+                    // confirm() is unavailable in MV3 service workers — open
+                    // the extensions page directly and skip the notice page.
+                    chrome.tabs.create({
+                        url: `chrome://extensions/?id=${chrome.runtime.id}`,
+                    });
+                    resolve(false);
                 } else resolve(true);
             });
             if (!shouldOpenNoticePage) {
@@ -1305,7 +1363,7 @@ class TranslatorManager {
             }
 
             const translatorId = this.DEFAULT_TRANSLATOR;
-            const normalizedSegments = this.normalizeSelectionSegments(textSegments);
+            const normalizedSegments = this.getTrustedSelectionSegments(text, textSegments);
             const shouldWrapRole = this.shouldWrapSelectionForRole(
                 translatorId,
                 textRole,
@@ -1329,6 +1387,7 @@ class TranslatorManager {
                 targetLanguage: tl,
                 shouldWrapRole,
                 expectedSegmentCount,
+                suppressStreamPreview: false,
             };
 
             let result;
@@ -1512,9 +1571,8 @@ class TranslatorManager {
             console.log("HYBRID_TRANSLATOR not initialized yet");
             return ["HybridTranslate"];
         }
-        return ["HybridTranslate"].concat(
-            this.HYBRID_TRANSLATOR.getAvailableTranslatorsFor(detail.from, detail.to)
-        );
+        const available = this.HYBRID_TRANSLATOR.getAvailableTranslatorsFor(detail.from, detail.to);
+        return ["HybridTranslate"].concat(available);
     }
 
     /**

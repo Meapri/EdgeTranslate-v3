@@ -1055,7 +1055,9 @@ async function getChromeBuiltinTranslator(sourceLanguage, targetLanguage) {
     }
 
     const translator = await translatorApi.create({ sourceLanguage, targetLanguage });
-    evictOldestFromMap(CHROME_TRANSLATOR_CACHE, CHROME_TRANSLATOR_CACHE_MAX);
+    evictOldestFromMap(CHROME_TRANSLATOR_CACHE, CHROME_TRANSLATOR_CACHE_MAX, (old) => {
+        if (typeof old?.destroy === "function") old.destroy();
+    });
     CHROME_TRANSLATOR_CACHE.set(key, translator);
     return translator;
 }

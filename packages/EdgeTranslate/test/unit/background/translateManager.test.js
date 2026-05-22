@@ -161,6 +161,40 @@ describe("TranslatorManager selection role wrapping", () => {
         });
     });
 
+    test("ignores role segments when they include text outside the dragged selection", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.HYBRID_TRANSLATOR_CONFIG = { selections: { mainMeaning: "LocalTranslate" } };
+
+        const selectedText = "The selected sentence only.";
+        const leakedSegments = [
+            { role: "paragraph", text: "Text before selection. The selected sentence only." },
+            { role: "paragraph", text: "Text after selection." },
+        ];
+
+        expect(manager.getTrustedSelectionSegments(selectedText, leakedSegments)).toEqual([]);
+        expect(
+            manager.shouldWrapSelectionForRole(
+                "LocalTranslate",
+                "text",
+                manager.getTrustedSelectionSegments(selectedText, leakedSegments)
+            )
+        ).toBe(false);
+    });
+
+    test("does not add Google plus on-device translator when both providers are available", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.LOCAL_TRANSLATOR_CONFIG = { enabled: true, mode: "chromeBuiltin" };
+        manager.HYBRID_TRANSLATOR = {
+            getAvailableTranslatorsFor: jest.fn(() => ["GoogleTranslate", "LocalTranslate"]),
+        };
+
+        expect(manager.getAvailableTranslators({ from: "en", to: "ko" })).toEqual([
+            "HybridTranslate",
+            "GoogleTranslate",
+            "LocalTranslate",
+        ]);
+    });
+
     test("does not wrap hybrid selection roles when hybrid main translation is not local AI", () => {
         const manager = Object.create(TranslatorManager.prototype);
         manager.HYBRID_TRANSLATOR_CONFIG = {
@@ -648,6 +682,34 @@ describe("TranslatorManager streaming translation display", () => {
             )
         ).toBe("패스워드 재설정 시 주의사항");
     });
+
+    test("suppresses unstable preview text when requested", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.channel = { emitToTabs: jest.fn() };
+        const context = {
+            tabId: 42,
+            timestamp: 123,
+            originalText: "source",
+            sourceLanguage: "ja",
+            targetLanguage: "ko",
+            suppressStreamPreview: true,
+        };
+
+        manager.emitTranslationStream(context, {
+            mainMeaning: "구글 초안",
+            streamState: "committed",
+        });
+        manager.emitTranslationStream(context, {
+            mainMeaning: "불안정한 후편집 미리보기",
+            streamState: "preview",
+        });
+
+        expect(manager.channel.emitToTabs).toHaveBeenCalledTimes(1);
+        expect(manager.channel.emitToTabs.mock.calls[0][2]).toMatchObject({
+            mainMeaning: "구글 초안",
+            streamPreviewText: "",
+        });
+    });
 });
 
 describe("Hybrid translation prompt application", () => {
@@ -726,6 +788,32 @@ describe("Hybrid translation prompt application", () => {
         // In googleAiStudio mode, raw translator.translate() should be called
         expect(rawLocalTranslator.translate).toHaveBeenCalledWith("hello", "en", "ko");
         expect(result.mainMeaning).toBe("AI Studio 결과");
+    });
+
+    test("hybrid LocalTranslate slot falls through to raw translator in OpenAI mode", async () => {
+        const manager = Object.create(TranslatorManager.prototype);
+
+        const rawLocalTranslator = {
+            useConfig: jest.fn(),
+            supportedLanguages: jest.fn(() => new Set(["en", "ko", "ja"])),
+            detect: jest.fn().mockResolvedValue("auto"),
+            translate: jest.fn(async (text) => ({
+                originalText: text,
+                mainMeaning: "OpenAI 결과",
+            })),
+            pronounce: jest.fn(),
+            stopPronounce: jest.fn(),
+        };
+
+        const proxy = manager.createLocalTranslatorProxy(rawLocalTranslator, {
+            enabled: true,
+            mode: "openai",
+        });
+
+        const result = await proxy.translate("hello", "en", "ko");
+
+        expect(rawLocalTranslator.translate).toHaveBeenCalledWith("hello", "en", "ko");
+        expect(result.mainMeaning).toBe("OpenAI 결과");
     });
 });
 

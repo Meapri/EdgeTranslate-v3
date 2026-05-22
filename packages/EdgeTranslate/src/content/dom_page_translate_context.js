@@ -186,9 +186,13 @@ function createContextGroup(block, entries) {
 function createReadableBlockReplacement(group, options = {}) {
     const minNodes = options.minNodes || 2;
     const maxChars = options.maxChars || 3500;
+    const preserveInlineFormatting = options.preserveInlineFormatting !== false;
     const block = group && group.block;
     if (!block || !READABLE_REPLACE_BLOCK_TAGS.has(block.tagName)) return null;
     if (!group.nodes || group.nodes.length < minNodes) return null;
+    if (preserveInlineFormatting && block.children && block.children.length > 0) {
+        return null;
+    }
     if (block.querySelector && block.querySelector(UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR)) {
         return null;
     }

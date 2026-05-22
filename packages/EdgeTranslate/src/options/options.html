@@ -161,6 +161,11 @@
                                     class="i18n"
                                     data-i18n-name="LocalTranslatorModeGoogleAiStudio"
                                 ></option>
+                                <option
+                                    value="openai"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeOpenAI"
+                                ></option>
                             </select>
                         </label>
                     </div>
@@ -225,6 +230,77 @@
                                 min="1000"
                                 step="1000"
                             />
+                        </label>
+                    </div>
+                </div>
+                <div class="row" id="local-translator-openai-settings">
+                    <div class="column" data-local-mode="openai">
+                        <label
+                            for="local-translator-openai-api-key"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorOpenAIApiKey"
+                            data-insert-pos="afterBegin"
+                        >
+                            <input
+                                type="password"
+                                setting-type="text"
+                                setting-path="LocalTranslatorConfig openaiApiKey"
+                                id="local-translator-openai-api-key"
+                                autocomplete="off"
+                            />
+                        </label>
+                    </div>
+                    <div class="column" data-local-mode="openai">
+                        <label
+                            for="local-translator-openai-model"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorOpenAIModel"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="LocalTranslatorConfig openaiModel"
+                                id="local-translator-openai-model"
+                            >
+                                <option value="gpt-5.5">gpt-5.5</option>
+                                <option value="gpt-5.5-2026-04-23">gpt-5.5-2026-04-23</option>
+                                <option value="gpt-5.5-pro">gpt-5.5-pro</option>
+                                <option value="gpt-5.5-pro-2026-04-23">gpt-5.5-pro-2026-04-23</option>
+                                <option value="gpt-5.4">gpt-5.4</option>
+                                <option value="gpt-5.4-2026-03-05">gpt-5.4-2026-03-05</option>
+                                <option value="gpt-5.4-pro">gpt-5.4-pro</option>
+                                <option value="gpt-5.4-pro-2026-03-05">gpt-5.4-pro-2026-03-05</option>
+                                <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+                                <option value="gpt-5.4-mini-2026-03-17">gpt-5.4-mini-2026-03-17</option>
+                                <option value="gpt-5.4-nano">gpt-5.4-nano</option>
+                                <option value="gpt-5.4-nano-2026-03-17">gpt-5.4-nano-2026-03-17</option>
+                                <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
+                                <option value="gpt-5.2">gpt-5.2</option>
+                                <option value="gpt-5.2-2025-12-11">gpt-5.2-2025-12-11</option>
+                                <option value="gpt-5.2-pro">gpt-5.2-pro</option>
+                                <option value="gpt-5.2-pro-2025-12-11">gpt-5.2-pro-2025-12-11</option>
+                                <option value="gpt-5.2-chat-latest">gpt-5.2-chat-latest</option>
+                                <option value="gpt-5.1">gpt-5.1</option>
+                                <option value="gpt-5.1-2025-11-13">gpt-5.1-2025-11-13</option>
+                                <option value="gpt-5.1-chat-latest">gpt-5.1-chat-latest</option>
+                                <option value="gpt-5">gpt-5</option>
+                                <option value="gpt-5-2025-08-07">gpt-5-2025-08-07</option>
+                                <option value="gpt-5-pro">gpt-5-pro</option>
+                                <option value="gpt-5-pro-2025-10-06">gpt-5-pro-2025-10-06</option>
+                                <option value="gpt-5-mini">gpt-5-mini</option>
+                                <option value="gpt-5-mini-2025-08-07">gpt-5-mini-2025-08-07</option>
+                                <option value="gpt-5-nano">gpt-5-nano</option>
+                                <option value="gpt-5-nano-2025-08-07">gpt-5-nano-2025-08-07</option>
+                                <option value="gpt-5-chat-latest">gpt-5-chat-latest</option>
+                                <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="o3">o3</option>
+                                <option value="o4-mini">o4-mini</option>
+                                <option value="o3-pro">o3-pro</option>
+                            </select>
                         </label>
                     </div>
                 </div>

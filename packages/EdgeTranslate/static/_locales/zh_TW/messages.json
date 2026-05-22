@@ -1303,8 +1303,12 @@
         "message": "API 金鑰",
         "description": "Google AI Studio 模式使用的 API 金鑰"
     },
+    "LocalTranslatorOpenAIApiKey": {
+        "message": "OpenAI API 金鑰",
+        "description": "OpenAI API 模式使用的 API 金鑰"
+    },
     "LocalTranslatorHelp": {
-        "message": "Chrome Gemini Nano 用於裝置端 AI 翻譯；Google AI Studio 使用你自己的 API 金鑰和所選 Gemini 模型。AI 單字翻譯會在模型可提供時顯示詳細意思、定義和例句。",
+        "message": "Chrome Gemini Nano 用於裝置端 AI 翻譯；Google AI Studio 使用你自己的 Gemini API 金鑰；OpenAI API 使用你自己的 OpenAI API 金鑰。AI 單字翻譯會在模型可提供時顯示詳細意思、定義和例句。",
         "description": "AI 翻譯說明"
     },
     "LocalTranslatorMode": {
@@ -1328,8 +1332,16 @@
         "message": "Google AI Studio",
         "description": "使用使用者提供的 Google AI Studio API 金鑰呼叫 Gemini API。"
     },
+    "LocalTranslatorModeOpenAI": {
+        "message": "OpenAI API",
+        "description": "使用使用者提供的 OpenAI API 金鑰呼叫 OpenAI API。"
+    },
     "LocalTranslatorModel": {
         "message": "AI 模型",
         "description": "Google AI Studio 模型名稱"
+    },
+    "LocalTranslatorOpenAIModel": {
+        "message": "OpenAI 模型",
+        "description": "OpenAI 模型名稱"
     }
 }

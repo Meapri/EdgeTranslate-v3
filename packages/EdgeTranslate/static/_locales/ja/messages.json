@@ -1303,8 +1303,12 @@
         "message": "APIキー",
         "description": "Google AI Studio モードで使用する API キー"
     },
+    "LocalTranslatorOpenAIApiKey": {
+        "message": "OpenAI APIキー",
+        "description": "OpenAI API モードで使用する API キー"
+    },
     "LocalTranslatorHelp": {
-        "message": "Chrome Gemini Nano はオンデバイス AI 翻訳に使用し、Google AI Studio は自分の API キーと選択した Gemini モデルを使用します。AI の単語翻訳では、モデルが提供できる場合に詳しい意味、定義、例文も表示します。",
+        "message": "Chrome Gemini Nano はオンデバイス AI 翻訳に使用し、Google AI Studio は自分の Gemini API キー、OpenAI API は自分の OpenAI API キーを使用します。AI の単語翻訳では、モデルが提供できる場合に詳しい意味、定義、例文も表示します。",
         "description": "AI翻訳ヘルプ"
     },
     "LocalTranslatorMode": {
@@ -1328,8 +1332,16 @@
         "message": "Google AI Studio",
         "description": "ユーザー入力の Google AI Studio API キーで Gemini API を使用します。"
     },
+    "LocalTranslatorModeOpenAI": {
+        "message": "OpenAI API",
+        "description": "ユーザー入力の OpenAI API キーで OpenAI API を使用します。"
+    },
     "LocalTranslatorModel": {
         "message": "AIモデル",
         "description": "Google AI Studio モデル名"
+    },
+    "LocalTranslatorOpenAIModel": {
+        "message": "OpenAIモデル",
+        "description": "OpenAI モデル名"
     }
 }

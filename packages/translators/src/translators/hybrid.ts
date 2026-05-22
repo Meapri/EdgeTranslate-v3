@@ -45,6 +45,7 @@ class HybridTranslator {
     private cache = new LRUCache<string, TranslationResult>({ max: 250, ttl: 15 * 60 * 1000 });
     // In-flight requests to dedupe concurrent calls
     private inflight = new Map<string, Promise<TranslationResult>>();
+    private cacheConfigSignature = "";
 
     // Statistics
     private stats = {
@@ -79,6 +80,7 @@ class HybridTranslator {
 
     useLocalConfig(config: LocalTranslatorConfig = {}) {
         this.REAL_TRANSLATORS.LocalTranslate.useConfig(config);
+        this.clearRuntimeCache();
     }
 
     /**
@@ -96,7 +98,12 @@ class HybridTranslator {
         }
 
         this.CONFIG = this.normalizeConfig(config);
-        this.MAIN_TRANSLATOR = config.selections.mainMeaning;
+        this.MAIN_TRANSLATOR = this.CONFIG.selections.mainMeaning;
+        const nextSignature = this.makeConfigCacheSignature(this.CONFIG);
+        if (nextSignature !== this.cacheConfigSignature) {
+            this.cacheConfigSignature = nextSignature;
+            this.clearRuntimeCache();
+        }
     }
 
     private normalizeConfig(config: HybridConfig): HybridConfig {
@@ -112,6 +119,20 @@ class HybridTranslator {
             ...config,
             translators: Array.from(translators),
         };
+    }
+
+    private makeConfigCacheSignature(config: HybridConfig) {
+        const selections = Object.keys(config.selections || {})
+            .sort()
+            .map((key) => `${key}:${config.selections[key as keyof Selections]}`)
+            .join("|");
+        const translators = [...(config.translators || [])].sort().join(",");
+        return `${translators}::${selections}`;
+    }
+
+    private clearRuntimeCache() {
+        this.cache.clear();
+        this.inflight.clear();
     }
 
     /**
@@ -227,13 +248,33 @@ class HybridTranslator {
             mainMeaning: "",
         };
         const results = new Map(await Promise.all(requests));
+        const localMainSelected = this.CONFIG.selections.mainMeaning === "LocalTranslate";
+        const localResult = localMainSelected ? results.get("LocalTranslate") : null;
         
         // Process each component with fallback support
         let item: keyof Selections;
         for (item in this.CONFIG.selections) {
             try {
+                if (localResult && this.hasValue(localResult[item])) {
+                    translation[item] = localResult[item] as string &
+                        DetailedMeaning[] &
+                        Definition[] &
+                        Example[];
+                    continue;
+                }
+
                 const selectedTranslator = this.CONFIG.selections[item];
                 const selectedResult = results.get(selectedTranslator)!;
+
+                if (item === "mainMeaning" || item === "originalText") {
+                    if (selectedResult && selectedResult[item] !== undefined) {
+                        translation[item] = selectedResult[item] as string &
+                            DetailedMeaning[] &
+                            Definition[] &
+                            Example[];
+                    }
+                    continue;
+                }
                 
                 // Check if the selected translator provided the component
                 if (selectedResult[item] && this.hasValue(selectedResult[item])) {
@@ -287,7 +328,7 @@ class HybridTranslator {
         }
 
         // Normalize inputs to keep key stable
-        const key = `H|${from}|${to}|${fnv1a32(text)}`;
+        const key = `H|${this.cacheConfigSignature}|${from}|${to}|${fnv1a32(text)}`;
 
         // Cache hit
         const cached = this.cache.get(key);

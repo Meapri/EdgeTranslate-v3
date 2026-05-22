@@ -19,6 +19,11 @@ import SettingIcon from "./icons/setting.svg";
 import PinIcon from "./icons/pin.svg";
 import CloseIcon from "./icons/close.svg";
 
+function getI18nMessage(name, fallback = "") {
+    const message = chrome.i18n.getMessage(name);
+    return message || fallback;
+}
+
 // Communication channel.
 const channel = new Channel();
 // Store the translation result and attach it to window.
@@ -83,6 +88,7 @@ export default function ResultPanel() {
     const userMovedRef = useRef(false);
     // 마지막 앵커(선택된 단어) 기준 좌표 기억 (캐시 히트 시 position 누락 대비)
     const lastAnchorPosRef = useRef(null); // [x, y]
+    const lastOpenedAtRef = useRef(0);
 
     // store the display type("floating"|"fixed")
     const displaySettingRef = useRef({
@@ -313,6 +319,7 @@ export default function ResultPanel() {
                 if (detail.position && Array.isArray(detail.position)) {
                     lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
                 }
+                lastOpenedAtRef.current = Date.now();
                 setOpen(true);
                 setContentType("LOADING");
                 setContent(detail);
@@ -325,6 +332,7 @@ export default function ResultPanel() {
                 if (detail.position && Array.isArray(detail.position)) {
                     lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
                 }
+                lastOpenedAtRef.current = Date.now();
                 setOpen(true);
                 setContentType("RESULT");
                 setContent(detail);
@@ -337,6 +345,7 @@ export default function ResultPanel() {
                 if (detail.position && Array.isArray(detail.position)) {
                     lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
                 }
+                lastOpenedAtRef.current = Date.now();
                 setOpen(true);
                 setContentType("RESULT");
                 setContent((previous) => ({
@@ -633,6 +642,8 @@ export default function ResultPanel() {
 
     useClickAway(containerElRef, () => {
         // The panel will be closed if users click outside of the it with the panelFix option closed.
+        const openedRecently = Date.now() - lastOpenedAtRef.current < 500;
+        if (contentTypeRef.current === "LOADING" || openedRecently) return;
         if (!panelFix) {
             setOpen(false);
         }
@@ -914,8 +925,9 @@ export default function ResultPanel() {
                                     <Head ref={headElRef} data-testid="Head">
                                         <SourceOption
                                             role="button"
-                                            title={chrome.i18n.getMessage(
-                                                `${currentTranslator}Short`
+                                            title={getI18nMessage(
+                                                `${currentTranslator}Short`,
+                                                currentTranslator
                                             )}
                                             activeKey={currentTranslator}
                                             onSelect={(eventKey) => {
@@ -934,15 +946,34 @@ export default function ResultPanel() {
                                             }}
                                             data-testid="SourceOption"
                                         >
-                                            {availableTranslators?.map((translator) => (
-                                                <Dropdown.Item
-                                                    role="button"
-                                                    key={translator}
-                                                    eventKey={translator}
-                                                >
-                                                    {chrome.i18n.getMessage(translator)}
-                                                </Dropdown.Item>
-                                            ))}
+                                            {availableTranslators?.map((translator) => {
+                                                const description = getI18nMessage(
+                                                    `${translator}Description`
+                                                );
+                                                return (
+                                                    <Dropdown.Item
+                                                        role="button"
+                                                        key={translator}
+                                                        eventKey={translator}
+                                                    >
+                                                        <TranslatorOptionContent>
+                                                            <TranslatorOptionHeader>
+                                                                <TranslatorOptionName>
+                                                                    {getI18nMessage(
+                                                                        translator,
+                                                                        translator
+                                                                    )}
+                                                                </TranslatorOptionName>
+                                                            </TranslatorOptionHeader>
+                                                            {description && (
+                                                                <TranslatorOptionDescription>
+                                                                    {description}
+                                                                </TranslatorOptionDescription>
+                                                            )}
+                                                        </TranslatorOptionContent>
+                                                    </Dropdown.Item>
+                                                );
+                                            })}
                                         </SourceOption>
                                         <HeadIcons>
                                             <HeadIcon
@@ -1302,6 +1333,58 @@ const SourceOption = styled(Dropdown)`
     @media (prefers-color-scheme: dark) {
         color: ${DarkPrimary};
         background-color: #1f3b68;
+    }
+
+    ul {
+        min-width: 260px;
+        max-width: min(320px, calc(100vw - 32px));
+        text-align: left;
+        text-align-last: left;
+    }
+`;
+
+const TranslatorOptionContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    width: 100%;
+    text-align: left;
+    text-align-last: left;
+`;
+
+const TranslatorOptionHeader = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+`;
+
+const TranslatorOptionName = styled.span`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+    text-align-last: left;
+    white-space: nowrap;
+`;
+
+const TranslatorOptionDescription = styled.span`
+    display: block;
+    width: 100%;
+    color: #5f6368;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: left;
+    text-align-last: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: keep-all;
+
+    @media (prefers-color-scheme: dark) {
+        color: ${DarkOnSurfaceVariant};
     }
 `;
 

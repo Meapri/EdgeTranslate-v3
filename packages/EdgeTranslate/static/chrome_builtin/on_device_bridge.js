@@ -80,7 +80,10 @@
             );
         }
 
-        const detector = await detectorApi.create();
+        if (!detectChromeBuiltinLanguage._detector) {
+            detectChromeBuiltinLanguage._detector = await detectorApi.create();
+        }
+        const detector = detectChromeBuiltinLanguage._detector;
         const detections = await detector.detect(text);
         const detected = Array.isArray(detections) ? detections[0]?.detectedLanguage : undefined;
         const sourceLanguage = toChromeTranslatorLanguage(detected || "");
@@ -97,6 +100,9 @@
         if (translatorCache.has(key)) return translatorCache.get(key);
 
         const translatorApi = window.Translator;
+        if (!translatorApi || typeof translatorApi.create !== "function") {
+            throw new Error("Chrome built-in Translator API is not available in this browser context.");
+        }
         if (typeof translatorApi.availability === "function") {
             const availability = await translatorApi.availability({
                 sourceLanguage,
@@ -493,7 +499,10 @@
         const detectorApi = window.LanguageDetector;
         if (detectorApi && typeof detectorApi.create === "function" && detectionText) {
             try {
-                const detector = await detectorApi.create();
+                if (!detectGeminiNanoSourceLanguage._detector) {
+                    detectGeminiNanoSourceLanguage._detector = await detectorApi.create();
+                }
+                const detector = detectGeminiNanoSourceLanguage._detector;
                 const detections = await detector.detect(detectionText);
                 const detected = Array.isArray(detections) ? detections[0]?.detectedLanguage : "";
                 const normalized = toChromeTranslatorLanguage(detected || "");
@@ -640,9 +649,17 @@
 
     async function promptGeminiNano(session, prompt, options = {}) {
         const { onUpdate, preferStreaming = true } = options;
-        const promptSession =
-            session && typeof session.clone === "function" ? await session.clone() : session;
+        let promptSession;
         try {
+            promptSession =
+                session && typeof session.clone === "function" ? await session.clone() : session;
+        } catch {
+            promptSession = session;
+        }
+        try {
+            const safeOnUpdate = (value) => {
+                try { onUpdate?.(value); } catch { /* isolate callback errors */ }
+            };
             const readPrompt = async () => {
                 if (preferStreaming && typeof promptSession.promptStreaming === "function") {
                     const stream = await promptSession.promptStreaming(prompt);
@@ -650,19 +667,23 @@
                     if (stream && typeof stream[Symbol.asyncIterator] === "function") {
                         for await (const chunk of stream) {
                             output = appendPromptStreamChunk(output, chunk);
-                            onUpdate?.(normalizeGeminiNanoPartialOutput(output));
+                            safeOnUpdate(normalizeGeminiNanoPartialOutput(output));
                         }
                         return output;
                     }
                     if (stream && typeof stream.getReader === "function") {
                         const reader = stream.getReader();
-                        let done = false;
-                        while (!done) {
-                            const chunk = await reader.read();
-                            done = chunk.done;
-                            if (done) break;
-                            output = appendPromptStreamChunk(output, chunk.value);
-                            onUpdate?.(normalizeGeminiNanoPartialOutput(output));
+                        try {
+                            let done = false;
+                            while (!done) {
+                                const chunk = await reader.read();
+                                done = chunk.done;
+                                if (done) break;
+                                output = appendPromptStreamChunk(output, chunk.value);
+                                safeOnUpdate(normalizeGeminiNanoPartialOutput(output));
+                            }
+                        } finally {
+                            reader.releaseLock();
                         }
                         return output;
                     }

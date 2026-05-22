@@ -39,6 +39,7 @@ class BannerController {
         this._domPageTranslateOptions = { engine: "dom", sl: "auto", tl: "en" };
         this._domResolvedSourceLanguage = null;
         this._domTranslationCache = new Map();
+        this._domTranslationCacheMax = 2000;
         this._domActiveTranslations = 0;
         this._domMaxConcurrentTranslations = 2;
         this._domOnDeviceUnavailable = false;
@@ -106,7 +107,16 @@ class BannerController {
             const from = (params && params.sl) || (params && params.from) || "auto";
             const to = (params && params.tl) || (params && params.to) || "en";
             const streamId = params && params.streamId;
-            return this.translateWithOnDeviceEngine(text, from, to, streamId);
+            const draftTranslation = params && params.draftTranslation;
+            const fastPostEdit = Boolean(params && params.fastPostEdit);
+            return this.translateWithOnDeviceEngine(
+                text,
+                from,
+                to,
+                streamId,
+                draftTranslation,
+                fastPostEdit
+            );
         });
 
         // Kick off DOM fallback/on-device page translation on explicit request
@@ -414,7 +424,7 @@ class BannerController {
         }
     }
 
-    async translateWithOnDeviceEngine(text, from, to, streamId) {
+    async translateWithOnDeviceEngine(text, from, to, streamId, draftTranslation, fastPostEdit) {
         try {
             await this.ensureOnDeviceBridge();
             return await this.requestOnDeviceBridge({
@@ -423,10 +433,15 @@ class BannerController {
                 tl: to,
                 engine: this._domPageTranslateOptions.engine || "geminiNano",
                 streamId,
+                draftTranslation,
+                fastPostEdit,
             });
         } catch (bridgeError) {
             try {
-                return await translateWithChromeOnDevice(text, from, to);
+                return await translateWithChromeOnDevice(text, from, to, {
+                    draftTranslation,
+                    fastPostEdit,
+                });
             } catch (contentError) {
                 throw bridgeError || contentError;
             }
@@ -468,12 +483,10 @@ class BannerController {
 
     getDomPageBatchOptions() {
         if (this._domPageTranslateOptions.engine === "geminiNano") {
-            if (this._domBatchFailureCount >= 2) return { maxChars: 5000, maxItems: 6 };
-            if (this._domBatchFailureCount === 1) return { maxChars: 7000, maxItems: 8 };
-            return { maxChars: 9000, maxItems: 14 };
+            return { maxChars: 4500, maxItems: 1 };
         }
         if (this._domPageTranslateOptions.engine !== "googleAiStudio") return null;
-        return { maxChars: 24000, maxItems: 24 };
+        return { maxChars: 6000, maxItems: 1 };
     }
 
     recordDomPageBatchFailure() {
@@ -724,6 +737,7 @@ class BannerController {
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
         this._domPageBanner = null;
+        this._domTranslationCache.clear();
         this._domTotalTranslationEntries = 0;
         this._domCompletedTranslationEntries = 0;
         if (this.currentTranslator === "dom") this.currentTranslator = null;
@@ -1004,7 +1018,13 @@ class BannerController {
 
                 entries.forEach((entry, index) => {
                     const part = translatedParts[index];
-                    if (part) this._domTranslationCache.set(entry.cacheKey, part);
+                    if (part) {
+                        if (this._domTranslationCache.size >= this._domTranslationCacheMax) {
+                            const oldest = this._domTranslationCache.keys().next().value;
+                            if (oldest !== undefined) this._domTranslationCache.delete(oldest);
+                        }
+                        this._domTranslationCache.set(entry.cacheKey, part);
+                    }
                     if (this.applyDomPageTranslatedEntry(entry, part)) {
                     } else {
                         this.enqueueDomPageGroupTranslation(entry.group);
@@ -1045,7 +1065,13 @@ class BannerController {
                         result.mainMeaning || result.translatedText,
                         1
                     );
-                    if (translated) this._domTranslationCache.set(entry.cacheKey, translated);
+                    if (translated) {
+                        if (this._domTranslationCache.size >= this._domTranslationCacheMax) {
+                            const oldest = this._domTranslationCache.keys().next().value;
+                            if (oldest !== undefined) this._domTranslationCache.delete(oldest);
+                        }
+                        this._domTranslationCache.set(entry.cacheKey, translated);
+                    }
                 }
 
                 if (readableBlockReplacement) {
@@ -1109,7 +1135,13 @@ class BannerController {
                 if (!translated) {
                     const result = await this.translateWithDomPageEngine(item.text, sl, tl);
                     translated = result.mainMeaning || result.translatedText;
-                    if (translated) this._domTranslationCache.set(cacheKey, translated);
+                    if (translated) {
+                        if (this._domTranslationCache.size >= this._domTranslationCacheMax) {
+                            const oldest = this._domTranslationCache.keys().next().value;
+                            if (oldest !== undefined) this._domTranslationCache.delete(oldest);
+                        }
+                        this._domTranslationCache.set(cacheKey, translated);
+                    }
                 }
                 if (translated && item.node.parentElement === item.parent) {
                     item.node.nodeValue = translated;

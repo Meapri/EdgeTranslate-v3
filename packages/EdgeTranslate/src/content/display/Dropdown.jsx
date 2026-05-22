@@ -241,13 +241,14 @@ const InActiveStyle = css`
 `;
 const Item = styled.li`
     display: flex;
-    align-items: center;
+    align-items: stretch;
+    min-width: 0;
     min-height: 40px;
-    padding: 0 12px;
+    padding: 8px 12px;
     clear: both;
     font-weight: 600;
     line-height: 1.4;
-    white-space: nowrap;
+    white-space: normal;
     cursor: pointer;
     border-radius: 8px;
     -webkit-user-select: none;

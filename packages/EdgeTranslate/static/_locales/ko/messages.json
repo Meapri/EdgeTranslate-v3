@@ -347,6 +347,10 @@
         "message": "Google 번역",
         "description": "Google 번역"
     },
+    "GoogleTranslateDescription": {
+        "message": "빠른 네트워크 번역",
+        "description": "Google 번역 메뉴 설명"
+    },
     "GoogleTranslateShort": {
         "message": "Google",
         "description": "Google"
@@ -354,6 +358,10 @@
     "HybridTranslate": {
         "message": "하이브리드 번역",
         "description": "하이브리드 번역"
+    },
+    "HybridTranslateDescription": {
+        "message": "결과 영역별로 번역기를 나눠 사용",
+        "description": "하이브리드 번역 메뉴 설명"
     },
     "HybridTranslateShort": {
         "message": "하이브리드",
@@ -1287,6 +1295,10 @@
         "message": "AI 번역",
         "description": "사용자가 설정하는 온디바이스 또는 Gemini 번역 공급자"
     },
+    "LocalTranslateDescription": {
+        "message": "선택한 AI 공급자를 직접 사용",
+        "description": "AI 번역 메뉴 설명"
+    },
     "LocalTranslateShort": {
         "message": "AI",
         "description": "AI 번역 약칭"
@@ -1303,8 +1315,12 @@
         "message": "API 키",
         "description": "Google AI Studio 모드에 사용할 API 키"
     },
+    "LocalTranslatorOpenAIApiKey": {
+        "message": "OpenAI API 키",
+        "description": "OpenAI API 모드에 사용할 API 키"
+    },
     "LocalTranslatorHelp": {
-        "message": "Chrome Gemini Nano는 온디바이스 AI 번역에 사용하고, Google AI Studio는 직접 입력한 API 키와 선택한 Gemini 모델을 사용합니다. AI 단어 번역은 모델이 제공할 수 있으면 상세 의미, 정의, 예문을 함께 표시합니다.",
+        "message": "Chrome Gemini Nano는 온디바이스 AI 번역에 사용하고, Google AI Studio는 직접 입력한 Gemini API 키를, OpenAI API는 직접 입력한 OpenAI API 키를 사용합니다. AI 단어 번역은 모델이 제공할 수 있으면 상세 의미, 정의, 예문을 함께 표시합니다.",
         "description": "AI 번역 도움말"
     },
     "LocalTranslatorMode": {
@@ -1328,8 +1344,16 @@
         "message": "Google AI Studio",
         "description": "사용자가 입력한 Google AI Studio API 키로 Gemini API를 사용합니다."
     },
+    "LocalTranslatorModeOpenAI": {
+        "message": "OpenAI API",
+        "description": "사용자가 입력한 OpenAI API 키로 OpenAI API를 사용합니다."
+    },
     "LocalTranslatorModel": {
         "message": "AI 모델",
         "description": "Google AI Studio 모델 이름"
+    },
+    "LocalTranslatorOpenAIModel": {
+        "message": "OpenAI 모델",
+        "description": "OpenAI 모델 이름"
     }
 }

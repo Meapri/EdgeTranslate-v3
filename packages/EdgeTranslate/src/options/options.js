@@ -68,6 +68,10 @@ window.onload = () => {
         for (let element of [...inputElements]) {
             let settingItemPath = element.getAttribute("setting-path").split(/\s/g);
             let settingItemValue = getSetting(result, settingItemPath);
+            if (settingItemValue === undefined) {
+                settingItemValue = getSetting(DEFAULT_SETTINGS, settingItemPath);
+                saveOption(result, settingItemPath, settingItemValue);
+            }
             if (
                 settingItemPath.join(" ") === "LocalTranslatorConfig mode" &&
                 (settingItemValue === "geminiNano" || settingItemValue === "endpoint")
@@ -155,11 +159,18 @@ window.onload = () => {
 };
 
 function syncLocalTranslatorFields(mode) {
-    const googleAiStudioFields = document.querySelectorAll("[data-local-mode='googleAiStudio']");
-    const googleAiStudioRow = document.getElementById("local-translator-google-settings");
-    if (googleAiStudioRow) googleAiStudioRow.hidden = mode !== "googleAiStudio";
-    googleAiStudioFields.forEach((element) => {
-        element.hidden = mode !== "googleAiStudio";
+    ["googleAiStudio", "openai"].forEach((localMode) => {
+        const fields = document.querySelectorAll(`[data-local-mode='${localMode}']`);
+        const row = document.getElementById(
+            localMode === "googleAiStudio"
+                ? "local-translator-google-settings"
+                : "local-translator-openai-settings"
+        );
+        const hidden = mode !== localMode;
+        if (row) row.hidden = hidden;
+        fields.forEach((element) => {
+            element.hidden = hidden;
+        });
     });
 }
 

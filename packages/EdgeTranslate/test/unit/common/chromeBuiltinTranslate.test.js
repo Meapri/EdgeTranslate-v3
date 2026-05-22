@@ -62,13 +62,105 @@ describe("Chrome built-in translator helper", () => {
         // 2 creates for the first language pair (warmup + real), then reused
         expect(createMock).toHaveBeenCalledTimes(2);
         // The second create (real session) should have the system prompt
-        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toMatch(
-            /professional translator/i
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toContain(
+            "Translate naturally while preserving meaning"
         );
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toContain(
+            "Output only the translation"
+        );
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toContain(
+            "subtitle cue numbers"
+        );
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toContain(
+            "Preserve numeric literals"
+        );
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).toContain(
+            "Preserve proper nouns"
+        );
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).not.toContain(
+            "translate warp as"
+        );
+        expect(createMock.mock.calls[1][0].initialPrompts[0].content).not.toContain("Korean");
+        expect(createMock.mock.calls[1][0]).toMatchObject({
+            temperature: 0,
+            topK: 1,
+        });
         expect(promptMock.mock.calls[0][0]).toContain("hello");
         expect(promptMock.mock.calls[1][0]).toContain("world");
         expect(first.mainMeaning).toBe("안녕");
         expect(second.mainMeaning).toBe("세계");
+    });
+
+    it("reuses cached Gemini Nano results for identical on-device translation requests", async () => {
+        const promptMock = jest.fn().mockResolvedValueOnce('{"translation":"캐시된 결과"}');
+        mockGeminiNano(promptMock);
+
+        const first = await translateWithChromeOnDevice("consistent cache probe", "nl", "ko");
+        const updates = [];
+        const second = await translateWithChromeOnDevice("consistent cache probe", "nl", "ko", {
+            onUpdate: (partial) => updates.push(partial),
+        });
+
+        expect(first.mainMeaning).toBe("캐시된 결과");
+        expect(second.mainMeaning).toBe("캐시된 결과");
+        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(updates).toMatchObject([{ mainMeaning: "캐시된 결과", streamState: "committed" }]);
+    });
+
+    it("post-edits a supplied draft translation with Gemini Nano", async () => {
+        const promptMock = jest.fn().mockResolvedValueOnce('{"translation":"기존 방식으로는 워프를 구현하기 어려웠습니다."}');
+        mockGeminiNano(promptMock);
+
+        const result = await translateWithChromeOnDevice(
+            "The old method had issues with achieving the warp:",
+            "pt",
+            "ko",
+            {
+                draftTranslation: "구형 방식은 휘어짐을 달성하는 데 문제가 있었습니다:",
+            }
+        );
+
+        expect(result.mainMeaning).toBe("기존 방식으로는 워프를 구현하기 어려웠습니다.");
+        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(promptMock.mock.calls[0][0]).toContain("Use the draft only as a candidate");
+        expect(promptMock.mock.calls[0][0]).toContain("SOURCE:");
+        expect(promptMock.mock.calls[0][0]).toContain("DRAFT:");
+        expect(promptMock.mock.calls[0][0]).toContain("휘어짐");
+    });
+
+    it("uses non-streaming prompts for fast post-edit drafts", async () => {
+        const promptMock = jest.fn().mockResolvedValueOnce('{"translation":"빠른 후편집"}');
+        const promptStreamingMock = jest.fn().mockResolvedValueOnce(["should not stream"]);
+        mockGeminiNano(promptMock, { promptStreaming: promptStreamingMock });
+
+        const result = await translateWithChromeOnDevice("source", "bg", "ko", {
+            draftTranslation: "초안",
+            fastPostEdit: true,
+        });
+
+        expect(result.mainMeaning).toBe("빠른 후편집");
+        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(promptStreamingMock).not.toHaveBeenCalled();
+    });
+
+    it("removes an echoed source line from Gemini Nano post-edits", async () => {
+        const source =
+            "「会員アカウント」に対する不正ログインの発生のご報告とポケモンセンターオンラインを安全にご利用いただくためのお願い";
+        const translated =
+            "「회원 계정」에 대한 부정 로그인 발생 보고 및 포켓몬 센터 온라인을 안전하게 이용하기 위한 안내 말씀";
+        const promptMock = jest.fn().mockResolvedValueOnce(
+            JSON.stringify({
+                translation: `${source}\n\n${translated}`,
+            })
+        );
+        mockGeminiNano(promptMock);
+
+        const result = await translateWithChromeOnDevice(source, "fi", "ko", {
+            draftTranslation: translated,
+        });
+
+        expect(result.mainMeaning).toBe(translated);
+        expect(result.mainMeaning).not.toContain(source);
     });
 
     it("warms up Chrome Gemini Nano sessions without prompting", async () => {
@@ -155,35 +247,39 @@ describe("Chrome built-in translator helper", () => {
         expect(promptMock.mock.calls[0][0]).toContain(source);
     });
 
-    it("sends very long paragraphs as-is without splitting", async () => {
-        const promptMock = jest.fn().mockResolvedValueOnce("komplette deutsche Übersetzung");
+    it("splits very long paragraphs into stable prompts and rejoins their translations", async () => {
+        const promptMock = jest
+            .fn()
+            .mockResolvedValueOnce("erste Hälfte")
+            .mockResolvedValueOnce("zweite Hälfte")
+            .mockResolvedValueOnce("dritte Hälfte")
+            .mockResolvedValueOnce("vierte Hälfte");
         mockGeminiNano(promptMock);
         const longParagraph = `${"長い説明です。".repeat(420)}終わりです。`;
 
         const result = await translateWithChromeOnDevice(longParagraph, "ja", "de");
 
-        expect(result.mainMeaning).toBe("komplette deutsche Übersetzung");
-        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(result.mainMeaning).toBe("erste Hälftezweite Hälftedritte Hälftevierte Hälfte");
+        expect(promptMock).toHaveBeenCalledTimes(4);
         expect(promptMock.mock.calls[0][0]).toContain("長い説明です。");
-        expect(promptMock.mock.calls[0][0]).toContain(
-            "→ German"
-        );
+        expect(promptMock.mock.calls[0][0]).toContain("Target language: German");
     });
 
-    it("sends multi-paragraph text as-is in a single prompt", async () => {
+    it("splits very long multi-paragraph text and preserves paragraph breaks", async () => {
         const promptMock = jest
             .fn()
-            .mockResolvedValueOnce("premier paragraphe\n\ndeuxième paragraphe");
+            .mockResolvedValueOnce("premier paragraphe")
+            .mockResolvedValueOnce("deuxième paragraphe");
         mockGeminiNano(promptMock);
-        const source = "第一段落です。\n\n第二段落です。";
+        const source = `${"第一段落です。".repeat(90)}\n\n${"第二段落です。".repeat(90)}`;
 
         const result = await translateWithChromeOnDevice(source, "ja", "fr");
 
         expect(result.mainMeaning).toBe("premier paragraphe\n\ndeuxième paragraphe");
-        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(promptMock).toHaveBeenCalledTimes(2);
         expect(promptMock.mock.calls[0][0]).toContain("第一段落です。");
-        expect(promptMock.mock.calls[0][0]).toContain("第二段落です。");
-        expect(promptMock.mock.calls[0][0]).toContain("Do not omit");
+        expect(promptMock.mock.calls[1][0]).toContain("第二段落です。");
+        expect(promptMock.mock.calls[0][0]).toContain("Target language: French");
     });
 
     it("sends multi-line text as-is in a single prompt", async () => {
@@ -233,9 +329,7 @@ describe("Chrome built-in translator helper", () => {
             "포켓몬센터 온라인을 이용해 주셔서 감사합니다. 부정하게 입수한 로그인 정보를 사용했습니다."
         );
         expect(promptMock).toHaveBeenCalledTimes(1);
-        expect(promptMock.mock.calls[0][0]).toContain(
-            "→ Korean"
-        );
+        expect(promptMock.mock.calls[0][0]).toContain("Target language: Korean");
     });
 
     it("translates marked Gemini Nano segments without sentence chunking", async () => {
@@ -286,7 +380,7 @@ describe("Chrome built-in translator helper", () => {
         expect(createMock.mock.calls[1][0]).toMatchObject({
             expectedInputs: [{ type: "text", languages: ["en", "ja"] }],
         });
-        expect(promptMock.mock.calls[0][0]).toContain("→ Ukrainian");
+        expect(promptMock.mock.calls[0][0]).toContain("Target language: Ukrainian");
         expect(promptMock.mock.calls[0][0]).not.toContain(
             "<<<EDGE_TRANSLATE_SEGMENT"
         );
@@ -345,7 +439,7 @@ describe("Chrome built-in translator helper", () => {
                 translation: "달리다",
                 detailedMeanings: [{ pos: "verb", meaning: "빠르게 움직이다" }],
                 definitions: [{ pos: "verb", meaning: "발로 빠르게 이동하다" }],
-                examples: [{ source: "I run.", target: "나는 달린다." }],
+                examples: [{ sourceExample: "I run.", targetExample: "나는 달린다." }],
             })
         );
         mockGeminiNano(promptMock);
@@ -357,7 +451,8 @@ describe("Chrome built-in translator helper", () => {
             definitions: [{ pos: "verb", meaning: "발로 빠르게 이동하다" }],
             examples: [{ source: "I run.", target: "나는 달린다." }],
         });
-        expect(promptMock.mock.calls[0][0]).toContain("translation");
+        expect(promptMock.mock.calls[0][0]).toContain("Source language:");
+        expect(promptMock.mock.calls[0][0]).toContain("Target language:");
         expect(promptMock.mock.calls[0][0]).not.toContain("Pronunciation");
         expect(promptMock.mock.calls[0][0]).not.toContain("tPronunciation");
     });
@@ -378,8 +473,7 @@ describe("Chrome built-in translator helper", () => {
         expect(result.mainMeaning).toBe(
             "Rapport om obehörig inloggning på medlemskonto och vägledning för säker användning"
         );
-        expect(promptMock.mock.calls[0][0]).toContain("→ Swedish");
-        expect(promptMock.mock.calls[0][0]).toContain("Do not omit");
+        expect(promptMock.mock.calls[0][0]).toContain("Target language: Swedish");
         expect(promptMock.mock.calls[0][0]).not.toContain("One word or short term");
     });
 
@@ -396,18 +490,12 @@ describe("Chrome built-in translator helper", () => {
     });
 
 
-    it("instructs Korean Gemini Nano output to avoid mixed-script Japanese or Chinese fragments", async () => {
-        const promptMock = jest.fn()
-            .mockResolvedValueOnce(
-                JSON.stringify({
-                    translation: "国勢調査 사칭 의심스러운 이메일",
-                })
-            )
-            .mockResolvedValueOnce(
-                JSON.stringify({
-                    translation: "인구총조사 사칭 의심스러운 이메일",
-                })
-            );
+    it("does not retry Korean Gemini Nano output when source-script fragments remain", async () => {
+        const promptMock = jest.fn().mockResolvedValueOnce(
+            JSON.stringify({
+                translation: "国勢調査 사칭 의심스러운 이메일",
+            })
+        );
         mockGeminiNano(promptMock);
 
         const result = await translateWithChromeOnDevice(
@@ -416,14 +504,11 @@ describe("Chrome built-in translator helper", () => {
             "ko"
         );
 
-        expect(result.mainMeaning).toBe("인구총조사 사칭 의심스러운 이메일");
-        expect(promptMock).toHaveBeenCalledTimes(2);
-        expect(promptMock.mock.calls[0][0]).toContain(
-            "→ Korean"
-        );
+        expect(result.mainMeaning).toBe("国勢調査 사칭 의심스러운 이메일");
+        expect(promptMock).toHaveBeenCalledTimes(1);
+        expect(promptMock.mock.calls[0][0]).toContain("Target language: Korean");
         expect(promptMock.mock.calls[0][0]).not.toContain("One word or short term");
     });
 
 
 });
-

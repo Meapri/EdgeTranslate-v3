@@ -69,7 +69,7 @@ describe("DOM page translation context grouping", () => {
         ]);
     });
 
-    it("prefers replacing simple readable paragraphs as one full-context block", () => {
+    it("preserves inline formatting instead of replacing formatted paragraphs as plain text", () => {
         document.body.innerHTML = `
             <article>
                 <p id="sample">
@@ -85,11 +85,7 @@ describe("DOM page translation context grouping", () => {
         );
         const [group] = buildContextTranslationGroups(nodes);
 
-        expect(createReadableBlockReplacement(group)).toMatchObject({
-            block: document.getElementById("sample"),
-            sourceText:
-                "Out of the box, the Kindle is good at only one thing. Well, two. It lets me buy books from Amazon and read them with very little friction.",
-        });
+        expect(createReadableBlockReplacement(group)).toBeNull();
     });
 
     it("does not whole-replace blocks that contain links or controls", () => {

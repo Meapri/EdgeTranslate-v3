@@ -1303,8 +1303,12 @@
         "message": "API-ключ",
         "description": "API-ключ для режима Google AI Studio."
     },
+    "LocalTranslatorOpenAIApiKey": {
+        "message": "API-ключ OpenAI",
+        "description": "API-ключ для режима OpenAI API."
+    },
     "LocalTranslatorHelp": {
-        "message": "Используйте Chrome Gemini Nano для AI-перевода на устройстве или Google AI Studio со своим API-ключом и выбранной моделью Gemini. Для отдельных слов AI-перевод показывает значения, определения и примеры, если модель может их предоставить.",
+        "message": "Используйте Chrome Gemini Nano для AI-перевода на устройстве, Google AI Studio со своим ключом Gemini API или OpenAI API со своим ключом OpenAI API. Для отдельных слов AI-перевод показывает значения, определения и примеры, если модель может их предоставить.",
         "description": "Справка по AI-переводу."
     },
     "LocalTranslatorMode": {
@@ -1328,8 +1332,16 @@
         "message": "Google AI Studio",
         "description": "Использовать Gemini API с вашим ключом Google AI Studio."
     },
+    "LocalTranslatorModeOpenAI": {
+        "message": "OpenAI API",
+        "description": "Использовать OpenAI API с вашим ключом OpenAI API."
+    },
     "LocalTranslatorModel": {
         "message": "AI-модель",
         "description": "Название модели Google AI Studio."
+    },
+    "LocalTranslatorOpenAIModel": {
+        "message": "Модель OpenAI",
+        "description": "Название модели OpenAI."
     }
 }

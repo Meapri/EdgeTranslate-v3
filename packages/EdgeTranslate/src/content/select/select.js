@@ -243,14 +243,17 @@ function getSelection() {
             !!document.getElementById("viewer") && !!document.getElementById("outerContainer");
         if (isPdfViewer && text) {
             text = normalizePdfSelectionText(text);
+        } else {
+            const strictText = getStrictSelectionText(selection);
+            if (strictText) text = strictText;
         }
 
         const lastRange = selection.getRangeAt(selection.rangeCount - 1);
         textRole = inferSelectionTextRole(lastRange);
         textSegments = isPdfViewer ? [] : getSelectionTextSegments(selection);
         const structuredText = isPdfViewer ? "" : buildSelectionTextFromSegments(textSegments);
-        if (structuredText) {
-            text = structuredText;
+        if (structuredText && !selectionTextMatchesSegments(text, structuredText)) {
+            textSegments = [];
         }
         // If the user selects something in a shadow dom, the endContainer will be the HTML element and the position will be [0,0]. In this situation, we set the position undefined to avoid relocating the result panel.
         if (lastRange.endContainer !== document.documentElement) {
@@ -289,6 +292,32 @@ function getSelectionTextSegments(selection) {
         .filter((segment) => segment.text);
 }
 
+function getStrictSelectionText(selection) {
+    if (!selection || !selection.rangeCount) return "";
+    const parts = [];
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+        const range = selection.getRangeAt(index);
+        const root =
+            range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+                ? range.commonAncestorContainer.parentElement
+                : range.commonAncestorContainer;
+        if (!root) continue;
+        const nodes =
+            range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+                ? [range.commonAncestorContainer]
+                : collectTextNodesAndBreaksInRange(root, range);
+        for (const node of nodes) {
+            if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "BR") {
+                parts.push("\n");
+                continue;
+            }
+            const text = getSelectedTextForNode(range, node);
+            if (text) parts.push(text);
+        }
+    }
+    return normalizeSelectionSegmentText(parts.join(""));
+}
+
 function normalizeSelectionSegmentText(text) {
     return String(text || "")
         .replace(/\r\n?/g, "\n")
@@ -307,6 +336,16 @@ function buildSelectionTextFromSegments(segments) {
         .filter(Boolean)
         .join("\n\n")
         .trim();
+}
+
+function normalizeSelectionComparisonText(text) {
+    return normalizeSelectionSegmentText(text).replace(/\s+/g, " ").trim();
+}
+
+function selectionTextMatchesSegments(selectionText, segmentedText) {
+    const selection = normalizeSelectionComparisonText(selectionText);
+    const segmented = normalizeSelectionComparisonText(segmentedText);
+    return Boolean(selection && segmented && selection === segmented);
 }
 
 function isBlockLikeSelectionElement(element) {
@@ -425,6 +464,15 @@ function collectTextNodesAndBreaksInRange(root, range) {
 
 function getSelectedTextForNode(range, node) {
     if (!node || node.nodeType !== Node.TEXT_NODE) return "";
+    if (range.comparePoint) {
+        try {
+            const beforeStart = range.comparePoint(node, node.nodeValue.length) < 0;
+            const afterEnd = range.comparePoint(node, 0) > 0;
+            if (beforeStart || afterEnd) return "";
+        } catch (error) {
+            void error;
+        }
+    }
     let start = 0;
     let end = node.nodeValue.length;
     if (node === range.startContainer) start = range.startOffset;
