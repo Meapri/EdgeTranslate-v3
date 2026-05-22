@@ -2,13 +2,15 @@ import { TranslationResult } from "../types";
 import { LRUCache } from "../utils/lru";
 import { fnv1a32 } from "../utils/hash";
 
-export type LocalTranslatorMode = "chromeBuiltin" | "googleAiStudio";
+export type LocalTranslatorMode = "chromeBuiltin" | "googleAiStudio" | "openai";
 
 export type LocalTranslatorConfig = {
     enabled?: boolean;
     mode?: LocalTranslatorMode | string;
     apiKey?: string;
     model?: string;
+    openaiApiKey?: string;
+    openaiModel?: string;
     timeoutMs?: number | string;
 };
 
@@ -87,9 +89,26 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
 );
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-06-25-01";
+const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-06-25-08";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
+const AI_TRANSLATION_SYSTEM_PROMPT = [
+    "Translate naturally while preserving meaning, tone, intent, nuance, register, context, and character voice.",
+    "Output only the translation, or only the exact JSON object when JSON is requested. Do not add notes, alternatives, labels, Markdown, or process narration.",
+    "Preserve structure exactly: subtitle cue numbers, timestamps, cue order, block boundaries, line breaks, speaker labels, tags, escaped entities, markup, tables, keys, placeholders, code spans, URLs, file paths, commands, and formatting tokens.",
+    "Preserve numeric literals, dates, times, measurements, versions, ratings, prices, percentages, ranges, IDs, model names, product names, file names, and issue numbers exactly unless the target language has a required conventional format.",
+    "Preserve proper nouns by default: personal names, organizations, brands, services, places, titles, works, events, laws, technical terms, and account names. Use a standard established target-language form only when it is clearly conventional in context.",
+    "Do not phoneticize, respell, translate, explain, or normalize unfamiliar names, dates, or numbers. Keep forms like 2024, GPT-5.5, sk-proj, iPhone, GitHub, and Pokemon-style names as written unless the source itself translates them.",
+    "Translate only human-language payload. Resolve ambiguity conservatively from local context, keeping subtext, politeness, technical precision, humor, vulgarity, fragments, interruptions, and intentional odd phrasing.",
+].join(" ");
+
+const DICTIONARY_OUTPUT_INSTRUCTION = [
+    "Dictionary task: this input is a single word or short term. Return only one valid JSON object with this exact shape:",
+    '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
+    "Use the target language for translation, meanings, definitions, and translated examples. Keep source examples in the source language. For ordinary dictionary terms, provide at least one detailedMeaning, one definition, and two examples whenever possible. If a field is truly not applicable, use an empty array rather than prose. Do not wrap the JSON in Markdown.",
+].join(" ");
 
 
 class RequestLimiter {
@@ -118,11 +137,12 @@ const localRequestLimiter = new RequestLimiter(DEFAULT_MAX_CONCURRENT_REQUESTS);
 function normalizeMode(mode?: string): LocalTranslatorMode {
     if (mode === "chromeBuiltin" || mode === "geminiNano") return "chromeBuiltin";
     if (mode === "googleAiStudio") return "googleAiStudio";
+    if (mode === "openai") return "openai";
     return "chromeBuiltin";
 }
 
-function normalizeModel(model?: string) {
-    return (model || DEFAULT_GOOGLE_AI_STUDIO_MODEL).trim() || DEFAULT_GOOGLE_AI_STUDIO_MODEL;
+function normalizeModel(model: string | undefined, fallback: string) {
+    return (model || fallback).trim() || fallback;
 }
 
 function toLanguageName(language: string) {
@@ -176,7 +196,7 @@ function isDictionaryCandidate(text: string) {
     const cjkChars = trimmed.match(
         /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF]/g
     );
-    if (cjkChars && cjkChars.length > 8) return false;
+    if (cjkChars && cjkChars.length > 4) return false;
 
     return trimmed.split(/\s+/).length <= 2;
 }
@@ -246,8 +266,31 @@ function parsePlainTranslationOutput(output: string) {
     );
 }
 
+function extractOpenAIMessageContent(message: any) {
+    const content = message?.content;
+    if (typeof content === "string") return content.trim();
+    if (Array.isArray(content)) {
+        return content
+            .map((part) => {
+                if (typeof part === "string") return part;
+                return part?.text || "";
+            })
+            .join("")
+            .trim();
+    }
+    return "";
+}
+
 function asArray(value: any) {
     return Array.isArray(value) ? value : [];
+}
+
+function getFirstArray(payload: any, keys: string[]) {
+    for (const key of keys) {
+        const value = payload?.[key];
+        if (Array.isArray(value)) return value;
+    }
+    return [];
 }
 
 function parseStructuredDictionaryOutput(output: string, fallbackText: string) {
@@ -262,34 +305,84 @@ function parseStructuredDictionaryOutput(output: string, fallbackText: string) {
             payload.translation || payload.mainMeaning || payload.translatedText || ""
         ).trim();
         if (!mainMeaning) return null;
+        const pickString = (item: any, keys: string[]) => {
+            for (const key of keys) {
+                const value = item?.[key];
+                if (value !== undefined && value !== null && String(value).trim()) {
+                    return String(value).trim();
+                }
+            }
+            return null;
+        };
+        const detailedMeanings = getFirstArray(payload, [
+            "detailedMeanings",
+            "detailed_meanings",
+            "meanings",
+            "senses",
+        ])
+            .map((item) => {
+                if (typeof item === "string") {
+                    return { pos: "", meaning: item.trim(), synonyms: [] };
+                }
+                return {
+                    pos: String(item?.pos || item?.partOfSpeech || item?.part_of_speech || "")
+                        .trim(),
+                    meaning: String(item?.meaning || item?.definition || item?.translation || "")
+                        .trim(),
+                    synonyms: asArray(item?.synonyms)
+                        .map((word) => String(word || "").trim())
+                        .filter(Boolean),
+                };
+            })
+            .filter((item) => item.meaning);
+        const definitions = getFirstArray(payload, ["definitions", "definitionEntries"])
+            .map((item) => {
+                if (typeof item === "string") {
+                    return { pos: "", meaning: item.trim(), example: "", synonyms: [] };
+                }
+                return {
+                    pos: String(item?.pos || item?.partOfSpeech || item?.part_of_speech || "")
+                        .trim(),
+                    meaning: String(item?.meaning || item?.definition || item?.translation || "")
+                        .trim(),
+                    example: String(item?.example || item?.sourceExample || item?.sentence || "")
+                        .trim(),
+                    synonyms: asArray(item?.synonyms)
+                        .map((word) => String(word || "").trim())
+                        .filter(Boolean),
+                };
+            })
+            .filter((item) => item.meaning);
+        const examples = getFirstArray(payload, ["examples", "exampleSentences"])
+            .map((item) => {
+                if (typeof item === "string") {
+                    return { source: item.trim(), target: null };
+                }
+                return {
+                    source: pickString(item, [
+                        "source",
+                        "sourceExample",
+                        "sourceText",
+                        "example",
+                        "sentence",
+                    ]),
+                    target: pickString(item, [
+                        "target",
+                        "targetExample",
+                        "targetText",
+                        "translation",
+                        "translated",
+                    ]),
+                };
+            })
+            .filter((item) => item.source || item.target);
+
         return {
             originalText: fallbackText,
             mainMeaning,
-            detailedMeanings: asArray(payload.detailedMeanings)
-                .map((item) => ({
-                    pos: String(item?.pos || "").trim(),
-                    meaning: String(item?.meaning || "").trim(),
-                    synonyms: asArray(item?.synonyms)
-                        .map((word) => String(word || "").trim())
-                        .filter(Boolean),
-                }))
-                .filter((item) => item.meaning),
-            definitions: asArray(payload.definitions)
-                .map((item) => ({
-                    pos: String(item?.pos || "").trim(),
-                    meaning: String(item?.meaning || "").trim(),
-                    example: String(item?.example || "").trim(),
-                    synonyms: asArray(item?.synonyms)
-                        .map((word) => String(word || "").trim())
-                        .filter(Boolean),
-                }))
-                .filter((item) => item.meaning),
-            examples: asArray(payload.examples)
-                .map((item) => ({
-                    source: item?.source ? String(item.source).trim() : null,
-                    target: item?.target ? String(item.target).trim() : null,
-                }))
-                .filter((item) => item.source || item.target),
+            detailedMeanings,
+            definitions,
+            examples,
         } as TranslationResult;
     } catch {
         return null;
@@ -301,6 +394,8 @@ class LocalTranslator {
     private mode: LocalTranslatorMode = "chromeBuiltin";
     private apiKey = "";
     private model = DEFAULT_GOOGLE_AI_STUDIO_MODEL;
+    private openaiApiKey = "";
+    private openaiModel = DEFAULT_OPENAI_MODEL;
     private timeoutMs = DEFAULT_TIMEOUT_MS;
     private cache = new LRUCache<string, TranslationResult>({ max: 200, ttl: 10 * 60 * 1000 });
     private inflight = new Map<string, Promise<TranslationResult>>();
@@ -314,7 +409,9 @@ class LocalTranslator {
         this.enabled = Boolean(config.enabled);
         this.mode = normalizeMode(config.mode);
         this.apiKey = (config.apiKey || "").trim();
-        this.model = normalizeModel(config.model);
+        this.model = normalizeModel(config.model, DEFAULT_GOOGLE_AI_STUDIO_MODEL);
+        this.openaiApiKey = (config.openaiApiKey || "").trim();
+        this.openaiModel = normalizeModel(config.openaiModel, DEFAULT_OPENAI_MODEL);
         this.timeoutMs = Number(config.timeoutMs) || DEFAULT_TIMEOUT_MS;
         this.cache.clear();
         this.inflight.clear();
@@ -328,6 +425,10 @@ class LocalTranslator {
         }
         if (this.mode === "googleAiStudio") {
             if (!this.apiKey || !this.model) return new Set<string>();
+            return new Set(SUPPORTED_LANGUAGE_CODES);
+        }
+        if (this.mode === "openai") {
+            if (!this.openaiApiKey || !this.openaiModel) return new Set<string>();
             return new Set(SUPPORTED_LANGUAGE_CODES);
         }
         return new Set<string>();
@@ -364,10 +465,25 @@ class LocalTranslator {
                 },
             };
         }
+        if (this.mode === "openai" && !this.openaiApiKey) {
+            throw {
+                errorType: "CONFIG_ERR",
+                errorCode: "OPENAI_API_KEY_MISSING",
+                errorMsg: "OpenAI API key is not configured.",
+                errorAct: {
+                    api: "local",
+                    mode: "openai",
+                    action: "translate",
+                    text,
+                    from,
+                    to,
+                },
+            };
+        }
 
-        const key = `L|${LOCAL_TRANSLATOR_PROMPT_VERSION}|${this.mode}|${from}|${to}|${fnv1a32(
-            text
-        )}`;
+        const providerModel =
+            this.mode === "openai" ? this.openaiModel : this.mode === "googleAiStudio" ? this.model : "";
+        const key = `L|${LOCAL_TRANSLATOR_PROMPT_VERSION}|${this.mode}|${providerModel}|${from}|${to}|${fnv1a32(text)}`;
         const cached = this.cache.get(key);
         if (cached) return cached;
 
@@ -392,6 +508,9 @@ class LocalTranslator {
         }
         if (this.mode === "googleAiStudio") {
             return this.requestGoogleAiStudioTranslation(text, from, to);
+        }
+        if (this.mode === "openai") {
+            return this.requestOpenAiTranslation(text, from, to);
         }
         return this.requestChromeBuiltinTranslation(text, from, to);
     }
@@ -487,38 +606,22 @@ class LocalTranslator {
         const sourceLanguage = toLanguageName(from);
         const targetLanguage = toLanguageName(to);
         const scriptRule = getScriptConstraint(to);
-
-        if (isDictionaryCandidate(text)) {
-            const parts = [
-                `Translate from ${sourceLanguage} to ${targetLanguage}. Return strict JSON only.`,
-                '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
-                scriptRule,
-                "",
-                text,
-            ];
-            return parts.filter(Boolean).join("\n");
-        }
-
-        if (/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(text)) {
-            const parts = [
-                `Translate from ${sourceLanguage} to ${targetLanguage}. Return translated text only.`,
-                "Copy each <<<EDGE_TRANSLATE_SEGMENT_N role=...>>> marker exactly, then translate the text after it.",
-                "Preserve layout: line breaks, list items, bullets, numbering. Do not shorten or summarize.",
-                scriptRule,
-                "",
-                text,
-            ];
-            return parts.filter(Boolean).join("\n");
-        }
-
+        const dictionaryInstruction = isDictionaryCandidate(text)
+            ? DICTIONARY_OUTPUT_INSTRUCTION
+            : "";
         const parts = [
-            `Translate from ${sourceLanguage} to ${targetLanguage}. Return translated text only.`,
-            "Preserve layout: paragraph breaks, line breaks, list items, bullets, numbering. Do not shorten or summarize.",
+            `Source language: ${sourceLanguage}.`,
+            `Target language: ${targetLanguage}.`,
             scriptRule,
+            dictionaryInstruction,
             "",
             text,
         ];
         return parts.filter(Boolean).join("\n");
+    }
+
+    private buildOpenAiPrompt(text: string, from: string, to: string) {
+        return this.buildGoogleAiStudioPrompt(text, from, to);
     }
 
     private parseGoogleAiStudioResponse(payload: any) {
@@ -532,11 +635,15 @@ class LocalTranslator {
         return (payload?.text || payload?.output || "").trim();
     }
 
+    private parseOpenAiResponse(payload: any) {
+        return extractOpenAIMessageContent(payload?.choices?.[0]?.message);
+    }
+
     private buildGoogleAiStudioGenerationConfig() {
         const config: Record<string, any> = {
             temperature: 0,
         };
-        if (!/^gemma-/i.test(this.model)) {
+        if (/^gemini-2\.5-/i.test(this.model)) {
             config.thinkingConfig = { thinkingBudget: 0 };
         }
         return config;
@@ -558,6 +665,9 @@ class LocalTranslator {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({
+                        systemInstruction: {
+                            parts: [{ text: AI_TRANSLATION_SYSTEM_PROMPT }],
+                        },
                         contents: [
                             {
                                 role: "user",
@@ -611,6 +721,86 @@ class LocalTranslator {
                     api: "local",
                     mode: "googleAiStudio",
                     model: this.model,
+                    action: "translate",
+                    text,
+                    from,
+                    to,
+                },
+            };
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
+    private async requestOpenAiTranslation(text: string, from: string, to: string) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const response = await fetch(OPENAI_CHAT_COMPLETIONS_ENDPOINT, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${this.openaiApiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    model: this.openaiModel,
+                    messages: [
+                        {
+                            role: "system",
+                            content: AI_TRANSLATION_SYSTEM_PROMPT,
+                        },
+                        {
+                            role: "user",
+                            content: this.buildOpenAiPrompt(text, from, to),
+                        },
+                    ],
+                    ...(isDictionaryCandidate(text)
+                        ? { response_format: { type: "json_object" } }
+                        : {}),
+                }),
+                signal: controller.signal,
+            });
+
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(
+                    payload?.error?.message || `OpenAI API request failed with ${response.status}`
+                );
+            }
+
+            const rawOutput = this.parseOpenAiResponse(payload);
+            const structured = isDictionaryCandidate(text)
+                ? parseStructuredDictionaryOutput(rawOutput, text)
+                : null;
+            if (structured) {
+                return {
+                    ...structured,
+                    translatedText: structured.mainMeaning,
+                    sourceLanguage: from,
+                    targetLanguage: to,
+                } as TranslationResult;
+            }
+
+            const translated = parsePlainTranslationOutput(rawOutput);
+            if (!translated) {
+                throw new Error("OpenAI API returned an empty translation.");
+            }
+
+            return {
+                originalText: text,
+                mainMeaning: translated,
+                sourceLanguage: from,
+                targetLanguage: to,
+            } as TranslationResult;
+        } catch (error: any) {
+            throw {
+                errorType: "API_ERR",
+                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_API_ERROR",
+                errorMsg: error?.message || "OpenAI API request failed.",
+                errorAct: {
+                    api: "local",
+                    mode: "openai",
+                    model: this.openaiModel,
                     action: "translate",
                     text,
                     from,

@@ -30,18 +30,27 @@
     };
 
     const translatorCache = new Map();
+    const TRANSLATOR_CACHE_MAX = 8;
     const geminiNanoSessionCache = new Map();
+    const GEMINI_NANO_SESSION_CACHE_MAX = 4;
+    const geminiNanoSessionInflight = new Map();
     const languageDetectionCache = new Map();
     const LANGUAGE_DETECTION_CACHE_MAX = 200;
     const PROMPT_API_LANGUAGE_CODES = new Set(["en", "es", "ja"]);
     const DEFAULT_PROMPT_API_OUTPUT_LANGUAGE = "en";
     const GEMINI_NANO_CREATE_TIMEOUT_MS = 45000;
     const GEMINI_NANO_PROMPT_TIMEOUT_MS = 60000;
-    const GEMINI_NANO_PROMPT_VERSION = "gemini-nano-prompt-2026-06-25-01";
+    const GEMINI_NANO_PROMPT_VERSION = "gemini-nano-prompt-2026-06-25-16";
     const GEMINI_NANO_MAX_CHUNK_CHARS = 800;
-
-    const TRANSLATION_RESULT_SCHEMA = JSON.stringify({ translation: "..." });
-
+    const AI_TRANSLATION_SYSTEM_PROMPT = [
+        "Translate naturally while preserving meaning, tone, intent, nuance, register, context, and character voice.",
+        "Output only the translation, or only the exact JSON object when JSON is requested. Do not add notes, alternatives, labels, Markdown, or process narration.",
+        "Preserve structure exactly: subtitle cue numbers, timestamps, cue order, block boundaries, line breaks, speaker labels, tags, escaped entities, markup, tables, keys, placeholders, code spans, URLs, file paths, commands, and formatting tokens.",
+        "Preserve numeric literals, dates, times, measurements, versions, ratings, prices, percentages, ranges, IDs, model names, product names, file names, and issue numbers exactly unless the target language has a required conventional format.",
+        "Preserve proper nouns by default: personal names, organizations, brands, services, places, titles, works, events, laws, technical terms, and account names. Use a standard established target-language form only when it is clearly conventional in context.",
+        "Do not phoneticize, respell, translate, explain, or normalize unfamiliar names, dates, or numbers. Keep forms like 2024, GPT-5.5, sk-proj, iPhone, GitHub, and Pokemon-style names as written unless the source itself translates them.",
+        "Translate only human-language payload. Resolve ambiguity conservatively from local context, keeping subtext, politeness, technical precision, humor, vulgarity, fragments, interruptions, and intentional odd phrasing.",
+    ].join(" ");
 
     function toChromeTranslatorLanguage(language) {
         if (!language) return language;
@@ -101,6 +110,7 @@
         }
 
         const translator = await translatorApi.create({ sourceLanguage, targetLanguage });
+        evictOldestFromMap(translatorCache, TRANSLATOR_CACHE_MAX);
         translatorCache.set(key, translator);
         return translator;
     }
@@ -263,15 +273,32 @@
         return `${output}${value}`;
     }
 
-    function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage) {
+    function buildGeminiNanoPrompt(text, sourceLanguage, targetLanguage, options = {}) {
         const targetName = toLanguageName(targetLanguage);
         const sourceName =
             sourceLanguage && sourceLanguage !== "auto" ? toLanguageName(sourceLanguage) : null;
-        const direction = sourceName ? `${sourceName} → ${targetName}` : `→ ${targetName}`;
         const promptBody = String(text || "").trim();
-        return `${direction}. Full translation. Do not omit.\n${TRANSLATION_RESULT_SCHEMA}\n\n${promptBody}`;
+        const draftTranslation = String(options.draftTranslation || "").trim();
+        const direction = [
+            sourceName
+                ? `Source language: ${sourceName}.`
+                : "Source language: detected source language.",
+            `Target language: ${targetName}.`,
+        ].join("\n");
+        if (draftTranslation) {
+            return [
+                direction,
+                "Use the draft only as a candidate translation. Correct it where needed while obeying the system prompt.",
+                "",
+                "SOURCE:",
+                promptBody,
+                "",
+                "DRAFT:",
+                draftTranslation,
+            ].join("\n");
+        }
+        return [direction, "", promptBody].join("\n");
     }
-
 
     function getPromptApiLanguage(language) {
         const normalized = toChromeTranslatorLanguage(language || "");
@@ -287,7 +314,7 @@
         if (sourcePromptLanguage) inputLanguages.add(sourcePromptLanguage);
         if (targetPromptLanguage) inputLanguages.add(targetPromptLanguage);
 
-        const options = {
+        return {
             expectedInputs: [{ type: "text", languages: Array.from(inputLanguages) }],
             expectedOutputs: [
                 {
@@ -295,8 +322,18 @@
                     languages: [targetPromptLanguage || DEFAULT_PROMPT_API_OUTPUT_LANGUAGE],
                 },
             ],
+            temperature: 0,
         };
-        return options;
+    }
+
+    function evictOldestFromMap(map, max, onEvict) {
+        while (map.size >= max) {
+            const oldest = map.keys().next().value;
+            if (oldest === undefined) break;
+            const value = map.get(oldest);
+            map.delete(oldest);
+            if (onEvict) onEvict(value);
+        }
     }
 
     function withTimeout(promise, timeoutMs, message, abortController) {
@@ -325,13 +362,26 @@
     }
 
     function buildGeminiNanoSystemPrompt() {
-        return "You are a professional translator. Translate accurately and naturally. Do NOT hallucinate or invent information. Preserve proper nouns, brands, and titles exactly. Avoid literal Kanji→Hanja readings (e.g. 国勢調査→인구총조사, not 국세조사).";
+        return AI_TRANSLATION_SYSTEM_PROMPT;
     }
 
     async function getGeminiNanoSession(sourceLanguage, targetLanguage) {
         const key = `${GEMINI_NANO_PROMPT_VERSION}|${sourceLanguage}|${targetLanguage}`;
         if (geminiNanoSessionCache.has(key)) return geminiNanoSessionCache.get(key);
 
+        // Deduplicate concurrent session creation for the same key
+        if (geminiNanoSessionInflight.has(key)) return geminiNanoSessionInflight.get(key);
+
+        const promise = createAndWarmGeminiNanoSession(sourceLanguage, targetLanguage, key);
+        geminiNanoSessionInflight.set(key, promise);
+        try {
+            return await promise;
+        } finally {
+            geminiNanoSessionInflight.delete(key);
+        }
+    }
+
+    async function createAndWarmGeminiNanoSession(sourceLanguage, targetLanguage, cacheKey) {
         const languageModelApi = window.LanguageModel;
         if (!languageModelApi || typeof languageModelApi.create !== "function") {
             throw new Error(
@@ -348,6 +398,10 @@
             }
         }
 
+        const makeInitialPrompts = () => [
+            { role: "system", content: buildGeminiNanoSystemPrompt() },
+        ];
+
         const abortController =
             typeof window.AbortController === "function" ? new window.AbortController() : null;
         const session = await withTimeout(
@@ -357,12 +411,7 @@
                 monitor(monitor) {
                     monitor.addEventListener("downloadprogress", () => {});
                 },
-                initialPrompts: [
-                    {
-                        role: "system",
-                        content: buildGeminiNanoSystemPrompt(),
-                    },
-                ],
+                initialPrompts: makeInitialPrompts(),
             }),
             GEMINI_NANO_CREATE_TIMEOUT_MS,
             "Chrome Gemini Nano session creation timed out while preparing the on-device model. Gemini Nano may still be downloading or not installed yet. Open chrome://on-device-internals or chrome://components and finish the Optimization Guide On Device Model download, then try again.",
@@ -370,26 +419,39 @@
         );
 
         // Warm up: prompt the first session, then recreate a clean one
+        let sessionDestroyed = false;
         try {
             if (typeof session.prompt === "function") {
                 await session.prompt("Translate:\nOK");
             }
             if (typeof session.destroy === "function") {
                 session.destroy();
+                sessionDestroyed = true;
             }
-            const freshSession = await languageModelApi.create({
-                ...createOptions,
-                initialPrompts: [
-                    {
-                        role: "system",
-                        content: buildGeminiNanoSystemPrompt(),
-                    },
-                ],
+            const freshSession = await withTimeout(
+                languageModelApi.create({
+                    ...createOptions,
+                    initialPrompts: makeInitialPrompts(),
+                }),
+                GEMINI_NANO_CREATE_TIMEOUT_MS,
+                "Chrome Gemini Nano fresh session creation timed out after warmup."
+            );
+            evictOldestFromMap(geminiNanoSessionCache, GEMINI_NANO_SESSION_CACHE_MAX, (old) => {
+                if (typeof old?.destroy === "function") old.destroy();
             });
-            geminiNanoSessionCache.set(key, freshSession);
+            geminiNanoSessionCache.set(cacheKey, freshSession);
             return freshSession;
         } catch {
-            geminiNanoSessionCache.set(key, session);
+            if (sessionDestroyed) {
+                geminiNanoSessionCache.delete(cacheKey);
+                throw new Error(
+                    "Chrome Gemini Nano warm-up succeeded but fresh session creation failed."
+                );
+            }
+            evictOldestFromMap(geminiNanoSessionCache, GEMINI_NANO_SESSION_CACHE_MAX, (old) => {
+                if (typeof old?.destroy === "function") old.destroy();
+            });
+            geminiNanoSessionCache.set(cacheKey, session);
             return session;
         }
     }
@@ -546,6 +608,26 @@
         return match ? match[1].trim() : text;
     }
 
+    function normalizeForCopiedSourceComparison(text) {
+        return String(text || "")
+            .replace(/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/gi, "")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function removeCopiedSourceLines(translatedText, originalText) {
+        const sourceNorm = normalizeForCopiedSourceComparison(originalText);
+        const text = String(translatedText || "").trim();
+        if (!sourceNorm || !text) return text;
+
+        const lines = text.split(/\r?\n/);
+        const keptLines = lines.filter(
+            (line) => normalizeForCopiedSourceComparison(line) !== sourceNorm
+        );
+        const keptText = keptLines.join("\n").trim();
+        return keptText && keptText !== text ? keptText : text;
+    }
+
     function applyPostTranslationRules(translatedText, targetLanguage) {
         let text = String(translatedText || "");
         const lang = toChromeTranslatorLanguage(targetLanguage);
@@ -557,12 +639,12 @@
 
 
     async function promptGeminiNano(session, prompt, options = {}) {
-        const { onUpdate } = options;
+        const { onUpdate, preferStreaming = true } = options;
         const promptSession =
             session && typeof session.clone === "function" ? await session.clone() : session;
         try {
             const readPrompt = async () => {
-                if (typeof promptSession.promptStreaming === "function") {
+                if (preferStreaming && typeof promptSession.promptStreaming === "function") {
                     const stream = await promptSession.promptStreaming(prompt);
                     let output = "";
                     if (stream && typeof stream[Symbol.asyncIterator] === "function") {
@@ -625,8 +707,11 @@
         const promptAndParse = async (inputText, onPartial) => {
             const output = await promptGeminiNano(
                 session,
-                buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage),
+                buildGeminiNanoPrompt(inputText, sourceLanguage, targetLanguage, {
+                    draftTranslation: options.draftTranslation,
+                }),
                 {
+                    preferStreaming: !options.fastPostEdit,
                     onUpdate(partial) {
                         const normalized = applyPostTranslationRules(
                             normalizeGeminiNanoPartialOutput(partial),
@@ -637,7 +722,9 @@
                 }
             );
             const parsed = extractGeminiNanoTranslationText(output);
-            return parsed ? applyPostTranslationRules(parsed, targetLanguage) : parsed;
+            return parsed
+                ? applyPostTranslationRules(removeCopiedSourceLines(parsed, inputText), targetLanguage)
+                : parsed;
         };
 
         const promptAndParseChunked = async (inputText, onPartial) => {
@@ -710,7 +797,11 @@
             };
         }
         if (!detail || detail.engine !== "translator") {
-            return translateWithGeminiNano(text, from, to, { onUpdate });
+            return translateWithGeminiNano(text, from, to, {
+                onUpdate,
+                draftTranslation: detail.draftTranslation,
+                fastPostEdit: detail.fastPostEdit,
+            });
         }
         return translateWithChromeBuiltin(text, from, to);
     }
