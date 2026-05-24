@@ -171,6 +171,22 @@
                     </div>
                 </div>
                 <div class="row" id="local-translator-google-settings">
+                    <div class="column provider-heading" data-local-mode="googleAiStudio">
+                        <span class="provider-badge provider-badge-gemini" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" focusable="false">
+                                <defs>
+                                    <linearGradient id="options-gemini-gradient" x1="3" y1="20" x2="21" y2="4" gradientUnits="userSpaceOnUse">
+                                        <stop offset="0" stop-color="#34A853" />
+                                        <stop offset="0.33" stop-color="#4285F4" />
+                                        <stop offset="0.68" stop-color="#A142F4" />
+                                        <stop offset="1" stop-color="#EA4335" />
+                                    </linearGradient>
+                                </defs>
+                                <path fill="url(#options-gemini-gradient)" d="M12 2.25c.38 3.5 1.42 5.88 3.12 7.14 1.45 1.08 3.66 1.83 6.63 2.26-3.02.46-5.25 1.25-6.69 2.38-1.65 1.29-2.67 3.7-3.06 7.22-.4-3.52-1.43-5.93-3.08-7.22-1.45-1.13-3.67-1.92-6.67-2.38 2.96-.43 5.16-1.18 6.61-2.26C10.56 8.13 11.61 5.75 12 2.25Z" />
+                            </svg>
+                        </span>
+                        <span>Google AI Studio</span>
+                    </div>
                     <div class="column" data-local-mode="googleAiStudio">
                         <label
                             for="local-translator-api-key"
@@ -199,19 +215,38 @@
                                 setting-path="LocalTranslatorConfig model"
                                 id="local-translator-model"
                             >
-                                <option value="gemini-3.1-pro">gemini-3.1-pro</option>
-                                <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
-                                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-                                <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
-                                <option value="gemini-3-flash">gemini-3-flash</option>
-                                <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
-                                <option value="gemini-3.0-flash">gemini-3.0-flash</option>
-                                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+                                <option value="gemini-3.1-flash-lite">
+                                    gemini-3.1-flash-lite
+                                </option>
+                                <option value="gemini-3.1-flash-lite-preview">
+                                    gemini-3.1-flash-lite-preview
+                                </option>
+                                <option value="gemini-3.1-pro-preview">
+                                    gemini-3.1-pro-preview
+                                </option>
+                                <option value="gemini-3-pro-preview">
+                                    gemini-3-pro-preview
+                                </option>
+                                <option value="gemini-3-flash-preview">
+                                    gemini-3-flash-preview
+                                </option>
+                                <option value="gemini-2.5-flash-lite">
+                                    gemini-2.5-flash-lite
+                                </option>
                                 <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-                                <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                                <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
-                                <option value="gemma-4-26b-a4b">gemma-4-26b-a4b</option>
+                                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                <option value="gemini-flash-latest">
+                                    gemini-flash-latest
+                                </option>
+                                <option value="gemini-flash-lite-latest">
+                                    gemini-flash-lite-latest
+                                </option>
+                                <option value="gemini-pro-latest">
+                                    gemini-pro-latest
+                                </option>
+                                <option value="gemma-4-31b-it">gemma-4-31b-it</option>
+                                <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it</option>
                             </select>
                         </label>
                     </div>
@@ -234,6 +269,26 @@
                     </div>
                 </div>
                 <div class="row" id="local-translator-openai-settings">
+                    <div class="column provider-heading" data-local-mode="openai">
+                        <span class="provider-badge provider-badge-chatgpt" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" focusable="false">
+                                <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 4.25c1.5-1.35 3.85-.6 4.35 1.34.2.78.06 1.55-.34 2.17" />
+                                    <path d="M16.02 7.76c1.98-.43 3.77 1.27 3.43 3.25-.14.82-.61 1.48-1.27 1.88" />
+                                    <path d="M18.18 12.89c1.06 1.72-.03 3.94-2.03 4.16-.78.09-1.5-.15-2.06-.62" />
+                                    <path d="M14.09 16.43c-.66 1.91-3.02 2.55-4.36 1.08-.55-.6-.78-1.36-.68-2.1" />
+                                    <path d="M9.05 15.41c-1.99.36-3.72-1.39-3.3-3.35.17-.8.66-1.44 1.32-1.82" />
+                                    <path d="M7.07 10.24c-1-1.76.16-3.93 2.16-4.08.78-.06 1.49.21 2.03.7" />
+                                    <path d="M8.82 8.4 12 6.56l3.18 1.84v3.68L12 13.92l-3.18-1.84V8.4Z" />
+                                    <path d="m12 13.92 3.18 1.84" />
+                                    <path d="M8.82 12.08v3.68" />
+                                    <path d="M15.18 8.4 18 6.78" />
+                                    <path d="M6 12.08l2.82-1.63" />
+                                </g>
+                            </svg>
+                        </span>
+                        <span>OpenAI</span>
+                    </div>
                     <div class="column" data-local-mode="openai">
                         <label
                             for="local-translator-openai-api-key"
@@ -387,9 +442,7 @@
                             />
                         </label>
                     </div>
-                </div>
-                <div class="row" id="ai-page-translator-row" hidden>
-                    <div class="column">
+                    <div class="column" id="ai-page-translator-row" hidden>
                         <label
                             for="ai-page-translator"
                             class="checked-label i18n"

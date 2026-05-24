@@ -1014,7 +1014,7 @@ class TranslatorManager {
                     originalText: text,
                     translatedText: text,
                     translationFailed: true,
-                    errorMsg: String(e && e.errorMsg ? e.errorMsg : e && e.message ? e.message : e),
+                    errorMsg: this.getErrorMessage(e),
                 });
             } finally {
                 this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
@@ -1488,13 +1488,24 @@ class TranslatorManager {
         }
     }
 
+    getErrorMessage(error) {
+        if (!error) return "Translation failed.";
+        if (typeof error === "string") return error;
+        const message = error.errorMsg || error.message;
+        if (message && message !== "[object Object]") return String(message);
+        try {
+            return JSON.stringify(error);
+        } catch {
+            return String(error);
+        }
+    }
+
     serializeError(error) {
-        const message = error?.message || String(error || "Translation failed.");
         return {
-            errorType: "API_ERR",
-            errorCode: error?.name || "Error",
-            errorMsg: message,
-            errorAct: error?.stack ? { stack: error.stack } : undefined,
+            errorType: error?.errorType || "API_ERR",
+            errorCode: error?.errorCode || error?.name || "Error",
+            errorMsg: this.getErrorMessage(error),
+            errorAct: error?.errorAct || (error?.stack ? { stack: error.stack } : undefined),
         };
     }
 

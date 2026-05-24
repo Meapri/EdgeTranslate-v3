@@ -110,7 +110,7 @@ describe("LocalTranslator", () => {
             enabled: true,
             mode: "googleAiStudio",
             apiKey: "studio-test-key",
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
         });
         const result = await translator.translate("hello there.", "en", "ko");
 
@@ -121,7 +121,7 @@ describe("LocalTranslator", () => {
             targetLanguage: "ko",
         });
         expect(fetchMock.mock.calls[0][0]).toBe(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=studio-test-key"
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=studio-test-key"
         );
         expect(fetchMock.mock.calls[0][1]).toMatchObject({
             method: "POST",
@@ -135,14 +135,171 @@ describe("LocalTranslator", () => {
         expect(body.systemInstruction.parts[0].text).toContain("subtitle cue numbers");
         expect(body.systemInstruction.parts[0].text).toContain("Preserve numeric literals");
         expect(body.systemInstruction.parts[0].text).toContain("Preserve proper nouns");
-        expect(body.generationConfig.candidateCount).toBe(1);
         expect(body.generationConfig.temperature).toBe(0);
-        expect(body.generationConfig.topK).toBe(1);
-        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+        expect(body.generationConfig.maxOutputTokens).toBe(256);
+        expect(body.generationConfig.candidateCount).toBeUndefined();
+        expect(body.generationConfig.topK).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toBeUndefined();
         expect(body.contents[0].parts[0].text).toContain("Source language: English");
         expect(body.contents[0].parts[0].text).toContain("Target language: Korean");
         expect(body.contents[0].parts[0].text).not.toContain("marked segments");
         expect(body.contents[0].parts[0].text).toContain("hello there.");
+    });
+
+    test("starts Google AI Studio models with minimal generation config", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-3.5-flash",
+        });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(result.mainMeaning).toBe("안녕");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.topK).toBeUndefined();
+        expect(body.generationConfig.candidateCount).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toBeUndefined();
+        expect(body.generationConfig.temperature).toBe(0);
+    });
+
+    test("uses bare Google AI Studio requests for Gemini 3.1 Pro", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-3.1-pro-preview",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        expect(fetchMock.mock.calls[0][0]).toBe(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=studio-test-key"
+        );
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig).toBeUndefined();
+    });
+
+    test("falls back to bare Google AI Studio requests when minimal config returns empty output", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [] } }],
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-pro",
+        });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(result.mainMeaning).toBe("안녕");
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(retryBody.generationConfig).toBeUndefined();
+    });
+
+    test("falls back to bare Google AI Studio requests when compatible config is rejected", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                json: async () => ({
+                    error: {
+                        message: "GenerationConfig.maxOutputTokens is not supported by this model.",
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemma-4-31b-it",
+        });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(result.mainMeaning).toBe("안녕");
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(retryBody.generationConfig).toBeUndefined();
+    });
+
+    test("falls back to bare Google AI Studio requests when thinking budget is rejected", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                json: async () => ({
+                    error: {
+                        message:
+                            "Budget 0 is invalid. This model only works in thinking mode.",
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-3.5-flash",
+        });
+        const result = await translator.translate("hello", "en", "ko");
+
+        expect(result.mainMeaning).toBe("안녕");
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(retryBody.generationConfig).toBeUndefined();
     });
 
     test("parses accidental Google AI Studio JSON while preserving translated line breaks", async () => {
@@ -343,7 +500,7 @@ describe("LocalTranslator", () => {
         );
     });
 
-    test("omits thinking config for Gemma Google AI Studio models", async () => {
+    test("uses compatible config for non-Gemini Google AI Studio models", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -361,10 +518,14 @@ describe("LocalTranslator", () => {
         });
         await translator.translate("hello", "en", "ko");
 
+        expect(fetchMock.mock.calls[0][0]).toBe(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=studio-test-key"
+        );
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.generationConfig.candidateCount).toBe(1);
         expect(body.generationConfig.temperature).toBe(0);
-        expect(body.generationConfig.topK).toBe(1);
+        expect(body.generationConfig.maxOutputTokens).toBe(256);
+        expect(body.generationConfig.candidateCount).toBeUndefined();
+        expect(body.generationConfig.topK).toBeUndefined();
         expect(body.generationConfig.thinkingConfig).toBeUndefined();
     });
 

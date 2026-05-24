@@ -93,7 +93,7 @@ const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-24-opt";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MAX_CONCURRENT_REQUESTS = 12;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 16;
 const AI_TRANSLATION_SYSTEM_PROMPT = [
     "Translate naturally while preserving meaning, tone, intent, nuance, register, context, and character voice.",
     "Output only the translation, or only the exact JSON object when JSON is requested. Do not add notes, alternatives, labels, Markdown, or process narration.",
@@ -723,19 +723,41 @@ class LocalTranslator {
         return extractOpenAIMessageContent(payload?.choices?.[0]?.message);
     }
 
-    private buildGoogleAiStudioGenerationConfig(inputLength?: number) {
-        const config: Record<string, any> = {
-            candidateCount: 1,
-            temperature: 0,
-            topK: 1,
-        };
+    private getGoogleAiStudioCompatibilityModes() {
+        if (this.shouldStartGoogleAiStudioWithBareRequest()) {
+            return ["bare", "minimal"] as const;
+        }
+        return ["minimal", "bare"] as const;
+    }
+
+    private shouldStartGoogleAiStudioWithBareRequest() {
+        const model = this.model.toLowerCase();
+        return /^gemini-(?:3(?:\.\d+)?-pro|pro-latest)(?:$|-)/.test(model);
+    }
+
+    private buildGoogleAiStudioGenerationConfig(
+        inputLength?: number,
+        compatibilityMode: "minimal" | "bare" = "minimal"
+    ) {
+        if (compatibilityMode === "bare") return undefined;
+        const config: Record<string, any> = { temperature: 0 };
         if (inputLength) {
             config.maxOutputTokens = Math.max(256, Math.ceil(inputLength * 3));
         }
-        if (/^gemini-/i.test(this.model)) {
-            config.thinkingConfig = { thinkingBudget: 0 };
-        }
         return config;
+    }
+
+    private shouldRetryGoogleAiStudioWithCompatibilityConfig(error: any) {
+        if (error?.name === "AbortError") return false;
+        const status = Number(error?.status || 0);
+        if (status && status !== 400 && status !== 422) return false;
+        const message = String(error?.message || error?.errorMsg || error || "").toLowerCase();
+        if (!message || /not\s+found|permission|api key|quota|billing|rate limit/.test(message)) {
+            return false;
+        }
+        return /generationconfig|generation config|thinkingconfig|thinking|budget|topk|candidatecount|temperature|maxoutputtokens|unknown field|invalid argument|unsupported|not supported/.test(
+            message
+        );
     }
 
     private buildKoreanScriptRepairPrompt(
@@ -765,6 +787,35 @@ class LocalTranslator {
         const fragments = getKoreanMixedScriptFragments(translated);
         if (!fragments.length) return translated;
 
+        const generationConfig = this.buildGoogleAiStudioGenerationConfig(
+            translated.length,
+            this.shouldStartGoogleAiStudioWithBareRequest() ? "bare" : "minimal"
+        );
+        const body: Record<string, any> = {
+            systemInstruction: {
+                parts: [
+                    {
+                        text: "You repair Korean mixed-script translation fragments. Output only JSON.",
+                    },
+                ],
+            },
+            contents: [
+                {
+                    role: "user",
+                    parts: [
+                        {
+                            text: this.buildKoreanScriptRepairPrompt(
+                                sourceText,
+                                translated,
+                                fragments
+                            ),
+                        },
+                    ],
+                },
+            ],
+        };
+        if (generationConfig) body.generationConfig = generationConfig;
+
         const response = await fetch(
             `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${encodeURIComponent(
                 this.model
@@ -774,32 +825,7 @@ class LocalTranslator {
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({
-                    systemInstruction: {
-                        parts: [
-                            {
-                                text: "You repair Korean mixed-script translation fragments. Output only JSON.",
-                            },
-                        ],
-                    },
-                    contents: [
-                        {
-                            role: "user",
-                            parts: [
-                                {
-                                    text: this.buildKoreanScriptRepairPrompt(
-                                        sourceText,
-                                        translated,
-                                        fragments
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                    generationConfig: this.buildGoogleAiStudioGenerationConfig(
-                        translated.length
-                    ),
-                }),
+                body: JSON.stringify(body),
             }
         );
         const payload = await response.json().catch(() => ({}));
@@ -815,43 +841,69 @@ class LocalTranslator {
         return repairedText;
     }
 
-
     private async requestGoogleAiStudioTranslation(text: string, from: string, to: string) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
             const model = encodeURIComponent(this.model);
-            const response = await fetch(
-                `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(
-                    this.apiKey
-                )}`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        systemInstruction: {
-                            parts: [{ text: AI_TRANSLATION_SYSTEM_PROMPT }],
-                        },
-                        contents: [
-                            {
-                                role: "user",
-                                parts: [{ text: this.buildGoogleAiStudioPrompt(text, from, to) }],
-                            },
-                        ],
-                        generationConfig: this.buildGoogleAiStudioGenerationConfig(text.length),
-                    }),
-                    signal: controller.signal,
-                }
-            );
-
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(
-                    payload?.error?.message ||
-                        `Google AI Studio request failed with ${response.status}`
+            const requestPayload = async (compatibilityMode: "minimal" | "bare") => {
+                const generationConfig = this.buildGoogleAiStudioGenerationConfig(
+                    text.length,
+                    compatibilityMode
                 );
+                const body: Record<string, any> = {
+                    systemInstruction: {
+                        parts: [{ text: AI_TRANSLATION_SYSTEM_PROMPT }],
+                    },
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [{ text: this.buildGoogleAiStudioPrompt(text, from, to) }],
+                        },
+                    ],
+                };
+                if (generationConfig) body.generationConfig = generationConfig;
+                const response = await fetch(
+                    `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(
+                        this.apiKey
+                    )}`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(body),
+                        signal: controller.signal,
+                    }
+                );
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const error: any = new Error(
+                        payload?.error?.message ||
+                            `Google AI Studio request failed with ${response.status}`
+                    );
+                    error.status = response.status;
+                    throw error;
+                }
+                return payload;
+            };
+            let payload: any;
+            const compatibilityModes = this.getGoogleAiStudioCompatibilityModes();
+            for (let index = 0; index < compatibilityModes.length; index += 1) {
+                const mode = compatibilityModes[index];
+                const isLastMode = index === compatibilityModes.length - 1;
+                try {
+                    payload = await requestPayload(mode);
+                    if (!this.parseGoogleAiStudioResponse(payload) && !isLastMode) {
+                        continue;
+                    }
+                    break;
+                } catch (error) {
+                    const canRetry =
+                        !isLastMode &&
+                        this.shouldRetryGoogleAiStudioWithCompatibilityConfig(error);
+                    if (!canRetry) throw error;
+                }
             }
 
             const rawOutput = this.parseGoogleAiStudioResponse(payload);

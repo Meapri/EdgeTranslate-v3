@@ -6,6 +6,23 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
  * Communication channel.
  */
 const channel = new Channel();
+const DEFAULT_GOOGLE_AI_STUDIO_TRANSLATION_MODEL = "gemini-2.5-flash-lite";
+const GOOGLE_AI_STUDIO_TRANSLATION_MODELS = new Set([
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-pro-latest",
+    "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it",
+]);
 
 function stripPronunciationDisplaySelections(config = {}) {
     const selections = { ...(config.selections || {}) };
@@ -77,6 +94,13 @@ window.onload = () => {
                 (settingItemValue === "geminiNano" || settingItemValue === "endpoint")
             ) {
                 settingItemValue = "chromeBuiltin";
+                saveOption(result, settingItemPath, settingItemValue);
+            }
+            if (
+                settingItemPath.join(" ") === "LocalTranslatorConfig model" &&
+                !GOOGLE_AI_STUDIO_TRANSLATION_MODELS.has(settingItemValue)
+            ) {
+                settingItemValue = DEFAULT_GOOGLE_AI_STUDIO_TRANSLATION_MODEL;
                 saveOption(result, settingItemPath, settingItemValue);
             }
             if (

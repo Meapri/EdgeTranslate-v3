@@ -41,7 +41,10 @@ describe("DOM page translation banner", () => {
         const banner = document.getElementById("edge-translate-dom-page-banner");
         expect(banner).not.toBeNull();
         expect(banner.shadowRoot.textContent).toContain("Edge Translate");
-        expect(banner.shadowRoot.querySelector("[data-role='engine']").textContent).toBe("OpenAI");
+        expect(banner.shadowRoot.querySelector("[data-role='engine-label']").textContent).toBe(
+            "OpenAI"
+        );
+        expect(banner.shadowRoot.querySelector(".provider-logo-chatgpt")).not.toBeNull();
         expect(banner.shadowRoot.querySelector("[data-role='bar']").dataset.state).toBe(
             "starting"
         );
@@ -81,18 +84,33 @@ describe("DOM page translation banner", () => {
     it("uses segmented batch jobs for AI page translation", () => {
         const controller = new BannerController();
         controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
-        controller._domMaxConcurrentTranslations = 8;
+        controller._domMaxConcurrentTranslations = 16;
         const entries = Array.from({ length: 21 }, (_, index) => ({
             sourceText: `Paragraph ${index + 1}.`,
         }));
 
-        expect(controller._domMaxConcurrentTranslations).toBe(8);
-        expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 9000, maxItems: 14 });
-        expect(controller.buildDomPageTranslationBatches(entries)).toHaveLength(2);
+        expect(controller._domMaxConcurrentTranslations).toBe(16);
+        expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 16000, maxItems: 32 });
+        expect(controller.buildDomPageTranslationBatches(entries)).toHaveLength(1);
+        expect(controller.getDomPageBatchOptions({ fastLane: true })).toEqual({
+            maxChars: 4000,
+            maxItems: 6,
+        });
+        expect(controller.buildDomPageTranslationBatches(entries, { fastLane: true })).toHaveLength(
+            4
+        );
         controller.recordDomPageBatchFailure();
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 7000, maxItems: 8 });
+        expect(controller.getDomPageBatchOptions({ fastLane: true })).toEqual({
+            maxChars: 3500,
+            maxItems: 5,
+        });
         controller.recordDomPageBatchFailure();
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 5000, maxItems: 6 });
+        expect(controller.getDomPageBatchOptions({ fastLane: true })).toEqual({
+            maxChars: 3000,
+            maxItems: 4,
+        });
     });
 
     it("wraps single AI page translation fallbacks with DOM role metadata", () => {
@@ -121,6 +139,40 @@ describe("DOM page translation banner", () => {
                 1
             )
         ).toBe("회원 계정 무단 로그인 발생 보고");
+    });
+
+    it("shows original text tooltip for AI page translated content", () => {
+        document.body.innerHTML = `<p id="line">Original sentence.</p>`;
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        const node = document.getElementById("line").firstChild;
+        const entry = controller.createDomPageTranslationEntry({
+            role: "text",
+            sourceText: "Original sentence.",
+            nodes: [node],
+            texts: ["Original sentence."],
+        });
+
+        expect(controller.applyDomPageTranslatedEntry(entry, "번역된 문장.")).toBe(true);
+        const paragraph = document.getElementById("line");
+        expect(paragraph.textContent).toBe("번역된 문장.");
+        expect(paragraph.classList.contains("et-dom-original-source")).toBe(true);
+
+        paragraph.dispatchEvent(
+            new MouseEvent("mouseover", {
+                bubbles: true,
+                clientX: 120,
+                clientY: 160,
+            })
+        );
+        const tooltip = document.getElementById("edge-translate-dom-original-tooltip");
+        expect(tooltip).not.toBeNull();
+        expect(tooltip.dataset.visible).toBe("true");
+        expect(tooltip.textContent).toContain("원문 텍스트");
+        expect(tooltip.textContent).toContain("Original sentence.");
+
+        controller.cancelDomPageTranslate();
+        expect(document.getElementById("edge-translate-dom-original-tooltip")).toBeNull();
     });
 
     it("prioritizes article viewport text before deferred page text", () => {

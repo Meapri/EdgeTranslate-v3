@@ -65,6 +65,10 @@ class BannerController {
         this._onDeviceBridgePromise = null;
         this._onDeviceBridgeRequestId = 0;
         this._onDeviceBridgePending = new Map();
+        this._domOriginalTextByElement = new WeakMap();
+        this._domOriginalTooltip = null;
+        this._domOriginalTooltipTarget = null;
+        this._domOriginalTooltipHandlers = null;
 
         this.addListeners();
     }
@@ -140,10 +144,10 @@ class BannerController {
             this._domCompletedTranslationEntries = 0;
             this._domTotalTranslationEntries = 0;
             this._domBatchFailureCount = 0;
-            this._domFlushBurstDone = false;
+            this._domOriginalTextByElement = new WeakMap();
             const concurrencyByEngine = {
-                googleAiStudio: 8,
-                openai: 8,
+                googleAiStudio: 16,
+                openai: 16,
             };
             this._domMaxConcurrentTranslations =
                 concurrencyByEngine[this._domPageTranslateOptions.engine] || 2;
@@ -506,18 +510,23 @@ class BannerController {
         });
     }
 
-    getDomPageTranslationGroupOptions() {
-        return { maxChars: 9000 };
+    getDomPageTranslationGroupOptions(options = {}) {
+        return { maxChars: options.fastLane ? 4000 : 16000 };
     }
 
-    getReadableBlockReplacementOptions() {
-        return { maxChars: 9000 };
+    getReadableBlockReplacementOptions(options = {}) {
+        return { maxChars: options.fastLane ? 4000 : 16000 };
     }
 
-    getDomPageBatchOptions() {
+    getDomPageBatchOptions(options = {}) {
+        if (options.fastLane) {
+            if (this._domBatchFailureCount >= 2) return { maxChars: 3000, maxItems: 4 };
+            if (this._domBatchFailureCount >= 1) return { maxChars: 3500, maxItems: 5 };
+            return { maxChars: 4000, maxItems: 6 };
+        }
         if (this._domBatchFailureCount >= 2) return { maxChars: 5000, maxItems: 6 };
         if (this._domBatchFailureCount >= 1) return { maxChars: 7000, maxItems: 8 };
-        return { maxChars: 9000, maxItems: 14 };
+        return { maxChars: 16000, maxItems: 32 };
     }
 
     recordDomPageBatchFailure() {
@@ -564,12 +573,12 @@ class BannerController {
         return parts && parts.length === entryCount ? parts[0] : translated;
     }
 
-    createDomPageTranslationEntry(group) {
+    createDomPageTranslationEntry(group, options = {}) {
         const { tl } = this._domPageTranslateOptions;
         const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
         const readableBlockReplacement = createReadableBlockReplacement(
             group,
-            this.getReadableBlockReplacementOptions()
+            this.getReadableBlockReplacementOptions(options)
         );
         const sourceText = readableBlockReplacement
             ? readableBlockReplacement.sourceText
@@ -597,7 +606,12 @@ class BannerController {
             const block = readableBlockReplacement.block;
             if (block && block.isConnected) {
                 this._translatedBlocks.add(block);
-                this.applyWithFadeIn(block, translated, "block");
+                this.applyWithFadeIn(
+                    block,
+                    translated,
+                    "block",
+                    readableBlockReplacement.sourceText
+                );
                 return true;
             }
             return false;
@@ -608,7 +622,7 @@ class BannerController {
 
         group.nodes.forEach((node, index) => {
             if (translatedParts[index] && node.parentElement) {
-                this.applyWithFadeIn(node, translatedParts[index], "text");
+                this.applyWithFadeIn(node, translatedParts[index], "text", group.texts[index]);
             }
         });
         return true;
@@ -634,13 +648,14 @@ class BannerController {
     /**
      * Apply translated text with a subtle fade-in for smooth UX.
      */
-    applyWithFadeIn(node, translated, type) {
+    applyWithFadeIn(node, translated, type, originalText) {
         const el = type === "block" ? node : node.parentElement;
         if (!el || !el.style) {
             if (type === "block") node.textContent = translated;
             else node.nodeValue = translated;
             return;
         }
+        this.registerDomOriginalText(el, originalText);
         // Inject transition CSS once
         if (!this._domFadeStyleInjected) {
             this._domFadeStyleInjected = true;
@@ -661,8 +676,178 @@ class BannerController {
         });
     }
 
-    buildDomPageTranslationBatches(entries) {
-        const batchOptions = this.getDomPageBatchOptions();
+    registerDomOriginalText(element, originalText) {
+        const text = String(originalText || "").trim();
+        if (!element || !text) return;
+        this.ensureDomOriginalTooltip();
+        const existing = this._domOriginalTextByElement.get(element);
+        const next =
+            existing && !existing.includes(text) ? `${existing}\n\n${text}` : existing || text;
+        this._domOriginalTextByElement.set(element, next);
+        element.classList.add("et-dom-original-source");
+    }
+
+    ensureDomOriginalTooltip() {
+        if (!document.getElementById("edge-translate-dom-original-tooltip-style")) {
+            const style = document.createElement("style");
+            style.id = "edge-translate-dom-original-tooltip-style";
+            style.textContent = `
+                .et-dom-original-source:hover {
+                    background: rgba(66, 133, 244, 0.12) !important;
+                    border-radius: 3px !important;
+                    cursor: help !important;
+                }
+                #edge-translate-dom-original-tooltip {
+                    position: fixed;
+                    z-index: 2147483647;
+                    width: min(560px, calc(100vw - 32px));
+                    max-height: min(420px, calc(100vh - 32px));
+                    overflow: auto;
+                    box-sizing: border-box;
+                    padding: 0;
+                    border: 1px solid rgba(218, 220, 224, 0.95);
+                    border-radius: 8px;
+                    background: #fff;
+                    box-shadow: 0 14px 38px rgba(60, 64, 67, 0.26), 0 4px 12px rgba(60, 64, 67, 0.12);
+                    color: #202124;
+                    font-family: Arial, "Noto Sans", "Apple SD Gothic Neo", sans-serif;
+                    font-size: 14px;
+                    line-height: 1.55;
+                    pointer-events: none;
+                    opacity: 0;
+                    transform: translateY(4px);
+                    transition: opacity 90ms ease, transform 90ms ease;
+                }
+                #edge-translate-dom-original-tooltip[data-visible="true"] {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+                #edge-translate-dom-original-tooltip .et-original-header {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 12px 16px 8px;
+                    color: #5f6368;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+                #edge-translate-dom-original-tooltip .et-original-icon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 6px;
+                    background: #e8f0fe;
+                    color: #1a73e8;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+                #edge-translate-dom-original-tooltip .et-original-text {
+                    padding: 8px 20px 18px;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-size: 15px;
+                    color: #202124;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        if (!this._domOriginalTooltip) {
+            const tooltip = document.createElement("div");
+            tooltip.id = "edge-translate-dom-original-tooltip";
+            tooltip.setAttribute("role", "tooltip");
+            tooltip.setAttribute("aria-hidden", "true");
+            tooltip.innerHTML = `
+                <div class="et-original-header">
+                    <span class="et-original-icon">G</span>
+                    <span>원문 텍스트</span>
+                </div>
+                <div class="et-original-text"></div>
+            `;
+            document.documentElement.appendChild(tooltip);
+            this._domOriginalTooltip = tooltip;
+        }
+
+        if (!this._domOriginalTooltipHandlers) {
+            this._domOriginalTooltipHandlers = {
+                over: (event) => this.handleDomOriginalTooltipOver(event),
+                move: (event) => this.positionDomOriginalTooltip(event),
+                out: (event) => this.handleDomOriginalTooltipOut(event),
+            };
+            document.addEventListener("mouseover", this._domOriginalTooltipHandlers.over, true);
+            document.addEventListener("mousemove", this._domOriginalTooltipHandlers.move, true);
+            document.addEventListener("mouseout", this._domOriginalTooltipHandlers.out, true);
+        }
+    }
+
+    getDomOriginalTooltipTarget(target) {
+        if (!target || !target.closest) return null;
+        const element = target.closest(".et-dom-original-source");
+        return element && this._domOriginalTextByElement.get(element) ? element : null;
+    }
+
+    handleDomOriginalTooltipOver(event) {
+        const target = this.getDomOriginalTooltipTarget(event.target);
+        if (!target || target === this._domOriginalTooltipTarget) return;
+        this._domOriginalTooltipTarget = target;
+        const text = this._domOriginalTextByElement.get(target);
+        const textElement = this._domOriginalTooltip.querySelector(".et-original-text");
+        if (textElement) textElement.textContent = text;
+        this._domOriginalTooltip.dataset.visible = "true";
+        this._domOriginalTooltip.setAttribute("aria-hidden", "false");
+        this.positionDomOriginalTooltip(event);
+    }
+
+    handleDomOriginalTooltipOut(event) {
+        const target = this._domOriginalTooltipTarget;
+        if (!target) return;
+        const related = event.relatedTarget;
+        if (related && target.contains && target.contains(related)) return;
+        this.hideDomOriginalTooltip();
+    }
+
+    positionDomOriginalTooltip(event) {
+        const tooltip = this._domOriginalTooltip;
+        if (!tooltip || tooltip.dataset.visible !== "true") return;
+        const margin = 14;
+        const width = tooltip.offsetWidth || 560;
+        const height = tooltip.offsetHeight || 220;
+        let left = event.clientX + 14;
+        let top = event.clientY + 18;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || width;
+        const viewportHeight =
+            window.innerHeight || document.documentElement.clientHeight || height;
+        if (left + width + margin > viewportWidth) left = event.clientX - width - 14;
+        if (top + height + margin > viewportHeight) top = event.clientY - height - 14;
+        tooltip.style.left = `${Math.max(margin, left)}px`;
+        tooltip.style.top = `${Math.max(margin, top)}px`;
+    }
+
+    hideDomOriginalTooltip() {
+        if (!this._domOriginalTooltip) return;
+        this._domOriginalTooltip.dataset.visible = "false";
+        this._domOriginalTooltip.setAttribute("aria-hidden", "true");
+        this._domOriginalTooltipTarget = null;
+    }
+
+    destroyDomOriginalTooltip() {
+        if (this._domOriginalTooltipHandlers) {
+            document.removeEventListener("mouseover", this._domOriginalTooltipHandlers.over, true);
+            document.removeEventListener("mousemove", this._domOriginalTooltipHandlers.move, true);
+            document.removeEventListener("mouseout", this._domOriginalTooltipHandlers.out, true);
+            this._domOriginalTooltipHandlers = null;
+        }
+        if (this._domOriginalTooltip) {
+            this._domOriginalTooltip.remove();
+            this._domOriginalTooltip = null;
+        }
+        this._domOriginalTooltipTarget = null;
+    }
+
+    buildDomPageTranslationBatches(entries, options = {}) {
+        const batchOptions = this.getDomPageBatchOptions(options);
         if (!batchOptions) return [];
         if (!entries.length) return [];
 
@@ -714,14 +899,64 @@ class BannerController {
     }
 
     getDomPageTranslatorLabel() {
+        return this.getDomPageTranslatorMeta().label;
+    }
+
+    getDomPageTranslatorMeta() {
         switch (this._domPageTranslateOptions.engine) {
             case "googleAiStudio":
-                return "Google AI Studio";
+                return {
+                    label: "Google AI Studio",
+                    logo: this.getGeminiLogoSvg(),
+                };
             case "openai":
-                return "OpenAI";
+                return {
+                    label: "OpenAI",
+                    logo: this.getChatGptLogoSvg(),
+                };
             default:
-                return "Google AI Studio";
+                return {
+                    label: "Google AI Studio",
+                    logo: this.getGeminiLogoSvg(),
+                };
         }
+    }
+
+    getGeminiLogoSvg() {
+        return `
+            <svg class="provider-logo provider-logo-gemini" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <defs>
+                    <linearGradient id="et-gemini-gradient" x1="3" y1="20" x2="21" y2="4" gradientUnits="userSpaceOnUse">
+                        <stop offset="0" stop-color="#34A853"/>
+                        <stop offset="0.33" stop-color="#4285F4"/>
+                        <stop offset="0.68" stop-color="#A142F4"/>
+                        <stop offset="1" stop-color="#EA4335"/>
+                    </linearGradient>
+                </defs>
+                <path fill="url(#et-gemini-gradient)" d="M12 2.25c.38 3.5 1.42 5.88 3.12 7.14 1.45 1.08 3.66 1.83 6.63 2.26-3.02.46-5.25 1.25-6.69 2.38-1.65 1.29-2.67 3.7-3.06 7.22-.4-3.52-1.43-5.93-3.08-7.22-1.45-1.13-3.67-1.92-6.67-2.38 2.96-.43 5.16-1.18 6.61-2.26C10.56 8.13 11.61 5.75 12 2.25Z"/>
+                <path fill="#8AB4F8" d="M19.1 3.15c.16 1.22.54 2.06 1.14 2.52.52.4 1.39.69 2.61.87-1.23.18-2.1.48-2.61.89-.6.47-.98 1.31-1.14 2.52-.17-1.21-.55-2.05-1.15-2.52-.52-.41-1.39-.71-2.6-.89 1.21-.18 2.08-.47 2.6-.87.6-.46.98-1.3 1.15-2.52Z"/>
+            </svg>
+        `;
+    }
+
+    getChatGptLogoSvg() {
+        return `
+            <svg class="provider-logo provider-logo-chatgpt" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 4.25c1.5-1.35 3.85-.6 4.35 1.34.2.78.06 1.55-.34 2.17"/>
+                    <path d="M16.02 7.76c1.98-.43 3.77 1.27 3.43 3.25-.14.82-.61 1.48-1.27 1.88"/>
+                    <path d="M18.18 12.89c1.06 1.72-.03 3.94-2.03 4.16-.78.09-1.5-.15-2.06-.62"/>
+                    <path d="M14.09 16.43c-.66 1.91-3.02 2.55-4.36 1.08-.55-.6-.78-1.36-.68-2.1"/>
+                    <path d="M9.05 15.41c-1.99.36-3.72-1.39-3.3-3.35.17-.8.66-1.44 1.32-1.82"/>
+                    <path d="M7.07 10.24c-1-1.76.16-3.93 2.16-4.08.78-.06 1.49.21 2.03.7"/>
+                    <path d="M8.82 8.4 12 6.56l3.18 1.84v3.68L12 13.92l-3.18-1.84V8.4Z"/>
+                    <path d="m12 13.92 3.18 1.84"/>
+                    <path d="M8.82 12.08v3.68"/>
+                    <path d="M15.18 8.4 18 6.78"/>
+                    <path d="M6 12.08l2.82-1.63"/>
+                </g>
+            </svg>
+        `;
     }
 
     showDomPageBanner() {
@@ -799,6 +1034,9 @@ class BannerController {
                         white-space: nowrap;
                     }
                     .engine {
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 5px;
                         max-width: 160px;
                         overflow: hidden;
                         text-overflow: ellipsis;
@@ -810,6 +1048,19 @@ class BannerController {
                         background: #e8f0fe;
                         font-size: 11px;
                         font-weight: 600;
+                    }
+                    .engine span {
+                        min-width: 0;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+                    .provider-logo {
+                        width: 15px;
+                        height: 15px;
+                        flex: 0 0 auto;
+                    }
+                    .provider-logo-chatgpt {
+                        color: #10a37f;
                     }
                     .status {
                         color: #5f6368;
@@ -943,8 +1194,11 @@ class BannerController {
         const progressFill = host.shadowRoot.querySelector("[data-role='progress-fill']");
         const progressMeta = host.shadowRoot.querySelector("[data-role='progress-meta']");
         if (!bar || !status) return;
-        const label = this.getDomPageTranslatorLabel();
-        if (engine) engine.textContent = label;
+        const meta = this.getDomPageTranslatorMeta();
+        const label = meta.label;
+        if (engine) {
+            engine.innerHTML = `${meta.logo}<span data-role="engine-label">${label}</span>`;
+        }
         if (state === "error") {
             bar.dataset.state = "error";
             status.textContent = `${label} page translation failed${
@@ -1006,6 +1260,7 @@ class BannerController {
         }
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
+        this.destroyDomOriginalTooltip();
         this._domPageBanner = null;
         this._domTranslationCache.clear();
         this._domTotalTranslationEntries = 0;
@@ -1301,10 +1556,13 @@ class BannerController {
         }
         if (!eligibleNodes.length) return;
 
-        const groupOptions = this.getDomPageTranslationGroupOptions();
+        const fastLane = true;
+        const groupOptions = this.getDomPageTranslationGroupOptions({ fastLane });
         const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
-        if (this.getDomPageBatchOptions()) {
-            const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
+        if (this.getDomPageBatchOptions({ fastLane })) {
+            const entries = groups.map((group) =>
+                this.createDomPageTranslationEntry(group, { fastLane })
+            );
             const uncachedEntries = [];
             entries.forEach((entry) => {
                 const cached = this._domTranslationCache.get(entry.cacheKey);
@@ -1313,7 +1571,7 @@ class BannerController {
                 }
                 uncachedEntries.push(entry);
             });
-            const batches = this.buildDomPageTranslationBatches(uncachedEntries);
+            const batches = this.buildDomPageTranslationBatches(uncachedEntries, { fastLane });
             this._domTotalTranslationEntries += batches.length;
             this.updateDomPageBannerStatus();
             // Insert at FRONT of queue for priority processing
@@ -1428,7 +1686,12 @@ class BannerController {
                     const block = readableBlockReplacement.block;
                     if (translated && block && block.isConnected) {
                         this._translatedBlocks.add(block);
-                        this.applyWithFadeIn(block, translated, "block");
+                        this.applyWithFadeIn(
+                            block,
+                            translated,
+                            "block",
+                            readableBlockReplacement.sourceText
+                        );
                         this.markDomPageTranslationEntriesCompleted();
                     }
                     return;
@@ -1449,7 +1712,12 @@ class BannerController {
 
                 group.nodes.forEach((node, index) => {
                     if (translatedParts[index] && node.parentElement) {
-                        this.applyWithFadeIn(node, translatedParts[index], "text");
+                        this.applyWithFadeIn(
+                            node,
+                            translatedParts[index],
+                            "text",
+                            group.texts[index]
+                        );
                     }
                 });
                 this.markDomPageTranslationEntriesCompleted();
@@ -1500,7 +1768,7 @@ class BannerController {
                     }
                 }
                 if (translated && item.node.parentElement === item.parent) {
-                    item.node.nodeValue = translated;
+                    this.applyWithFadeIn(item.node, translated, "text", item.text);
                     this._translatedSet.add(item.node);
                 }
             } catch (error) {
@@ -1594,46 +1862,13 @@ class BannerController {
 
     flushDomTranslationQueue() {
         if (!this._domTranslationQueue) return;
-        if (this._domFlushStaggerTimer) return;
-
-        // Burst mode: first flush fires all slots at once for max speed
-        if (!this._domFlushBurstDone) {
-            this._domFlushBurstDone = true;
-            while (
-                this._domTranslationQueue.length &&
-                this._domActiveTranslations < this._domMaxConcurrentTranslations
-            ) {
-                const next = this._domTranslationQueue.shift();
-                next();
-            }
-            return;
-        }
-
-        // Subsequent flushes: stagger to spread responses
-        const startNext = () => {
-            if (
-                !this._domTranslationQueue ||
-                this._domActiveTranslations >= this._domMaxConcurrentTranslations ||
-                !this._domTranslationQueue.length
-            ) {
-                this._domFlushStaggerTimer = null;
-                return;
-            }
+        while (
+            this._domTranslationQueue.length &&
+            this._domActiveTranslations < this._domMaxConcurrentTranslations
+        ) {
             const next = this._domTranslationQueue.shift();
             next();
-            if (
-                this._domTranslationQueue.length &&
-                this._domActiveTranslations < this._domMaxConcurrentTranslations
-            ) {
-                this._domFlushStaggerTimer = setTimeout(() => {
-                    this._domFlushStaggerTimer = null;
-                    this.flushDomTranslationQueue();
-                }, 30);
-            } else {
-                this._domFlushStaggerTimer = null;
-            }
-        };
-        startNext();
+        }
     }
 }
 
