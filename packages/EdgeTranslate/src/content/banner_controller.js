@@ -154,7 +154,6 @@ class BannerController {
             this.showDomPageBanner();
             this.startDomFallback();
             this.startDomScrollPrioritizer();
-            console.log(`[ET] AI page engine=${this._domPageTranslateOptions.engine}`);
             this.startFullPageBatchTranslation();
         });
 
