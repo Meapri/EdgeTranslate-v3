@@ -243,6 +243,10 @@
         "message": "Google 페이지 번역",
         "description": "Google로 현재 페이지 번역"
     },
+    "AIPageTranslate": {
+        "message": "AI 페이지 번역",
+        "description": "AI(Google AI Studio 또는 OpenAI)로 페이지 번역"
+    },
     "TranslatePage": {
         "message": "이 페이지 번역",
         "description": "기본 번역기로 페이지 번역"
@@ -1331,14 +1335,8 @@
         "message": "Chrome Gemini Nano 온디바이스",
         "description": "지원되는 데스크톱 Chrome의 내장 Translator API를 사용합니다."
     },
-    "ChromeBuiltinPageTranslate": {
-        "message": "Chrome Gemini Nano 온디바이스 페이지 번역"
-    },
     "LocalTranslatorTimeoutMs": {
         "message": "AI 번역기 제한 시간(ms)"
-    },
-    "LocalPageTranslate": {
-        "message": "AI 번역기 페이지 번역"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

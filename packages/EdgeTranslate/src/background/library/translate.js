@@ -989,16 +989,33 @@ class TranslatorManager {
                 // cache first
                 let result = this.getTranslationFromCache(text, sl, tl, translatorId);
                 if (!result) {
-                    if (engine === "geminiNano" || engine === "chromeBuiltin") {
-                        result = await this.translateWithGeminiNanoPrompt(text, sl, tl);
+                    const key = this.makeTranslateKey(text, sl, tl, translatorId);
+                    if (this.inflightTranslate.has(key)) {
+                        result = await this.inflightTranslate.get(key);
                     } else {
-                        result = await this.TRANSLATORS[translatorId].translate(text, sl, tl);
+                        const promise = (async () => {
+                            if (engine === "geminiNano" || engine === "chromeBuiltin") {
+                                return await this.translateWithGeminiNanoPrompt(text, sl, tl);
+                            }
+                            return await this.TRANSLATORS[translatorId].translate(text, sl, tl);
+                        })()
+                            .then((res) => {
+                                if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
+                                return res;
+                            })
+                            .finally(() => this.inflightTranslate.delete(key));
+                        this.inflightTranslate.set(key, promise);
+                        result = await promise;
                     }
-                    if (result) this.rememberTranslation(text, sl, tl, translatorId, result);
                 }
                 return Promise.resolve(result || { originalText: text, translatedText: text });
             } catch (e) {
-                return Promise.resolve({ originalText: text, translatedText: text });
+                return Promise.resolve({
+                    originalText: text,
+                    translatedText: text,
+                    translationFailed: true,
+                    errorMsg: String(e && e.errorMsg ? e.errorMsg : e && e.message ? e.message : e),
+                });
             } finally {
                 this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
             }

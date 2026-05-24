@@ -34,19 +34,19 @@ describe("DOM page translation banner", () => {
 
     it("shows a Google-like top banner for AI page translation progress", async () => {
         const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "geminiNano", sl: "en", tl: "ko" };
+        controller._domPageTranslateOptions = { engine: "openai", sl: "en", tl: "ko" };
         controller.showDomPageBanner();
         await Promise.resolve();
 
         const banner = document.getElementById("edge-translate-dom-page-banner");
         expect(banner).not.toBeNull();
         expect(banner.shadowRoot.textContent).toContain("Edge Translate");
-        expect(banner.shadowRoot.textContent).toContain("Gemini Nano page translation is starting");
+        expect(banner.shadowRoot.textContent).toContain("OpenAI page translation is starting");
         expect(document.body.style.getPropertyValue("top")).toBe("40px");
 
         controller._domTotalTranslationEntries = 3;
         controller.markDomPageTranslationEntriesCompleted(2);
-        expect(banner.shadowRoot.textContent).toContain("Gemini Nano page translation 2/3");
+        expect(banner.shadowRoot.textContent).toContain("OpenAI page translation 2/3");
     });
 
     it("can hide and cancel the DOM page translation banner", async () => {
@@ -68,15 +68,15 @@ describe("DOM page translation banner", () => {
         expect(document.body.style.getPropertyValue("top")).toBe("0px");
     });
 
-    it("uses segmented batch jobs for Gemini Nano page translation", () => {
+    it("uses segmented batch jobs for AI page translation", () => {
         const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "geminiNano", sl: "en", tl: "ko" };
-        controller._domMaxConcurrentTranslations = 4;
+        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        controller._domMaxConcurrentTranslations = 8;
         const entries = Array.from({ length: 21 }, (_, index) => ({
             sourceText: `Paragraph ${index + 1}.`,
         }));
 
-        expect(controller._domMaxConcurrentTranslations).toBe(4);
+        expect(controller._domMaxConcurrentTranslations).toBe(8);
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 9000, maxItems: 14 });
         expect(controller.buildDomPageTranslationBatches(entries)).toHaveLength(2);
         controller.recordDomPageBatchFailure();
@@ -121,6 +121,12 @@ describe("DOM page translation banner", () => {
                 <p id="deferred">Deferred article text</p>
             </article>
         `;
+        document.querySelector("nav").getBoundingClientRect = () => ({
+            top: 20,
+            bottom: 40,
+            width: 200,
+            height: 20,
+        });
         document.getElementById("visible").getBoundingClientRect = () => ({
             top: 50,
             bottom: 80,
@@ -135,16 +141,21 @@ describe("DOM page translation banner", () => {
         });
 
         const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "googleAiStudio" };
         controller._domPageRootElements = controller.getDomPageTranslationRoots();
         const nodes = controller.collectDomPageTextNodes(controller._domPageRootElements);
         const { immediate, deferred } = controller.partitionDomPageTextNodes(nodes);
 
-        expect(controller._domPageRootElements[0].tagName).toBe("ARTICLE");
+        expect(controller._domPageRootElements[0].tagName).toBe("BODY");
         expect(nodes.map((node) => node.nodeValue.trim())).toEqual([
+            "Skip navigation text",
             "Visible article text",
             "Deferred article text",
         ]);
-        expect(immediate.map((node) => node.nodeValue.trim())).toEqual(["Visible article text"]);
+        expect(immediate.map((node) => node.nodeValue.trim())).toEqual([
+            "Skip navigation text",
+            "Visible article text",
+        ]);
         expect(deferred.map((node) => node.nodeValue.trim())).toEqual(["Deferred article text"]);
     });
 });

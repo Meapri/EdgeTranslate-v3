@@ -262,13 +262,13 @@ function splitSegmentedTranslationText(translatedText, expectedCount) {
     const translated = String(translatedText || "").trim();
     if (!translated || expectedCount <= 0) return null;
 
-    const markerPattern = /<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>/g;
+    const markerPattern = /<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
     const matches = Array.from(translated.matchAll(markerPattern));
     if (matches.length !== expectedCount) return null;
 
     const parts = new Array(expectedCount);
     for (let i = 0; i < matches.length; i += 1) {
-        const markerIndex = Number(matches[i][1]) - 1;
+        const markerIndex = Number(matches[i][1] || matches[i][2]) - 1;
         if (markerIndex < 0 || markerIndex >= expectedCount || parts[markerIndex] !== undefined) {
             return null;
         }

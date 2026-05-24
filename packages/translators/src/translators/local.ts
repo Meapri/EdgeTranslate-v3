@@ -90,10 +90,10 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-06-25-08";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-24-opt";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 12;
 const AI_TRANSLATION_SYSTEM_PROMPT = [
     "Translate naturally while preserving meaning, tone, intent, nuance, register, context, and character voice.",
     "Output only the translation, or only the exact JSON object when JSON is requested. Do not add notes, alternatives, labels, Markdown, or process narration.",
@@ -109,7 +109,6 @@ const DICTIONARY_OUTPUT_INSTRUCTION = [
     '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
     "Use the target language for translation, meanings, definitions, and translated examples. Keep source examples in the source language. For ordinary dictionary terms, provide at least one detailedMeaning, one definition, and two examples whenever possible. If a field is truly not applicable, use an empty array rather than prose. Do not wrap the JSON in Markdown.",
 ].join(" ");
-
 
 class RequestLimiter {
     private active = 0;
@@ -133,6 +132,27 @@ class RequestLimiter {
 }
 
 const localRequestLimiter = new RequestLimiter(DEFAULT_MAX_CONCURRENT_REQUESTS);
+
+async function retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    maxRetries = 2,
+    baseDelayMs = 1000
+): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error: any) {
+            lastError = error;
+            const msg = error?.errorMsg || error?.message || "";
+            const isRetryable =
+                /429|500|502|503|rate/i.test(msg);
+            if (!isRetryable || attempt === maxRetries) throw error;
+            await new Promise((r) => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
+        }
+    }
+    throw lastError;
+}
 
 function normalizeMode(mode?: string): LocalTranslatorMode {
     if (mode === "chromeBuiltin" || mode === "geminiNano") return "chromeBuiltin";
@@ -266,6 +286,44 @@ function parsePlainTranslationOutput(output: string) {
     );
 }
 
+function getKoreanMixedScriptFragments(text: string) {
+    const fragments = new Set<string>();
+    const tokens = String(text || "").match(/[^\s.,!?。！？()[\]{}"']+/g) || [];
+    for (const token of tokens) {
+        if (/[\uAC00-\uD7AF]/.test(token) && /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(token)) {
+            fragments.add(token);
+        }
+    }
+    return Array.from(fragments);
+}
+
+function isAcceptableKoreanFragmentRepair(source: string, translation: string) {
+    const repaired = String(translation || "").trim();
+    if (!source || !repaired) return false;
+    if (/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(repaired)) return false;
+    const compactSourceLength = source.replace(/\s+/g, "").length;
+    const compactRepairLength = repaired.replace(/\s+/g, "").length;
+    return compactRepairLength <= Math.max(compactSourceLength * 2, compactSourceLength + 4);
+}
+
+function parseGeminiNanoScriptRepairs(output: string) {
+    const cleaned = stripCodeFence(output);
+    const jsonStart = cleaned.indexOf("{");
+    const jsonEnd = cleaned.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd <= jsonStart) return [];
+    try {
+        const payload = JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1));
+        return asArray(payload?.repairs)
+            .map((item) => ({
+                source: String(item?.source || "").trim(),
+                translation: String(item?.translation || "").trim(),
+            }))
+            .filter((item) => item.source && item.translation);
+    } catch {
+        return [];
+    }
+}
+
 function extractOpenAIMessageContent(message: any) {
     const content = message?.content;
     if (typeof content === "string") return content.trim();
@@ -279,6 +337,14 @@ function extractOpenAIMessageContent(message: any) {
             .trim();
     }
     return "";
+}
+
+function buildOpenAiCompletionLimit(model: string, tokenBudget: number) {
+    const budget = Math.max(16, Math.ceil(tokenBudget));
+    if (/^gpt-5/i.test(model || "")) {
+        return { max_completion_tokens: budget };
+    }
+    return { max_tokens: budget };
 }
 
 function asArray(value: any) {
@@ -507,10 +573,14 @@ class LocalTranslator {
             return this.requestChromeBuiltinTranslation(text, from, to);
         }
         if (this.mode === "googleAiStudio") {
-            return this.requestGoogleAiStudioTranslation(text, from, to);
+            return retryWithBackoff(() =>
+                this.requestGoogleAiStudioTranslation(text, from, to)
+            );
         }
         if (this.mode === "openai") {
-            return this.requestOpenAiTranslation(text, from, to);
+            return retryWithBackoff(() =>
+                this.requestOpenAiTranslation(text, from, to)
+            );
         }
         return this.requestChromeBuiltinTranslation(text, from, to);
     }
@@ -610,10 +680,24 @@ class LocalTranslator {
             ? DICTIONARY_OUTPUT_INSTRUCTION
             : "";
         const parts = [
+            "Translate the user's text.",
+            "Translate faithfully and naturally into the target language.",
+            "Keep the same text form: heading stays heading, label stays label, sentence stays sentence, and list stays list.",
+            "Do not summarize, explain, or add information.",
+            "Respect the original formatting, line breaks, segment markers, placeholders, URLs, code, and markup.",
+            "Use the customary writing system of natural Korean when Korean is the target language.",
+            "Translate or transliterate names, brands, product names, service names, and ordinary terms when that is natural in the target language. Only non-linguistic tokens may stay unchanged.",
+            "For Han-script source text, translate complete semantic units. Do not partially translate compound nouns.",
+            "Never create mixed-script words by combining source-script characters with target-language characters.",
+            "Before finalizing, rewrite any remaining source-language fragment. Source-language text is forbidden in the output except for preserved URLs, code, IDs, and exact placeholders.",
+            "Silently scan the final answer for mixed-script words.",
             `Source language: ${sourceLanguage}.`,
             `Target language: ${targetLanguage}.`,
             scriptRule,
             dictionaryInstruction,
+            /<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(text)
+                ? "For marked segments, preserve every marker and role metadata exactly while translating only the text after each marker."
+                : "",
             "",
             text,
         ];
@@ -639,14 +723,96 @@ class LocalTranslator {
         return extractOpenAIMessageContent(payload?.choices?.[0]?.message);
     }
 
-    private buildGoogleAiStudioGenerationConfig() {
+    private buildGoogleAiStudioGenerationConfig(inputLength?: number) {
         const config: Record<string, any> = {
+            candidateCount: 1,
             temperature: 0,
+            topK: 1,
         };
-        if (/^gemini-2\.5-/i.test(this.model)) {
+        if (inputLength) {
+            config.maxOutputTokens = Math.max(256, Math.ceil(inputLength * 3));
+        }
+        if (/^gemini-/i.test(this.model)) {
             config.thinkingConfig = { thinkingBudget: 0 };
         }
         return config;
+    }
+
+    private buildKoreanScriptRepairPrompt(
+        sourceText: string,
+        translatedText: string,
+        fragments: string[]
+    ) {
+        return [
+            "Repair only the listed problematic fragments in the Korean translation.",
+            "Do not retranslate the whole sentence or paragraph.",
+            "Keep the same grammatical span as the fragment.",
+            "Return only JSON: {\"repairs\":[{\"source\":\"...\",\"translation\":\"...\"}]}",
+            "",
+            "Original source text:",
+            sourceText,
+            "",
+            "Current Korean translation:",
+            translatedText,
+            "",
+            "Problematic fragments:",
+            ...fragments.map((fragment) => `- ${fragment}`),
+        ].join("\n");
+    }
+
+    private async repairKoreanMixedScriptTranslation(translated: string, sourceText: string, to: string) {
+        if (toChromeTranslatorLanguage(to) !== "ko") return translated;
+        const fragments = getKoreanMixedScriptFragments(translated);
+        if (!fragments.length) return translated;
+
+        const response = await fetch(
+            `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${encodeURIComponent(
+                this.model
+            )}:generateContent?key=${encodeURIComponent(this.apiKey)}`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    systemInstruction: {
+                        parts: [
+                            {
+                                text: "You repair Korean mixed-script translation fragments. Output only JSON.",
+                            },
+                        ],
+                    },
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [
+                                {
+                                    text: this.buildKoreanScriptRepairPrompt(
+                                        sourceText,
+                                        translated,
+                                        fragments
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                    generationConfig: this.buildGoogleAiStudioGenerationConfig(
+                        translated.length
+                    ),
+                }),
+            }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) return translated;
+
+        const repairs = parseGeminiNanoScriptRepairs(this.parseGoogleAiStudioResponse(payload));
+        let repairedText = translated;
+        for (const repair of repairs) {
+            if (!fragments.includes(repair.source)) continue;
+            if (!isAcceptableKoreanFragmentRepair(repair.source, repair.translation)) continue;
+            repairedText = repairedText.replace(repair.source, repair.translation);
+        }
+        return repairedText;
     }
 
 
@@ -674,7 +840,7 @@ class LocalTranslator {
                                 parts: [{ text: this.buildGoogleAiStudioPrompt(text, from, to) }],
                             },
                         ],
-                        generationConfig: this.buildGoogleAiStudioGenerationConfig(),
+                        generationConfig: this.buildGoogleAiStudioGenerationConfig(text.length),
                     }),
                     signal: controller.signal,
                 }
@@ -701,9 +867,14 @@ class LocalTranslator {
                 } as TranslationResult;
             }
 
-            const translated = parsePlainTranslationOutput(rawOutput);
+            let translated = parsePlainTranslationOutput(rawOutput);
             if (!translated) {
                 throw new Error("Google AI Studio returned an empty translation.");
+            }
+            try {
+                translated = await this.repairKoreanMixedScriptTranslation(translated, text, to);
+            } catch {
+                // Keep the primary translation if the optional repair pass fails.
             }
 
             return {
@@ -757,6 +928,7 @@ class LocalTranslator {
                     ...(isDictionaryCandidate(text)
                         ? { response_format: { type: "json_object" } }
                         : {}),
+                    ...buildOpenAiCompletionLimit(this.openaiModel, Math.max(256, text.length * 3)),
                 }),
                 signal: controller.signal,
             });

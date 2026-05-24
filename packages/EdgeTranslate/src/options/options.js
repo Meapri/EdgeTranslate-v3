@@ -83,20 +83,40 @@ window.onload = () => {
                 settingItemPath.join(" ") === "DefaultPageTranslator" &&
                 (settingItemValue === "GeminiNanoPageTranslate" ||
                     settingItemValue === "LocalPageTranslate" ||
-                    settingItemValue === "ChromeBuiltinPageTranslate")
+                    settingItemValue === "ChromeBuiltinPageTranslate" ||
+                    settingItemValue === "DomPageTranslate")
             ) {
-                settingItemValue = "GooglePageTranslate";
+                const localConfig = result.LocalTranslatorConfig || {};
+                const isAiMode =
+                    localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+                settingItemValue =
+                    localConfig.enabled && isAiMode ? "AIPageTranslate" : "GooglePageTranslate";
                 saveOption(result, settingItemPath, settingItemValue);
+            }
+            // If AIPageTranslate was selected but AI is no longer available, reset
+            if (
+                settingItemPath.join(" ") === "DefaultPageTranslator" &&
+                settingItemValue === "AIPageTranslate"
+            ) {
+                const localConfig = result.LocalTranslatorConfig || {};
+                const isAiMode =
+                    localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+                if (!localConfig.enabled || !isAiMode) {
+                    settingItemValue = "GooglePageTranslate";
+                    saveOption(result, settingItemPath, settingItemValue);
+                }
             }
 
             switch (element.getAttribute("setting-type")) {
                 case "checkbox":
+                    if (!Array.isArray(settingItemValue)) settingItemValue = [];
                     element.checked = settingItemValue.indexOf(element.value) !== -1;
                     // update setting value
                     element.onchange = (event) => {
                         const target = event.target;
                         const settingItemPath = target.getAttribute("setting-path").split(/\s/g);
-                        const settingItemValue = getSetting(result, settingItemPath);
+                        let settingItemValue = getSetting(result, settingItemPath);
+                        if (!Array.isArray(settingItemValue)) settingItemValue = [];
 
                         // if user checked this option, add value to setting array
                         if (target.checked) settingItemValue.push(target.value);
@@ -139,6 +159,7 @@ window.onload = () => {
                         );
                         if (target.id === "local-translator-mode") {
                             syncLocalTranslatorFields(target.value);
+                            syncAiPageTranslatorVisibility(result);
                         }
                     };
                     break;
@@ -155,6 +176,18 @@ window.onload = () => {
             }
         }
         syncLocalTranslatorFields(result.LocalTranslatorConfig?.mode || "chromeBuiltin");
+        syncAiPageTranslatorVisibility(result);
+
+        // Update AI page translator visibility when local-translator-enabled changes
+        const enabledCheckbox = document.getElementById("local-translator-enabled");
+        if (enabledCheckbox) {
+            const originalOnChange = enabledCheckbox.onchange;
+            enabledCheckbox.onchange = (event) => {
+                if (originalOnChange) originalOnChange(event);
+                // Defer to let the setting value propagate
+                setTimeout(() => syncAiPageTranslatorVisibility(result), 0);
+            };
+        }
     });
 };
 
@@ -172,6 +205,26 @@ function syncLocalTranslatorFields(mode) {
             element.hidden = hidden;
         });
     });
+}
+
+function syncAiPageTranslatorVisibility(localSettings) {
+    const localConfig = localSettings.LocalTranslatorConfig || {};
+    const isAiMode = localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+    const showAi = Boolean(localConfig.enabled && isAiMode);
+    const aiRow = document.getElementById("ai-page-translator-row");
+    if (aiRow) aiRow.hidden = !showAi;
+
+    // If AI page translator was selected but is no longer available, fall back
+    if (!showAi) {
+        const aiRadio = document.getElementById("ai-page-translator");
+        if (aiRadio && aiRadio.checked) {
+            const googleRadio = document.getElementById("google-page-translator");
+            if (googleRadio) {
+                googleRadio.checked = true;
+                saveOption(localSettings, ["DefaultPageTranslator"], "GooglePageTranslate");
+            }
+        }
+    }
 }
 
 /**

@@ -17,32 +17,7 @@ describe("pageTranslate module", () => {
         expect(typeof executeGoogleScript).toBe("function");
     });
 
-    it("migrates Chrome built-in page translation to Google page translation", async () => {
-        getOrSetDefaultSettings.mockResolvedValue({
-            DefaultPageTranslator: "ChromeBuiltinPageTranslate",
-            languageSetting: { sl: "en", tl: "ko" },
-            LocalTranslatorConfig: {},
-        });
-        const channel = { emitToTabs: jest.fn() };
-        chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
-        chrome.scripting = { executeScript: jest.fn().mockResolvedValue(undefined) };
-
-        translatePage(channel);
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_page_translate", {
-            translator: "google",
-        });
-        expect(channel.emitToTabs).not.toHaveBeenCalledWith(
-            42,
-            "start_dom_page_translate",
-            expect.anything()
-        );
-    });
-
-    it("runs only Google page translation when Google is selected", async () => {
+    it("keeps Google page translation when Google is selected", async () => {
         getOrSetDefaultSettings.mockResolvedValue({
             DefaultPageTranslator: "GooglePageTranslate",
             languageSetting: { sl: "en", tl: "ko" },
@@ -69,28 +44,44 @@ describe("pageTranslate module", () => {
         );
     });
 
-    it("migrates legacy Local page translation to Google page translation", async () => {
+    it("runs OpenAI AI page translation when AI page translation is selected", async () => {
         getOrSetDefaultSettings.mockResolvedValue({
-            DefaultPageTranslator: "LocalPageTranslate",
+            DefaultPageTranslator: "AIPageTranslate",
             languageSetting: { sl: "en", tl: "ko" },
-            LocalTranslatorConfig: { enabled: true, mode: "chromeBuiltin" },
+            LocalTranslatorConfig: { enabled: true, mode: "openai" },
         });
         const channel = { emitToTabs: jest.fn() };
         chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
-        chrome.scripting = { executeScript: jest.fn().mockResolvedValue(undefined) };
 
         translatePage(channel);
         await Promise.resolve();
         await Promise.resolve();
+
+        expect(channel.emitToTabs).toHaveBeenCalledTimes(1);
+        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
+            engine: "openai",
+            sl: "en",
+            tl: "ko",
+        });
+    });
+
+    it("routes legacy AI page translation values to the new AI page translator", async () => {
+        getOrSetDefaultSettings.mockResolvedValue({
+            DefaultPageTranslator: "LocalPageTranslate",
+            languageSetting: { sl: "en", tl: "ko" },
+            LocalTranslatorConfig: { enabled: true, mode: "googleAiStudio" },
+        });
+        const channel = { emitToTabs: jest.fn() };
+        chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
+
+        translatePage(channel);
+        await Promise.resolve();
         await Promise.resolve();
 
-        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_page_translate", {
-            translator: "google",
+        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
+            engine: "googleAiStudio",
+            sl: "en",
+            tl: "ko",
         });
-        expect(channel.emitToTabs).not.toHaveBeenCalledWith(
-            42,
-            "start_dom_page_translate",
-            expect.anything()
-        );
     });
 });

@@ -12,6 +12,15 @@ import {
     splitTranslatedContext,
 } from "./dom_page_translate_context.js";
 
+function fnv1a32(str) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = (hash * 0x01000193) >>> 0;
+    }
+    return hash.toString(36);
+}
+
 /**
  * Control the visibility of page translator banners.
  */
@@ -20,7 +29,7 @@ class BannerController {
         // Communication channel.
         this.channel = new Channel();
 
-        // Allowed translator: google.
+        // Active page translation mode: google or AI DOM translation.
         this.currentTranslator = null;
 
         // Message listener canceller.
@@ -36,13 +45,12 @@ class BannerController {
         this._translatedBlocks = new WeakSet();
         this._scheduleBatch = null;
         this._pendingNodes = new Set();
-        this._domPageTranslateOptions = { engine: "dom", sl: "auto", tl: "en" };
+        this._domPageTranslateOptions = { engine: "googleAiStudio", sl: "auto", tl: "en" };
         this._domResolvedSourceLanguage = null;
         this._domTranslationCache = new Map();
         this._domTranslationCacheMax = 2000;
         this._domActiveTranslations = 0;
         this._domMaxConcurrentTranslations = 2;
-        this._domOnDeviceUnavailable = false;
         this._domPageBanner = null;
         this._domPageBannerVisible = true;
         this._domTotalTranslationEntries = 0;
@@ -129,28 +137,25 @@ class BannerController {
             this.currentTranslator = "dom";
             this._domTranslationQueue = [];
             this._domActiveTranslations = 0;
-            this._domOnDeviceUnavailable = false;
             this._domCompletedTranslationEntries = 0;
             this._domTotalTranslationEntries = 0;
             this._domBatchFailureCount = 0;
+            this._domFlushBurstDone = false;
+            const concurrencyByEngine = {
+                googleAiStudio: 8,
+                openai: 8,
+            };
             this._domMaxConcurrentTranslations =
-                this._domPageTranslateOptions.engine === "geminiNano" ? 4 : 2;
+                concurrencyByEngine[this._domPageTranslateOptions.engine] || 2;
             this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
                 this._domPageTranslateOptions.sl
             );
             this._domPageRootElements = this.getDomPageTranslationRoots();
-            this.warmUpDomPageTranslator();
             this.showDomPageBanner();
             this.startDomFallback();
-            // initial scan to cover existing content
-            const nodes = this.collectDomPageTextNodes(this._domPageRootElements);
-            const { immediate, deferred } = this.partitionDomPageTextNodes(nodes);
-            const firstPass = immediate.length ? immediate : deferred.slice(0, 24);
-            this.translateBatchNodes(firstPass);
-            const firstPassNodes = new Set(firstPass);
-            this.scheduleDeferredDomPageTranslation(
-                deferred.filter((node) => !firstPassNodes.has(node))
-            );
+            this.startDomScrollPrioritizer();
+            console.log(`[ET] AI page engine=${this._domPageTranslateOptions.engine}`);
+            this.startFullPageBatchTranslation();
         });
 
         // Background may request canceling DOM fallback scheduling when banner is visible
@@ -164,47 +169,19 @@ class BannerController {
     }
 
     normalizeDomPageTranslateEngine(engine) {
-        if (
-            engine === "dom" ||
-            engine === "googleAiStudio" ||
-            engine === "geminiNano" ||
-            engine === "chromeBuiltin"
-        ) {
-            return engine === "chromeBuiltin" ? "geminiNano" : engine;
-        }
-        return "geminiNano";
-    }
-
-    warmUpDomPageTranslator() {
-        if (this._domPageTranslateOptions.engine !== "geminiNano") return;
-        if (!this.channel || typeof this.channel.request !== "function") return;
-        const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl || "auto";
-        const tl = this._domPageTranslateOptions.tl || "en";
-        this.channel.request("warmup_gemini_nano", { sl, tl }).catch(() => {});
+        if (engine === "openai") return "openai";
+        return "googleAiStudio";
     }
 
     getDomPageTranslationRoots() {
-        const selectors = [
-            "article",
-            "main",
-            "[role='main']",
-            ".article-content",
-            ".entry-content",
-        ];
-        const roots = [];
-        for (const selector of selectors) {
-            document.querySelectorAll(selector).forEach((element) => {
-                if (!element || roots.some((root) => root === element || root.contains(element))) {
-                    return;
-                }
-                for (let i = roots.length - 1; i >= 0; i -= 1) {
-                    if (element.contains(roots[i])) roots.splice(i, 1);
-                }
-                roots.push(element);
-            });
-            if (roots.length) break;
-        }
-        return roots.length ? roots : [document.body].filter(Boolean);
+        return [document.body].filter(Boolean);
+    }
+
+    startFullPageBatchTranslation() {
+        const nodes = this.collectDomPageTextNodes(this._domPageRootElements);
+        const { immediate, deferred } = this.partitionDomPageTextNodes(nodes);
+        if (immediate.length) this.translateBatchNodesPriority(immediate);
+        if (deferred.length) this.translateBatchNodes(deferred);
     }
 
     isNodeInDomPageTranslationRoot(node) {
@@ -229,7 +206,6 @@ class BannerController {
         if (this._translatedSet.has(node)) return false;
         return true;
     }
-
     collectDomPageTextNodes(roots) {
         const nodes = [];
         for (const root of roots || []) {
@@ -243,6 +219,19 @@ class BannerController {
         return nodes;
     }
 
+    /**
+     * Check if node is in the EXACT current viewport (no margin).
+     * Used for highest-priority translation of what user sees right now.
+     */
+    isDomPageTextNodeInExactViewport(node) {
+        const element = node && node.parentElement;
+        if (!element || typeof element.getBoundingClientRect !== "function") return false;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        const vh = window.innerHeight || 800;
+        return rect.bottom >= 0 && rect.top <= vh;
+    }
+
     isDomPageTextNodeNearViewport(node) {
         const element = node && node.parentElement;
         if (!element || typeof element.getBoundingClientRect !== "function") return true;
@@ -252,6 +241,11 @@ class BannerController {
         return rect.bottom >= -margin && rect.top <= (window.innerHeight || 800) + margin;
     }
 
+    /**
+     * Partition nodes into immediate (near viewport) and deferred.
+     * Sort immediate nodes by vertical position (top-to-bottom) so
+     * content at the top of the viewport is translated first.
+     */
     partitionDomPageTextNodes(nodes) {
         const immediate = [];
         const deferred = [];
@@ -259,7 +253,62 @@ class BannerController {
             if (this.isDomPageTextNodeNearViewport(node)) immediate.push(node);
             else deferred.push(node);
         }
+        // Sort by vertical position: top of page first
+        immediate.sort((a, b) => {
+            const aRect = a.parentElement && a.parentElement.getBoundingClientRect();
+            const bRect = b.parentElement && b.parentElement.getBoundingClientRect();
+            return (aRect ? aRect.top : 0) - (bRect ? bRect.top : 0);
+        });
         return { immediate, deferred };
+    }
+
+    /**
+     * Scroll-aware prioritizer: when user scrolls, find untranslated nodes
+     * in the current viewport and push them to the FRONT of the queue.
+     */
+    startDomScrollPrioritizer() {
+        if (this._domScrollHandler) return;
+        let scrollTimer = null;
+        this._domScrollHandler = () => {
+            if (scrollTimer) return;
+            scrollTimer = setTimeout(() => {
+                scrollTimer = null;
+                this.prioritizeViewportTranslation();
+            }, 150);
+        };
+        window.addEventListener("scroll", this._domScrollHandler, { passive: true });
+    }
+
+    /**
+     * Find untranslated nodes in the exact viewport and translate them immediately
+     * by pushing to the FRONT of the queue.
+     */
+    prioritizeViewportTranslation() {
+        if (!this._domPageRootElements || this.currentTranslator !== "dom") return;
+        if (this._domCircuitBreakerActive) return;
+        const viewportNodes = [];
+        for (const root of this._domPageRootElements) {
+            if (!root) continue;
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (
+                    !this._translatedSet.has(node) &&
+                    this.isMeaningfulDomPageTextNode(node) &&
+                    this.isDomPageTextNodeInExactViewport(node)
+                ) {
+                    viewportNodes.push(node);
+                }
+            }
+        }
+        if (!viewportNodes.length) return;
+        // Sort top-to-bottom
+        viewportNodes.sort((a, b) => {
+            const aRect = a.parentElement && a.parentElement.getBoundingClientRect();
+            const bRect = b.parentElement && b.parentElement.getBoundingClientRect();
+            return (aRect ? aRect.top : 0) - (bRect ? bRect.top : 0);
+        });
+        this.translateBatchNodesPriority(viewportNodes);
     }
 
     scheduleDeferredDomPageTranslation(nodes) {
@@ -305,7 +354,7 @@ class BannerController {
 
     scheduleIdleDeferredDomPageTranslation() {
         if (this._domIdleHandle || this._domDeferredTimer) return;
-        const flush = (limit = 18) => {
+        const flush = (limit = 100) => {
             this._domIdleHandle = null;
             this._domDeferredTimer = null;
             const nodes = Array.from(this._domDeferredNodes).slice(0, limit);
@@ -315,13 +364,13 @@ class BannerController {
                 this._domDeferredTimer = setTimeout(() => {
                     this._domDeferredTimer = null;
                     this.scheduleIdleDeferredDomPageTranslation();
-                }, 1200);
+                }, 200);
             }
         };
         if (typeof requestIdleCallback === "function") {
-            this._domIdleHandle = requestIdleCallback(() => flush(24), { timeout: 2500 });
+            this._domIdleHandle = requestIdleCallback(() => flush(120), { timeout: 800 });
         } else {
-            this._domDeferredTimer = setTimeout(() => flush(18), 1600);
+            this._domDeferredTimer = setTimeout(() => flush(100), 400);
         }
     }
 
@@ -431,7 +480,7 @@ class BannerController {
                 text,
                 sl: from,
                 tl: to,
-                engine: this._domPageTranslateOptions.engine || "geminiNano",
+                engine: "chromeBuiltin",
                 streamId,
                 draftTranslation,
                 fastPostEdit,
@@ -449,60 +498,60 @@ class BannerController {
     }
 
     async translateWithDomPageEngine(text, from, to) {
-        if (
-            this._domPageTranslateOptions.engine === "googleAiStudio" ||
-            this._domPageTranslateOptions.engine === "geminiNano" ||
-            this._domPageTranslateOptions.engine === "chromeBuiltin"
-        ) {
-            return await this.channel.request("translate_text_quiet", {
-                text,
-                sl: from,
-                tl: to,
-                translatorId: "LocalTranslate",
-                engine: this._domPageTranslateOptions.engine,
-            });
-        }
-        return await this.translateWithOnDeviceEngine(text, from, to);
+        return await this.channel.request("translate_text_quiet", {
+            text,
+            sl: from,
+            tl: to,
+            translatorId: "LocalTranslate",
+            engine: this._domPageTranslateOptions.engine,
+        });
     }
 
     getDomPageTranslationGroupOptions() {
-        if (this._domPageTranslateOptions.engine === "googleAiStudio") return { maxChars: 6000 };
-        if (this._domPageTranslateOptions.engine === "geminiNano") return { maxChars: 4500 };
-        return undefined;
+        return { maxChars: 9000 };
     }
 
     getReadableBlockReplacementOptions() {
-        if (this._domPageTranslateOptions.engine === "googleAiStudio") {
-            return { maxChars: 6000 };
-        }
-        if (this._domPageTranslateOptions.engine === "geminiNano") {
-            return { maxChars: 4500 };
-        }
-        return undefined;
+        return { maxChars: 9000 };
     }
 
     getDomPageBatchOptions() {
-        if (this._domPageTranslateOptions.engine === "geminiNano") {
-            return { maxChars: 4500, maxItems: 1 };
-        }
-        if (this._domPageTranslateOptions.engine !== "googleAiStudio") return null;
-        return { maxChars: 6000, maxItems: 1 };
+        if (this._domBatchFailureCount >= 2) return { maxChars: 5000, maxItems: 6 };
+        if (this._domBatchFailureCount >= 1) return { maxChars: 7000, maxItems: 8 };
+        return { maxChars: 9000, maxItems: 14 };
     }
 
     recordDomPageBatchFailure() {
         this._domBatchFailureCount += 1;
+        if (this._domBatchFailureCount >= 5) {
+            this.triggerDomPageCircuitBreaker();
+        }
     }
 
     recordDomPageBatchSuccess() {
         if (this._domBatchFailureCount > 0) this._domBatchFailureCount -= 1;
     }
 
+    /**
+     * Circuit breaker: pause translation for 30s when too many consecutive failures.
+     * Prevents burning API tokens on persistent errors (e.g., invalid key, rate limit).
+     */
+    triggerDomPageCircuitBreaker() {
+        if (this._domCircuitBreakerActive) return;
+        this._domCircuitBreakerActive = true;
+        // Drain queue to stop further requests
+        if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
+        this.updateDomPageBannerStatus("error");
+        setTimeout(() => {
+            this._domCircuitBreakerActive = false;
+            this._domBatchFailureCount = 0;
+            this.updateDomPageBannerStatus();
+            this.flushDomTranslationQueue();
+        }, 30000);
+    }
+
     shouldUseDomPageRoleSegment() {
-        return (
-            this._domPageTranslateOptions.engine === "googleAiStudio" ||
-            this._domPageTranslateOptions.engine === "geminiNano" ||
-            this._domPageTranslateOptions.engine === "chromeBuiltin"
-        );
+        return true;
     }
 
     buildDomPageRoleSegmentText(entry) {
@@ -530,7 +579,14 @@ class BannerController {
             ? readableBlockReplacement.role || group.role
             : group.role;
         const cacheMode = readableBlockReplacement ? "readable-block" : "context";
-        const cacheKey = `${this._domPageTranslateOptions.engine}|${cacheMode}|${role}|${sl}|${tl}|${sourceText}`;
+        const cacheKey = [
+            this._domPageTranslateOptions.engine,
+            cacheMode,
+            role,
+            sl,
+            tl,
+            fnv1a32(sourceText),
+        ].join("|");
         return { group, readableBlockReplacement, role, sourceText, cacheKey };
     }
 
@@ -542,7 +598,7 @@ class BannerController {
             const block = readableBlockReplacement.block;
             if (block && block.isConnected) {
                 this._translatedBlocks.add(block);
-                block.textContent = translated;
+                this.applyWithFadeIn(block, translated, "block");
                 return true;
             }
             return false;
@@ -553,47 +609,119 @@ class BannerController {
 
         group.nodes.forEach((node, index) => {
             if (translatedParts[index] && node.parentElement) {
-                node.nodeValue = translatedParts[index];
+                this.applyWithFadeIn(node, translatedParts[index], "text");
             }
         });
         return true;
     }
 
+    enqueueDomPageEntryNodeTranslations(entry, priority = false) {
+        const group = entry && entry.group;
+        if (!group || !group.nodes || !group.nodes.length) return;
+        this._domTotalTranslationEntries += group.nodes.length;
+        this.updateDomPageBannerStatus();
+        group.nodes.forEach((node, index) => {
+            this.enqueueDomPageNodeTranslation(
+                {
+                    node,
+                    parent: node.parentElement,
+                    text: group.texts[index] || String(node.nodeValue || "").trim(),
+                },
+                priority
+            );
+        });
+    }
+
+    /**
+     * Apply translated text with a subtle fade-in for smooth UX.
+     */
+    applyWithFadeIn(node, translated, type) {
+        const el = type === "block" ? node : node.parentElement;
+        if (!el || !el.style) {
+            if (type === "block") node.textContent = translated;
+            else node.nodeValue = translated;
+            return;
+        }
+        // Inject transition CSS once
+        if (!this._domFadeStyleInjected) {
+            this._domFadeStyleInjected = true;
+            const style = document.createElement("style");
+            style.textContent = ".et-fade-in{transition:opacity .1s ease-in;}";
+            document.head.appendChild(style);
+        }
+        el.style.opacity = "0";
+        el.classList.add("et-fade-in");
+        if (type === "block") node.textContent = translated;
+        else node.nodeValue = translated;
+        requestAnimationFrame(() => {
+            el.style.opacity = "1";
+            setTimeout(() => {
+                el.classList.remove("et-fade-in");
+                el.style.removeProperty("opacity");
+            }, 300);
+        });
+    }
+
     buildDomPageTranslationBatches(entries) {
         const batchOptions = this.getDomPageBatchOptions();
         if (!batchOptions) return [];
-        const batches = [];
-        let current = [];
-        let currentLength = 0;
+        if (!entries.length) return [];
 
-        for (const entry of entries) {
-            const projectedLength =
-                currentLength + entry.sourceText.length + (current.length ? 1 : 0);
-            if (
-                current.length &&
-                (current.length >= batchOptions.maxItems || projectedLength > batchOptions.maxChars)
-            ) {
-                batches.push(current);
-                current = [];
-                currentLength = 0;
+        const { maxItems, maxChars } = batchOptions;
+
+        // Calculate number of batches needed
+        const batchCountByItems = Math.ceil(entries.length / maxItems);
+        const totalChars = entries.reduce((sum, e) => sum + e.sourceText.length, 0);
+        const batchCountByChars = Math.ceil(totalChars / maxChars);
+        const numBatches = Math.max(batchCountByItems, batchCountByChars, 1);
+
+        // Sort entries by length (longest first) for balanced distribution
+        const sorted = entries
+            .map((entry, idx) => ({ entry, len: entry.sourceText.length, idx }))
+            .sort((a, b) => b.len - a.len);
+
+        // Initialize batches with char tracking
+        const batches = Array.from({ length: numBatches }, () => ({
+            items: [],
+            chars: 0,
+        }));
+
+        // Greedy load-balance: assign each entry to the lightest batch
+        for (const { entry, len } of sorted) {
+            // Find batch with smallest total chars that still has room
+            let best = -1;
+            let bestChars = Infinity;
+            for (let i = 0; i < batches.length; i++) {
+                if (
+                    batches[i].items.length < maxItems &&
+                    batches[i].chars + len <= maxChars &&
+                    batches[i].chars < bestChars
+                ) {
+                    best = i;
+                    bestChars = batches[i].chars;
+                }
             }
-            current.push(entry);
-            currentLength += entry.sourceText.length + (current.length > 1 ? 1 : 0);
+            if (best === -1) {
+                // No room — create overflow batch
+                batches.push({ items: [entry], chars: len });
+            } else {
+                batches[best].items.push(entry);
+                batches[best].chars += len;
+            }
         }
-        if (current.length) batches.push(current);
-        return batches;
+
+        // Return non-empty batches (items only, drop tracking)
+        return batches.filter((b) => b.items.length > 0).map((b) => b.items);
     }
 
     getDomPageTranslatorLabel() {
         switch (this._domPageTranslateOptions.engine) {
             case "googleAiStudio":
                 return "Google AI Studio";
-            case "geminiNano":
-                return "Gemini Nano";
-            case "chromeBuiltin":
-                return "Chrome Built-in";
+            case "openai":
+                return "OpenAI";
             default:
-                return "DOM";
+                return "Google AI Studio";
         }
     }
 
@@ -688,13 +816,19 @@ class BannerController {
         this.movePage("top", visible ? 40 : 0, true);
     }
 
-    updateDomPageBannerStatus() {
+    updateDomPageBannerStatus(state, message) {
         const host =
             this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
         if (!host || !host.shadowRoot) return;
         const status = host.shadowRoot.querySelector("[data-role='status']");
         if (!status) return;
         const label = this.getDomPageTranslatorLabel();
+        if (state === "error") {
+            status.textContent = `${label} page translation failed${
+                message ? `: ${String(message).slice(0, 120)}` : ""
+            }`;
+            return;
+        }
         const total = this._domTotalTranslationEntries;
         if (!total) {
             status.textContent = `${label} page translation is starting…`;
@@ -734,6 +868,10 @@ class BannerController {
             cancelIdleCallback(this._domIdleHandle);
         }
         this._domIdleHandle = null;
+        if (this._domScrollHandler) {
+            window.removeEventListener("scroll", this._domScrollHandler);
+            this._domScrollHandler = null;
+        }
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
         this._domPageBanner = null;
@@ -948,6 +1086,7 @@ class BannerController {
 
     /**
      * Translate a batch of text nodes with block-level context first.
+     * Nodes are sorted by DOM document order to ensure top-to-bottom translation.
      */
     translateBatchNodes(nodes) {
         const eligibleNodes = [];
@@ -971,9 +1110,15 @@ class BannerController {
         }
         if (!eligibleNodes.length) return;
 
-        if (this._domPageTranslateOptions.engine === "dom") return;
-        if (this._domPageTranslateOptions.engine === "geminiNano" && this._domOnDeviceUnavailable)
-            return;
+        // Skip expensive DOM sort for large sets (>50 nodes)
+        if (eligibleNodes.length <= 50) {
+            eligibleNodes.sort((a, b) => {
+                const pos = a.compareDocumentPosition(b);
+                if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+                if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+                return 0;
+            });
+        }
 
         const groupOptions = this.getDomPageTranslationGroupOptions();
         const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
@@ -998,20 +1143,83 @@ class BannerController {
         groups.forEach((group) => this.enqueueDomPageGroupTranslation(group));
     }
 
+    /**
+     * Same as translateBatchNodes but inserts into the FRONT of the queue
+     * for viewport-priority translation triggered by scroll.
+     */
+    translateBatchNodesPriority(nodes) {
+        const eligibleNodes = [];
+        for (const n of nodes) {
+            const p = n.parentElement;
+            if (!p || this._translatedSet.has(n)) continue;
+            let ancestor = p;
+            let insideTranslatedBlock = false;
+            while (ancestor && ancestor !== document.documentElement) {
+                if (this._translatedBlocks.has(ancestor)) {
+                    insideTranslatedBlock = true;
+                    break;
+                }
+                ancestor = ancestor.parentElement;
+            }
+            if (insideTranslatedBlock) continue;
+            const text = String(n.nodeValue || "").trim();
+            if (text.length < 2) continue;
+            eligibleNodes.push(n);
+            this._translatedSet.add(n);
+        }
+        if (!eligibleNodes.length) return;
+
+        const groupOptions = this.getDomPageTranslationGroupOptions();
+        const groups = buildContextTranslationGroups(eligibleNodes, groupOptions);
+        if (this.getDomPageBatchOptions()) {
+            const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
+            const uncachedEntries = [];
+            entries.forEach((entry) => {
+                const cached = this._domTranslationCache.get(entry.cacheKey);
+                if (cached && this.applyDomPageTranslatedEntry(entry, cached)) {
+                    return;
+                }
+                uncachedEntries.push(entry);
+            });
+            const batches = this.buildDomPageTranslationBatches(uncachedEntries);
+            this._domTotalTranslationEntries += batches.length;
+            this.updateDomPageBannerStatus();
+            // Insert at FRONT of queue for priority processing
+            batches
+                .reverse()
+                .forEach((batch) => this.enqueueDomPageBatchTranslationPriority(batch));
+            return;
+        }
+        this._domTotalTranslationEntries += groups.length;
+        this.updateDomPageBannerStatus();
+        groups.forEach((group) => this.enqueueDomPageGroupTranslation(group));
+    }
+
     enqueueDomPageBatchTranslation(entries) {
         const run = async () => {
+            if (this._domCircuitBreakerActive) return;
             this._domActiveTranslations += 1;
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
                 const batchedSourceText = buildSegmentedTranslationText(entries);
                 const result = await this.translateWithDomPageEngine(batchedSourceText, sl, tl);
+                if (result && result.translationFailed) {
+                    throw new Error(result.errorMsg || "Page translation request failed.");
+                }
                 const translated = result.mainMeaning || result.translatedText;
                 const translatedParts = splitSegmentedTranslationText(translated, entries.length);
 
                 if (!translatedParts) {
                     this.recordDomPageBatchFailure();
-                    entries.forEach((entry) => this.enqueueDomPageGroupTranslation(entry.group));
+                    // Retry with halved batches before falling back to individual
+                    if (entries.length > 1) {
+                        const mid = Math.ceil(entries.length / 2);
+                        this.enqueueDomPageBatchTranslation(entries.slice(0, mid));
+                        this.enqueueDomPageBatchTranslation(entries.slice(mid));
+                    } else {
+                        entries.forEach((entry) => this.enqueueDomPageEntryNodeTranslations(entry));
+                    }
                     this.markDomPageTranslationEntriesCompleted();
                     return;
                 }
@@ -1025,18 +1233,25 @@ class BannerController {
                         }
                         this._domTranslationCache.set(entry.cacheKey, part);
                     }
-                    if (this.applyDomPageTranslatedEntry(entry, part)) {
-                    } else {
-                        this.enqueueDomPageGroupTranslation(entry.group);
+                    if (!this.applyDomPageTranslatedEntry(entry, part)) {
+                        this.enqueueDomPageEntryNodeTranslations(entry);
                     }
                 });
                 this.recordDomPageBatchSuccess();
                 this.markDomPageTranslationEntriesCompleted();
             } catch (error) {
+                this.updateDomPageBannerStatus(
+                    "error",
+                    error && error.message ? error.message : String(error || "")
+                );
                 this.recordDomPageBatchFailure();
-                entries.forEach((entry) => {
-                    entry.group.nodes.forEach((node) => this._translatedSet.delete(node));
-                });
+                if (entries.length > 1 && this._domBatchFailureCount < 5) {
+                    const mid = Math.ceil(entries.length / 2);
+                    this.enqueueDomPageBatchTranslation(entries.slice(0, mid));
+                    this.enqueueDomPageBatchTranslation(entries.slice(mid));
+                } else {
+                    entries.forEach((entry) => this.enqueueDomPageEntryNodeTranslations(entry));
+                }
                 this.markDomPageTranslationEntriesCompleted();
             } finally {
                 this._domActiveTranslations -= 1;
@@ -1061,6 +1276,9 @@ class BannerController {
                 if (!translated) {
                     const requestText = this.buildDomPageRoleSegmentText(entry);
                     const result = await this.translateWithDomPageEngine(requestText, sl, tl);
+                    if (result && result.translationFailed) {
+                        throw new Error(result.errorMsg || "Page translation request failed.");
+                    }
                     translated = this.unwrapDomPageRoleSegmentText(
                         result.mainMeaning || result.translatedText,
                         1
@@ -1078,7 +1296,7 @@ class BannerController {
                     const block = readableBlockReplacement.block;
                     if (translated && block && block.isConnected) {
                         this._translatedBlocks.add(block);
-                        block.textContent = translated;
+                        this.applyWithFadeIn(block, translated, "block");
                         this.markDomPageTranslationEntriesCompleted();
                     }
                     return;
@@ -1099,20 +1317,23 @@ class BannerController {
 
                 group.nodes.forEach((node, index) => {
                     if (translatedParts[index] && node.parentElement) {
-                        node.nodeValue = translatedParts[index];
+                        this.applyWithFadeIn(node, translatedParts[index], "text");
                     }
                 });
                 this.markDomPageTranslationEntriesCompleted();
             } catch (error) {
-                group.nodes.forEach((node) => this._translatedSet.delete(node));
-                this.markDomPageTranslationEntriesCompleted();
-                if (
-                    this._domPageTranslateOptions.engine === "geminiNano" &&
-                    this.isOnDeviceUnavailableError(error)
-                ) {
-                    this._domOnDeviceUnavailable = true;
-                    if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
+                this.updateDomPageBannerStatus(
+                    "error",
+                    error && error.message ? error.message : String(error || "")
+                );
+                if (group.nodes && group.nodes.length > 1) {
+                    this.enqueueDomPageEntryNodeTranslations(
+                        this.createDomPageTranslationEntry(group)
+                    );
+                } else {
+                    group.nodes.forEach((node) => this._translatedSet.delete(node));
                 }
+                this.markDomPageTranslationEntriesCompleted();
             } finally {
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
@@ -1124,7 +1345,7 @@ class BannerController {
         this.flushDomTranslationQueue();
     }
 
-    enqueueDomPageNodeTranslation(item) {
+    enqueueDomPageNodeTranslation(item, priority = false) {
         const run = async () => {
             this._domActiveTranslations += 1;
             try {
@@ -1134,6 +1355,9 @@ class BannerController {
                 let translated = this._domTranslationCache.get(cacheKey);
                 if (!translated) {
                     const result = await this.translateWithDomPageEngine(item.text, sl, tl);
+                    if (result && result.translationFailed) {
+                        throw new Error(result.errorMsg || "Page translation request failed.");
+                    }
                     translated = result.mainMeaning || result.translatedText;
                     if (translated) {
                         if (this._domTranslationCache.size >= this._domTranslationCacheMax) {
@@ -1145,15 +1369,85 @@ class BannerController {
                 }
                 if (translated && item.node.parentElement === item.parent) {
                     item.node.nodeValue = translated;
+                    this._translatedSet.add(item.node);
                 }
             } catch (error) {
+                this.updateDomPageBannerStatus(
+                    "error",
+                    error && error.message ? error.message : String(error || "")
+                );
                 this._translatedSet.delete(item.node);
-                if (
-                    this._domPageTranslateOptions.engine === "geminiNano" &&
-                    this.isOnDeviceUnavailableError(error)
-                ) {
-                    this._domOnDeviceUnavailable = true;
-                    if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
+            } finally {
+                this.markDomPageTranslationEntriesCompleted();
+                this._domActiveTranslations -= 1;
+                this.flushDomTranslationQueue();
+            }
+        };
+
+        if (!this._domTranslationQueue) this._domTranslationQueue = [];
+        if (priority) this._domTranslationQueue.unshift(run);
+        else this._domTranslationQueue.push(run);
+        this.flushDomTranslationQueue();
+    }
+
+    /**
+     * Same as enqueueDomPageBatchTranslation but inserts at FRONT of queue.
+     * Used by scroll prioritizer to ensure viewport content is translated first.
+     */
+    enqueueDomPageBatchTranslationPriority(entries) {
+        const run = async () => {
+            if (this._domCircuitBreakerActive) return;
+            this._domActiveTranslations += 1;
+            try {
+                const { tl } = this._domPageTranslateOptions;
+                const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                const batchedSourceText = buildSegmentedTranslationText(entries);
+                const result = await this.translateWithDomPageEngine(batchedSourceText, sl, tl);
+                if (result && result.translationFailed) {
+                    throw new Error(result.errorMsg || "Page translation request failed.");
+                }
+                const translated = result.mainMeaning || result.translatedText;
+                const translatedParts = splitSegmentedTranslationText(translated, entries.length);
+
+                if (!translatedParts) {
+                    this.recordDomPageBatchFailure();
+                    if (entries.length > 1) {
+                        const mid = Math.ceil(entries.length / 2);
+                        this.enqueueDomPageBatchTranslationPriority(entries.slice(0, mid));
+                        this.enqueueDomPageBatchTranslationPriority(entries.slice(mid));
+                    } else {
+                        entries.forEach((entry) =>
+                            this.enqueueDomPageEntryNodeTranslations(entry, true)
+                        );
+                    }
+                } else {
+                    this._domBatchFailureCount = 0;
+                    entries.forEach((entry, i) => {
+                        const part = translatedParts[i];
+                        if (part) {
+                            this._domTranslationCache.set(entry.cacheKey, part);
+                            if (!this.applyDomPageTranslatedEntry(entry, part)) {
+                                this.enqueueDomPageEntryNodeTranslations(entry, true);
+                            }
+                        }
+                    });
+                }
+
+                this.markDomPageTranslationEntriesCompleted(1);
+            } catch (error) {
+                this.updateDomPageBannerStatus(
+                    "error",
+                    error && error.message ? error.message : String(error || "")
+                );
+                this.markDomPageTranslationEntriesCompleted(1);
+                if (entries.length > 1 && this._domBatchFailureCount < 5) {
+                    const mid = Math.ceil(entries.length / 2);
+                    this.enqueueDomPageBatchTranslationPriority(entries.slice(0, mid));
+                    this.enqueueDomPageBatchTranslationPriority(entries.slice(mid));
+                } else {
+                    entries.forEach((entry) =>
+                        this.enqueueDomPageEntryNodeTranslations(entry, true)
+                    );
                 }
             } finally {
                 this._domActiveTranslations -= 1;
@@ -1162,26 +1456,52 @@ class BannerController {
         };
 
         if (!this._domTranslationQueue) this._domTranslationQueue = [];
-        this._domTranslationQueue.push(run);
+        this._domTranslationQueue.unshift(run);
         this.flushDomTranslationQueue();
     }
 
     flushDomTranslationQueue() {
         if (!this._domTranslationQueue) return;
-        while (
-            this._domActiveTranslations < this._domMaxConcurrentTranslations &&
-            this._domTranslationQueue.length
-        ) {
+        if (this._domFlushStaggerTimer) return;
+
+        // Burst mode: first flush fires all slots at once for max speed
+        if (!this._domFlushBurstDone) {
+            this._domFlushBurstDone = true;
+            while (
+                this._domTranslationQueue.length &&
+                this._domActiveTranslations < this._domMaxConcurrentTranslations
+            ) {
+                const next = this._domTranslationQueue.shift();
+                next();
+            }
+            return;
+        }
+
+        // Subsequent flushes: stagger to spread responses
+        const startNext = () => {
+            if (
+                !this._domTranslationQueue ||
+                this._domActiveTranslations >= this._domMaxConcurrentTranslations ||
+                !this._domTranslationQueue.length
+            ) {
+                this._domFlushStaggerTimer = null;
+                return;
+            }
             const next = this._domTranslationQueue.shift();
             next();
-        }
-    }
-
-    isOnDeviceUnavailableError(error) {
-        const message = error && error.message ? error.message : String(error || "");
-        return /network|not available|unavailable|did not become ready|Failed to inject|timed out/i.test(
-            message
-        );
+            if (
+                this._domTranslationQueue.length &&
+                this._domActiveTranslations < this._domMaxConcurrentTranslations
+            ) {
+                this._domFlushStaggerTimer = setTimeout(() => {
+                    this._domFlushStaggerTimer = null;
+                    this.flushDomTranslationQueue();
+                }, 30);
+            } else {
+                this._domFlushStaggerTimer = null;
+            }
+        };
+        startNext();
     }
 }
 

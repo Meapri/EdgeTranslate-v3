@@ -94,9 +94,12 @@ function getChromeTranslatorSupportedLanguages() {
 }
 
 function cloneGeminiNanoResult(result) {
-    if (!result) return result;
+    if (!result) {
+        return result;
+    }
     const clone = { ...result };
-    if (Array.isArray(result.detailedMeanings)) clone.detailedMeanings = [...result.detailedMeanings];
+    if (Array.isArray(result.detailedMeanings))
+        clone.detailedMeanings = [...result.detailedMeanings];
     if (Array.isArray(result.definitions)) clone.definitions = [...result.definitions];
     if (Array.isArray(result.examples)) clone.examples = [...result.examples];
     return clone;
@@ -506,7 +509,10 @@ async function createAndWarmGeminiNanoSession(sourceLanguage, targetLanguage, ca
     }
 
     const makeInitialPrompts = () => [
-        { role: "system", content: buildGeminiNanoSystemPrompt() },
+        {
+            role: "system",
+            content: buildGeminiNanoSystemPrompt(),
+        },
     ];
 
     const abortController =
@@ -601,7 +607,11 @@ async function readGeminiNanoPromptOutput(session, prompt, options = {}) {
 async function readGeminiNanoPromptOutputFromSession(session, prompt, options = {}) {
     const { preferStreaming = true, onUpdate } = options;
     const safeOnUpdate = (value) => {
-        try { onUpdate?.(value); } catch { /* ignore callback errors */ }
+        try {
+            onUpdate?.(value);
+        } catch {
+            /* ignore callback errors */
+        }
     };
     if (preferStreaming && session && typeof session.promptStreaming === "function") {
         const stream = await session.promptStreaming(prompt);

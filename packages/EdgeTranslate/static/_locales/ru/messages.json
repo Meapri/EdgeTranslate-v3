@@ -243,6 +243,10 @@
         "message": "Перевод страниц Google",
         "description": "Перевод текущей страницы с помощью Google Translate API."
     },
+    "AIPageTranslate": {
+        "message": "AI перевод стр.",
+        "description": "Перевести страницу с помощью AI (Google AI Studio или OpenAI)."
+    },
     "TranslatePage": {
         "message": "Перевести эту страницу",
         "description": "Перевод этой страницы с помощью переводчика страниц по умолчанию."
@@ -1319,14 +1323,8 @@
         "message": "Chrome Gemini Nano (на устройстве)",
         "description": "Использовать встроенный Translator API настольного Chrome, если доступен."
     },
-    "ChromeBuiltinPageTranslate": {
-        "message": "Перевод страниц Chrome Gemini Nano (на устройстве)"
-    },
     "LocalTranslatorTimeoutMs": {
         "message": "Тайм-аут AI-переводчика (мс)"
-    },
-    "LocalPageTranslate": {
-        "message": "Перевод страницы AI-переводчиком"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

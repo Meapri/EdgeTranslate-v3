@@ -243,6 +243,10 @@
         "message": "Google ページ翻訳",
         "description": "Google翻訳APIで現在のページを翻訳します。"
     },
+    "AIPageTranslate": {
+        "message": "AI ページ翻訳",
+        "description": "AI（Google AI Studio または OpenAI）でページを翻訳"
+    },
     "TranslatePage": {
         "message": "このページを翻訳する",
         "description": "このページをデフォルトのページ翻訳で翻訳します。"
@@ -1319,14 +1323,8 @@
         "message": "Chrome Gemini Nano（オンデバイス）",
         "description": "対応するデスクトップ版 Chrome の内蔵 Translator API を使用します。"
     },
-    "ChromeBuiltinPageTranslate": {
-        "message": "Chrome Gemini Nano（オンデバイス） ページ翻訳"
-    },
     "LocalTranslatorTimeoutMs": {
         "message": "AI翻訳タイムアウト(ms)"
-    },
-    "LocalPageTranslate": {
-        "message": "AI翻訳ページ翻訳"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

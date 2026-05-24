@@ -243,6 +243,10 @@
         "message": "Google 網頁翻譯",
         "description": "使用 Google 翻譯目前頁面。"
     },
+    "AIPageTranslate": {
+        "message": "AI 頁面翻譯",
+        "description": "使用 AI（Google AI Studio 或 OpenAI）翻譯頁面"
+    },
     "TranslatePage": {
         "message": "翻譯此頁",
         "description": "使用默認網頁翻譯引擎翻譯此頁。"
@@ -1319,14 +1323,8 @@
         "message": "Chrome Gemini Nano（裝置端）",
         "description": "使用支援的桌面版 Chrome 內建 Translator API。"
     },
-    "ChromeBuiltinPageTranslate": {
-        "message": "Chrome Gemini Nano（裝置端） 網頁翻譯"
-    },
     "LocalTranslatorTimeoutMs": {
         "message": "AI 翻譯逾時（毫秒）"
-    },
-    "LocalPageTranslate": {
-        "message": "AI 翻譯器網頁翻譯"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

@@ -415,6 +415,8 @@ describe("LocalTranslator", () => {
         expect(body.model).toBe("gpt-5.5");
         expect(body.temperature).toBeUndefined();
         expect(body.response_format).toBeUndefined();
+        expect(body.max_completion_tokens).toBeGreaterThan(0);
+        expect(body.max_tokens).toBeUndefined();
         expect(body.messages[0].role).toBe("system");
         expect(body.messages[0].content).toContain("Translate naturally while preserving meaning");
         expect(body.messages[0].content).toContain("Output only the translation");

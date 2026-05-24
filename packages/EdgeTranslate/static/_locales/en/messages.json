@@ -247,6 +247,10 @@
         "message": "Google Page Trans.",
         "description": "Translate current page with Google translate api."
     },
+    "AIPageTranslate": {
+        "message": "AI Page Trans.",
+        "description": "Translate current page with AI (Google AI Studio or OpenAI)."
+    },
     "TranslatePage": {
         "message": "Translate this page",
         "description": "Translate this page with default page translator."
@@ -1331,14 +1335,8 @@
         "message": "Chrome Gemini Nano (on-device)",
         "description": "Use Chrome desktop built-in Translator API when available."
     },
-    "ChromeBuiltinPageTranslate": {
-        "message": "Chrome Gemini Nano (on-device) page translation"
-    },
     "LocalTranslatorTimeoutMs": {
         "message": "AI translator timeout (ms)"
-    },
-    "LocalPageTranslate": {
-        "message": "AI Translator Page Translate"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",

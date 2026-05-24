@@ -8,35 +8,39 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
  * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
  */
 function translatePage(channel) {
-    getOrSetDefaultSettings(["DefaultPageTranslator", "languageSetting"], DEFAULT_SETTINGS).then(
-        (result) => {
-            const translator =
-                result.DefaultPageTranslator === "GeminiNanoPageTranslate" ||
-                result.DefaultPageTranslator === "LocalPageTranslate" ||
-                result.DefaultPageTranslator === "ChromeBuiltinPageTranslate"
-                    ? "GooglePageTranslate"
-                    : result.DefaultPageTranslator;
+    getOrSetDefaultSettings(
+        ["DefaultPageTranslator", "languageSetting", "LocalTranslatorConfig"],
+        DEFAULT_SETTINGS
+    ).then((result) => {
+        const localConfig = result.LocalTranslatorConfig || {};
+        const translator = result.DefaultPageTranslator;
 
-            // Page translation is currently Chrome-only.
-            if (!FEATURE_FLAGS.pageTranslate) return;
+        // Page translation is currently Chrome-only.
+        if (!FEATURE_FLAGS.pageTranslate) return;
 
-            switch (translator) {
-                case "GooglePageTranslate":
-                    executeGoogleScript(channel);
-                    break;
-                case "DomPageTranslate":
-                    executeDomPageTranslate(channel, {
-                        engine: "dom",
-                        sl: (result.languageSetting && result.languageSetting.sl) || "auto",
-                        tl: (result.languageSetting && result.languageSetting.tl) || "en",
-                    });
-                    break;
-                default:
-                    executeGoogleScript(channel);
-                    break;
-            }
+        if (translator === "GooglePageTranslate") {
+            executeGoogleScript(channel);
+            return;
         }
-    );
+
+        if (
+            translator === "AIPageTranslate" ||
+            translator === "DomPageTranslate" ||
+            translator === "GeminiNanoPageTranslate" ||
+            translator === "LocalPageTranslate" ||
+            translator === "ChromeBuiltinPageTranslate"
+        ) {
+            const engine = localConfig.mode === "openai" ? "openai" : "googleAiStudio";
+            executeDomPageTranslate(channel, {
+                engine,
+                sl: (result.languageSetting && result.languageSetting.sl) || "auto",
+                tl: (result.languageSetting && result.languageSetting.tl) || "en",
+            });
+            return;
+        }
+
+        executeGoogleScript(channel);
+    });
 }
 
 /**

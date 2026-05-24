@@ -243,6 +243,10 @@
         "message": "Google 网页翻译",
         "description": "使用 Google 翻译当前页面。"
     },
+    "AIPageTranslate": {
+        "message": "AI 页面翻译",
+        "description": "使用 AI（Google AI Studio 或 OpenAI）翻译页面"
+    },
     "TranslatePage": {
         "message": "翻译此页",
         "description": "使用默认网页翻译引擎翻译此页。"
@@ -1319,14 +1323,8 @@
         "message": "Chrome Gemini Nano（端侧）",
         "description": "使用支持的桌面版 Chrome 内置 Translator API。"
     },
-    "ChromeBuiltinPageTranslate": {
-        "message": "Chrome Gemini Nano（端侧） 网页翻译"
-    },
     "LocalTranslatorTimeoutMs": {
         "message": "AI 翻译超时（毫秒）"
-    },
-    "LocalPageTranslate": {
-        "message": "AI 翻译器网页翻译"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",
