@@ -742,51 +742,169 @@ class BannerController {
                 "top: 0",
                 "left: 0",
                 "right: 0",
-                "height: 40px",
+                "height: 46px",
                 "z-index: 2147483647",
                 "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
             ].join(";");
             const root = host.attachShadow({ mode: "open" });
             root.innerHTML = `
                 <style>
+                    :host { color-scheme: light; }
                     .bar {
-                        height: 40px;
+                        position: relative;
+                        height: 46px;
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
-                        gap: 12px;
+                        gap: 16px;
                         box-sizing: border-box;
-                        padding: 0 14px;
+                        padding: 0 12px 2px 14px;
                         color: #202124;
-                        background: #fff;
+                        background: rgba(255, 255, 255, 0.98);
                         border-bottom: 1px solid rgba(60, 64, 67, 0.2);
-                        box-shadow: 0 1px 3px rgba(60, 64, 67, 0.24);
+                        box-shadow: 0 1px 4px rgba(60, 64, 67, 0.18);
                         font-size: 13px;
+                        line-height: 1.2;
+                        backdrop-filter: saturate(180%) blur(12px);
                     }
-                    .title { font-weight: 600; }
-                    .status { color: #5f6368; margin-left: 8px; }
-                    .actions { display: flex; align-items: center; gap: 6px; }
+                    .main {
+                        display: flex;
+                        align-items: center;
+                        min-width: 0;
+                        gap: 10px;
+                    }
+                    .mark {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        flex: 0 0 auto;
+                        background: #1a73e8;
+                        box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.12);
+                    }
+                    .text {
+                        display: flex;
+                        flex-direction: column;
+                        min-width: 0;
+                        gap: 2px;
+                    }
+                    .row {
+                        display: flex;
+                        align-items: center;
+                        min-width: 0;
+                        gap: 8px;
+                    }
+                    .title {
+                        font-weight: 650;
+                        color: #202124;
+                        white-space: nowrap;
+                    }
+                    .engine {
+                        max-width: 160px;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                        border: 1px solid rgba(26, 115, 232, 0.22);
+                        border-radius: 999px;
+                        padding: 2px 7px;
+                        color: #174ea6;
+                        background: #e8f0fe;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                    .status {
+                        color: #5f6368;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                        max-width: min(62vw, 720px);
+                    }
+                    .actions {
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        flex: 0 0 auto;
+                    }
+                    .progress-meta {
+                        min-width: 38px;
+                        color: #5f6368;
+                        font-size: 12px;
+                        text-align: right;
+                        font-variant-numeric: tabular-nums;
+                    }
                     button {
                         border: 1px solid #dadce0;
-                        border-radius: 4px;
+                        border-radius: 6px;
                         background: #fff;
-                        color: #1a73e8;
+                        color: #174ea6;
                         cursor: pointer;
                         font: inherit;
-                        height: 28px;
-                        padding: 0 10px;
+                        height: 30px;
+                        padding: 0 11px;
                     }
-                    button:hover { background: #f1f3f4; }
-                    .close { color: #5f6368; min-width: 28px; padding: 0 8px; }
+                    button:hover { background: #f8fafd; border-color: #c7d2fe; }
+                    button:active { background: #eef3fe; }
+                    .close {
+                        color: #5f6368;
+                        min-width: 30px;
+                        padding: 0 8px;
+                        font-size: 18px;
+                        line-height: 1;
+                    }
+                    .progress {
+                        position: absolute;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        height: 2px;
+                        overflow: hidden;
+                        background: rgba(218, 220, 224, 0.9);
+                    }
+                    .progress-fill {
+                        width: 0%;
+                        height: 100%;
+                        background: linear-gradient(90deg, #1a73e8, #34a853);
+                        transition: width 180ms ease;
+                    }
+                    .bar[data-state="starting"] .progress-fill {
+                        width: 32%;
+                        animation: indeterminate 1.2s ease-in-out infinite;
+                    }
+                    .bar[data-state="error"] .mark {
+                        background: #d93025;
+                        box-shadow: 0 0 0 4px rgba(217, 48, 37, 0.12);
+                    }
+                    .bar[data-state="error"] .progress-fill {
+                        width: 100%;
+                        background: #d93025;
+                    }
+                    .bar[data-state="complete"] .mark {
+                        background: #188038;
+                        box-shadow: 0 0 0 4px rgba(24, 128, 56, 0.12);
+                    }
+                    @keyframes indeterminate {
+                        0% { transform: translateX(-110%); }
+                        55% { transform: translateX(95%); }
+                        100% { transform: translateX(220%); }
+                    }
                 </style>
-                <div class="bar" role="status" aria-live="polite">
-                    <div>
-                        <span class="title">Edge Translate</span>
-                        <span class="status" data-role="status"></span>
+                <div class="bar" role="status" aria-live="polite" data-role="bar">
+                    <div class="main">
+                        <span class="mark" aria-hidden="true"></span>
+                        <div class="text">
+                            <div class="row">
+                                <span class="title">Edge Translate</span>
+                                <span class="engine" data-role="engine"></span>
+                            </div>
+                            <span class="status" data-role="status"></span>
+                        </div>
                     </div>
                     <div class="actions">
+                        <span class="progress-meta" data-role="progress-meta"></span>
                         <button type="button" data-action="hide">Hide</button>
                         <button type="button" class="close" data-action="close" aria-label="Close">×</button>
+                    </div>
+                    <div class="progress" aria-hidden="true">
+                        <div class="progress-fill" data-role="progress-fill"></div>
                     </div>
                 </div>
             `;
@@ -812,29 +930,44 @@ class BannerController {
         const host = this.ensureDomPageBanner();
         this._domPageBannerVisible = visible;
         host.style.display = visible ? "block" : "none";
-        this.movePage("top", visible ? 40 : 0, true);
+        this.movePage("top", visible ? 46 : 0, true);
     }
 
     updateDomPageBannerStatus(state, message) {
         const host =
             this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
         if (!host || !host.shadowRoot) return;
+        const bar = host.shadowRoot.querySelector("[data-role='bar']");
+        const engine = host.shadowRoot.querySelector("[data-role='engine']");
         const status = host.shadowRoot.querySelector("[data-role='status']");
-        if (!status) return;
+        const progressFill = host.shadowRoot.querySelector("[data-role='progress-fill']");
+        const progressMeta = host.shadowRoot.querySelector("[data-role='progress-meta']");
+        if (!bar || !status) return;
         const label = this.getDomPageTranslatorLabel();
+        if (engine) engine.textContent = label;
         if (state === "error") {
+            bar.dataset.state = "error";
             status.textContent = `${label} page translation failed${
                 message ? `: ${String(message).slice(0, 120)}` : ""
             }`;
+            if (progressFill) progressFill.style.width = "100%";
+            if (progressMeta) progressMeta.textContent = "Error";
             return;
         }
         const total = this._domTotalTranslationEntries;
         if (!total) {
+            bar.dataset.state = "starting";
             status.textContent = `${label} page translation is starting…`;
+            if (progressFill) progressFill.style.width = "";
+            if (progressMeta) progressMeta.textContent = "";
             return;
         }
         const completed = Math.min(this._domCompletedTranslationEntries, total);
+        const percent = Math.round((completed / total) * 100);
+        bar.dataset.state = completed >= total ? "complete" : "running";
         status.textContent = `${label} page translation ${completed}/${total}`;
+        if (progressFill) progressFill.style.width = `${percent}%`;
+        if (progressMeta) progressMeta.textContent = `${percent}%`;
     }
 
     markDomPageTranslationEntriesCompleted(count = 1) {

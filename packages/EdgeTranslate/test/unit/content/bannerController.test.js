@@ -41,12 +41,22 @@ describe("DOM page translation banner", () => {
         const banner = document.getElementById("edge-translate-dom-page-banner");
         expect(banner).not.toBeNull();
         expect(banner.shadowRoot.textContent).toContain("Edge Translate");
+        expect(banner.shadowRoot.querySelector("[data-role='engine']").textContent).toBe("OpenAI");
+        expect(banner.shadowRoot.querySelector("[data-role='bar']").dataset.state).toBe(
+            "starting"
+        );
         expect(banner.shadowRoot.textContent).toContain("OpenAI page translation is starting");
-        expect(document.body.style.getPropertyValue("top")).toBe("40px");
+        expect(document.body.style.getPropertyValue("top")).toBe("46px");
 
         controller._domTotalTranslationEntries = 3;
         controller.markDomPageTranslationEntriesCompleted(2);
         expect(banner.shadowRoot.textContent).toContain("OpenAI page translation 2/3");
+        expect(banner.shadowRoot.querySelector("[data-role='progress-meta']").textContent).toBe(
+            "67%"
+        );
+        expect(banner.shadowRoot.querySelector("[data-role='progress-fill']").style.width).toBe(
+            "67%"
+        );
     });
 
     it("can hide and cancel the DOM page translation banner", async () => {
