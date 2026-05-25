@@ -409,10 +409,6 @@ export function setupServiceWorkerMocks() {
             }
             return originalDefineProperty.apply(this, args);
         };
-
-        console.log(
-            "[EdgeTranslate] Service Worker 환경 설정 완료 - translators 패키지 호환성 확보"
-        );
     }
 
     // XMLHttpRequest is not available in Service Workers, so we need to mock it with fetch

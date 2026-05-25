@@ -1324,7 +1324,7 @@
         "description": "使用支援的桌面版 Chrome 內建 Translator API。"
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "AI 翻譯逾時（毫秒）"
+        "message": "逾時"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",
@@ -1338,8 +1338,60 @@
         "message": "AI 模型",
         "description": "Google AI Studio 模型名稱"
     },
+    "LocalTranslatorReasoningLevel": {
+        "message": "推理層級",
+        "description": "Google AI Studio thinking level 設定"
+    },
     "LocalTranslatorOpenAIModel": {
         "message": "OpenAI 模型",
         "description": "OpenAI 模型名稱"
+    },
+    "LocalTranslatorOpenAIReasoningEffort": {
+        "message": "推理層級",
+        "description": "OpenAI reasoning_effort 設定"
+    },
+    "TranslateNormal": {
+        "message": "Normal translation",
+        "description": "Translate the selection with the normal translation profile."
+    },
+    "TranslatePrecise": {
+        "message": "Precise translation",
+        "description": "Translate the selection with the precise translation profile."
+    },
+    "TranslateNormalShort": {
+        "message": "Normal",
+        "description": "Short label for normal translation."
+    },
+    "TranslatePreciseShort": {
+        "message": "Precise",
+        "description": "Short label for precise translation."
+    },
+    "ToggleRealtimeCaptionTranslate": {
+        "message": "Toggle realtime subtitle translation",
+        "description": "Toggle realtime subtitle translation mode."
+    },
+    "RealtimeCaptionTranslate": {
+        "message": "Realtime subtitle translation",
+        "description": "Translate visible YouTube captions in realtime."
+    },
+    "PreciseTranslatorConfig": {
+        "message": "Precise translation model",
+        "description": "Settings for the precise translation profile."
+    },
+    "PreciseTranslatorMode": {
+        "message": "Precise mode",
+        "description": "AI provider mode for precise translation."
+    },
+    "PreciseTranslatorModel": {
+        "message": "Precise Gemini model",
+        "description": "Google AI Studio model for precise translation."
+    },
+    "PreciseTranslatorOpenAIModel": {
+        "message": "Precise OpenAI model",
+        "description": "OpenAI model for precise translation."
+    },
+    "PreciseTranslatorHelp": {
+        "message": "Precise translation reuses the same API keys as AI Translate, but can use a different provider, model, and reasoning level.",
+        "description": "Precise translation help text."
     }
 }

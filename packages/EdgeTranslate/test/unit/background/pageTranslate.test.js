@@ -48,7 +48,7 @@ describe("pageTranslate module", () => {
         getOrSetDefaultSettings.mockResolvedValue({
             DefaultPageTranslator: "AIPageTranslate",
             languageSetting: { sl: "en", tl: "ko" },
-            LocalTranslatorConfig: { enabled: true, mode: "openai" },
+            LocalTranslatorConfig: { enabled: true, mode: "openai", openaiModel: "gpt-5.4-mini" },
         });
         const channel = { emitToTabs: jest.fn() };
         chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
@@ -60,6 +60,8 @@ describe("pageTranslate module", () => {
         expect(channel.emitToTabs).toHaveBeenCalledTimes(1);
         expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
             engine: "openai",
+            model: "gpt-5.4-mini",
+            translatorId: "LocalTranslate",
             sl: "en",
             tl: "ko",
         });
@@ -69,7 +71,11 @@ describe("pageTranslate module", () => {
         getOrSetDefaultSettings.mockResolvedValue({
             DefaultPageTranslator: "LocalPageTranslate",
             languageSetting: { sl: "en", tl: "ko" },
-            LocalTranslatorConfig: { enabled: true, mode: "googleAiStudio" },
+            LocalTranslatorConfig: {
+                enabled: true,
+                mode: "googleAiStudio",
+                model: "gemini-2.5-flash-lite",
+            },
         });
         const channel = { emitToTabs: jest.fn() };
         chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
@@ -80,6 +86,8 @@ describe("pageTranslate module", () => {
 
         expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
             engine: "googleAiStudio",
+            model: "gemini-2.5-flash-lite",
+            translatorId: "LocalTranslate",
             sl: "en",
             tl: "ko",
         });

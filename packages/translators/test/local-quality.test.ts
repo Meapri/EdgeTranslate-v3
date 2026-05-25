@@ -23,8 +23,8 @@ describe("LocalTranslator multilingual quality prompts", () => {
                 "For Han-script source text",
                 "complete semantic units",
                 "Never create mixed-script words by combining source-script characters",
-                "Translate or transliterate names, brands, product names, service names",
-                "Only non-linguistic tokens may stay unchanged",
+                "Preserve proper nouns and official names",
+                "Use a localized or translated proper-name form only when it is clearly established",
             ],
         },
         {
@@ -52,8 +52,8 @@ describe("LocalTranslator multilingual quality prompts", () => {
             promptChecks: [
                 "Translate faithfully and naturally",
                 "Keep the same text form",
-                "Translate or transliterate names, brands, product names, service names",
-                "Only non-linguistic tokens may stay unchanged",
+                "Preserve proper nouns and official names",
+                "Use a localized or translated proper-name form only when it is clearly established",
             ],
         },
         {
@@ -73,7 +73,7 @@ describe("LocalTranslator multilingual quality prompts", () => {
             promptChecks: [
                 "Translate faithfully and naturally",
                 "Do not summarize",
-                "Translate or transliterate names, brands, product names, service names",
+                "Preserve proper nouns and official names",
                 "Before finalizing, rewrite any remaining source-language fragment",
             ],
         },
@@ -86,7 +86,7 @@ describe("LocalTranslator multilingual quality prompts", () => {
             promptChecks: [
                 "Translate faithfully and naturally",
                 "Do not summarize",
-                "Translate or transliterate names, brands, product names, service names",
+                "Preserve proper nouns and official names",
                 "Source-language text is forbidden in the output",
             ],
         },
@@ -111,15 +111,11 @@ describe("LocalTranslator multilingual quality prompts", () => {
         },
         {
             name: "English segmented text to Korean keeps segment markers",
-            text: "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>\nAccount settings\n<<<EDGE_TRANSLATE_SEGMENT_2 role=paragraph>>>\nReset password",
+            text: "[[1:t]]\nAccount settings\n[[2:p]]\nReset password",
             from: "en",
             to: "ko",
-            output: "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>\n계정 설정\n<<<EDGE_TRANSLATE_SEGMENT_2 role=paragraph>>>\n비밀번호 재설정",
-            promptChecks: [
-                "Translate faithfully and naturally",
-                "role metadata",
-                "Translate or transliterate names, brands, product names, service names",
-            ],
+            output: "[[1:t]]\n계정 설정\n[[2:p]]\n비밀번호 재설정",
+            promptChecks: ["Translate English -> Korean"],
         },
     ];
 
@@ -144,7 +140,12 @@ describe("LocalTranslator multilingual quality prompts", () => {
         expect(result.mainMeaning).toBe(output);
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         const prompt = body.contents[0].parts[0].text;
-        expect(prompt).toContain("Translate the user's text");
+        if (/\[\[\d+:[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_\d+/.test(text)) {
+            expect(prompt).toContain(`Translate ${from === "en" ? "English" : from} ->`);
+            expect(body.systemInstruction.parts[0].text).toContain("Translate page segments only");
+        } else {
+            expect(prompt).toContain("Translate the user's text");
+        }
         expect(prompt).not.toContain("word or short term");
         for (const check of promptChecks) {
             expect(prompt).toContain(check);

@@ -8,6 +8,14 @@ export type TranslationResult = {
     detailedMeanings?: DetailedMeaning[];
     definitions?: Definition[];
     examples?: Example[];
+    tokenUsage?: TranslationTokenUsage;
+};
+export type TranslationTokenUsage = {
+    inputTokens?: number;
+    outputTokens?: number;
+    reasoningTokens?: number;
+    cachedInputTokens?: number;
+    totalTokens?: number;
 };
 export type DetailedMeaning = {
     pos?: string;

@@ -1,4 +1,4 @@
-import { HybridTranslator } from "@edge_translate/translators";
+import { HybridTranslator, LocalTranslator } from "@edge_translate/translators";
 /* global globalThis */
 // common.log는 현재 파일에서 직접 사용하지 않습니다.
 import { promiseTabs, delayPromise } from "common/scripts/promise.js";
@@ -44,6 +44,7 @@ class TranslatorManager {
                 "languageSetting",
                 "OtherSettings",
                 "LocalTranslatorConfig",
+                "PreciseTranslatorConfig",
             ],
             DEFAULT_SETTINGS
         ).then((configs) => {
@@ -67,11 +68,23 @@ class TranslatorManager {
             this.HYBRID_TRANSLATOR.REAL_TRANSLATORS.LocalTranslate = this.localTranslatorProxy;
             this.HYBRID_TRANSLATOR_CONFIG = hybridTranslatorConfig;
             this.LOCAL_TRANSLATOR_CONFIG = configs.LocalTranslatorConfig;
+            this.PRECISE_TRANSLATOR_CONFIG = configs.PreciseTranslatorConfig;
+            this.PRECISE_LOCAL_TRANSLATOR = this.createPreciseLocalTranslatorProxy(
+                new LocalTranslator(
+                    this.getEffectivePreciseTranslatorConfig(
+                        configs.LocalTranslatorConfig,
+                        configs.PreciseTranslatorConfig
+                    )
+                ),
+                configs.LocalTranslatorConfig,
+                configs.PreciseTranslatorConfig
+            );
 
             // Supported translators.
             this.TRANSLATORS = {
                 HybridTranslate: this.HYBRID_TRANSLATOR,
                 ...this.HYBRID_TRANSLATOR.REAL_TRANSLATORS,
+                PreciseLocalTranslate: this.PRECISE_LOCAL_TRANSLATOR,
             };
 
             // Mutual translating mode flag.
@@ -147,6 +160,62 @@ class TranslatorManager {
                     return localTranslator.translate(text, from, to);
                 }
                 return manager.translateWithGeminiNanoPrompt(text, from, to);
+            },
+            pronounce(...args) {
+                return localTranslator.pronounce(...args);
+            },
+            stopPronounce(...args) {
+                return localTranslator.stopPronounce(...args);
+            },
+        };
+    }
+
+    getEffectivePreciseTranslatorConfig(localConfig = {}, preciseConfig = {}) {
+        const mode = preciseConfig.mode || localConfig.mode || "openai";
+        return {
+            ...localConfig,
+            enabled: true,
+            mode,
+            model: preciseConfig.model || localConfig.model,
+            reasoningLevel: preciseConfig.reasoningLevel || localConfig.reasoningLevel,
+            openaiModel: preciseConfig.openaiModel || localConfig.openaiModel,
+            openaiReasoningEffort:
+                preciseConfig.openaiReasoningEffort || localConfig.openaiReasoningEffort,
+            timeoutMs: preciseConfig.timeoutMs || localConfig.timeoutMs,
+        };
+    }
+
+    createPreciseLocalTranslatorProxy(localTranslator, localConfig = {}, preciseConfig = {}) {
+        let config = this.getEffectivePreciseTranslatorConfig(localConfig, preciseConfig);
+        const manager = this;
+        return {
+            useConfig(nextLocalConfig = {}, nextPreciseConfig = {}) {
+                config = manager.getEffectivePreciseTranslatorConfig(
+                    nextLocalConfig,
+                    nextPreciseConfig
+                );
+                localTranslator.useConfig(config);
+            },
+            getMode() {
+                if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
+                    return "geminiNano";
+                if (config.mode === "googleAiStudio" || config.mode === "openai")
+                    return config.mode;
+                return "openai";
+            },
+            supportedLanguages() {
+                if (this.getMode() === "geminiNano") return getChromeTranslatorSupportedLanguages();
+                return localTranslator.supportedLanguages();
+            },
+            detect(text) {
+                if (this.getMode() === "geminiNano") return Promise.resolve("auto");
+                return localTranslator.detect(text);
+            },
+            async translate(text, from, to) {
+                if (this.getMode() === "geminiNano") {
+                    return manager.translateWithGeminiNanoPrompt(text, from, to);
+                }
+                return localTranslator.translate(text, from, to);
             },
             pronounce(...args) {
                 return localTranslator.pronounce(...args);
@@ -801,12 +870,13 @@ class TranslatorManager {
         return this.normalizeKeyText(text);
     }
 
-    makeTranslateKey(text, sl, tl, translatorId) {
+    makeTranslateKey(text, sl, tl, translatorId, cacheProfile = "") {
         const norm = this.normalizeKeyText(text);
         const version = this.usesLocalMainTranslator(translatorId)
             ? `||${LOCAL_AI_TRANSLATION_CACHE_VERSION}`
             : "";
-        return `${translatorId}||${sl}||${tl}${version}||${norm}`;
+        const profile = cacheProfile ? `||profile:${cacheProfile}` : "";
+        return `${translatorId}||${sl}||${tl}${version}${profile}||${norm}`;
     }
 
     normalizeTextRole(role) {
@@ -865,7 +935,8 @@ class TranslatorManager {
     }
 
     usesLocalMainTranslator(translatorId) {
-        if (translatorId === "LocalTranslate") return true;
+        if (translatorId === "LocalTranslate" || translatorId === "PreciseLocalTranslate")
+            return true;
         return (
             translatorId === "HybridTranslate" &&
             this.HYBRID_TRANSLATOR_CONFIG?.selections?.mainMeaning === "LocalTranslate"
@@ -943,13 +1014,13 @@ class TranslatorManager {
         this.detectCache.set(key, lang, this.cacheOptions.detectTtlMs);
     }
 
-    getTranslationFromCache(text, sl, tl, translatorId) {
-        const key = this.makeTranslateKey(text, sl, tl, translatorId);
+    getTranslationFromCache(text, sl, tl, translatorId, cacheProfile = "") {
+        const key = this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
         return this.translationCache.get(key);
     }
 
-    rememberTranslation(text, sl, tl, translatorId, result) {
-        const key = this.makeTranslateKey(text, sl, tl, translatorId);
+    rememberTranslation(text, sl, tl, translatorId, result, cacheProfile = "") {
+        const key = this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
         this.translationCache.set(key, result, this.cacheOptions.translateTtlMs);
     }
 
@@ -966,7 +1037,8 @@ class TranslatorManager {
                 params.position,
                 sender,
                 params.textRole,
-                params.textSegments
+                params.textSegments,
+                params.translationProfile
             )
         );
 
@@ -978,6 +1050,9 @@ class TranslatorManager {
             let sl = (params && params.sl) || this.LANGUAGE_SETTING.sl || "auto";
             let tl = (params && params.tl) || this.LANGUAGE_SETTING.tl;
             const engine = (params && params.engine) || "";
+            const textRole = this.normalizeTextRole(params && params.textRole);
+            const translationProfile = (params && params.translationProfile) || "";
+            const cacheProfile = translationProfile || (textRole === "caption" ? "caption" : "");
             const translatorId =
                 engine === "geminiNano" || engine === "chromeBuiltin"
                     ? "GeminiNano"
@@ -987,9 +1062,9 @@ class TranslatorManager {
                 sender && sender.tab ? sender.tab.id : previousChromeBuiltinTabId;
             try {
                 // cache first
-                let result = this.getTranslationFromCache(text, sl, tl, translatorId);
+                let result = this.getTranslationFromCache(text, sl, tl, translatorId, cacheProfile);
                 if (!result) {
-                    const key = this.makeTranslateKey(text, sl, tl, translatorId);
+                    const key = this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
                     if (this.inflightTranslate.has(key)) {
                         result = await this.inflightTranslate.get(key);
                     } else {
@@ -997,10 +1072,21 @@ class TranslatorManager {
                             if (engine === "geminiNano" || engine === "chromeBuiltin") {
                                 return await this.translateWithGeminiNanoPrompt(text, sl, tl);
                             }
-                            return await this.TRANSLATORS[translatorId].translate(text, sl, tl);
+                            return await this.TRANSLATORS[translatorId].translate(text, sl, tl, {
+                                textRole,
+                                translationProfile,
+                            });
                         })()
                             .then((res) => {
-                                if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
+                                if (res)
+                                    this.rememberTranslation(
+                                        text,
+                                        sl,
+                                        tl,
+                                        translatorId,
+                                        res,
+                                        cacheProfile
+                                    );
                                 return res;
                             })
                             .finally(() => this.inflightTranslate.delete(key));
@@ -1130,8 +1216,22 @@ class TranslatorManager {
                         this.HYBRID_TRANSLATOR.useLocalConfig(
                             changes["LocalTranslatorConfig"].newValue
                         );
+                        this.PRECISE_LOCAL_TRANSLATOR?.useConfig(
+                            changes["LocalTranslatorConfig"].newValue,
+                            this.PRECISE_TRANSLATOR_CONFIG
+                        );
                         this.clearCaches();
                         this.applyLocalDefaultTranslatorPreference();
+                    }
+
+                    if (changes["PreciseTranslatorConfig"]) {
+                        this.PRECISE_TRANSLATOR_CONFIG =
+                            changes["PreciseTranslatorConfig"].newValue;
+                        this.PRECISE_LOCAL_TRANSLATOR?.useConfig(
+                            this.LOCAL_TRANSLATOR_CONFIG,
+                            changes["PreciseTranslatorConfig"].newValue
+                        );
+                        this.clearCaches();
                     }
 
                     if (changes["OtherSettings"]) {
@@ -1332,7 +1432,7 @@ class TranslatorManager {
      *
      * @returns {Promise<void>} translate finished Promise
      */
-    async translate(text, position, sender, textRole, textSegments) {
+    async translate(text, position, sender, textRole, textSegments, translationProfile = "normal") {
         // Ensure that configurations have been initialized.
         await this.config_loader;
 
@@ -1379,7 +1479,10 @@ class TranslatorManager {
                 }
             }
 
-            const translatorId = this.DEFAULT_TRANSLATOR;
+            const translatorId =
+                translationProfile === "precise"
+                    ? "PreciseLocalTranslate"
+                    : this.DEFAULT_TRANSLATOR;
             const normalizedSegments = this.getTrustedSelectionSegments(text, textSegments);
             const shouldWrapRole = this.shouldWrapSelectionForRole(
                 translatorId,
@@ -1596,7 +1699,6 @@ class TranslatorManager {
      */
     getAvailableTranslators(detail) {
         if (!this.HYBRID_TRANSLATOR) {
-            console.log("HYBRID_TRANSLATOR not initialized yet");
             return ["HybridTranslate"];
         }
         const available = this.HYBRID_TRANSLATOR.getAvailableTranslatorsFor(detail.from, detail.to);

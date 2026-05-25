@@ -1,6 +1,9 @@
 import {
+    bindPdfPageTranslateButton,
     buildNativePdfUrl,
     getOriginalPdfUrl,
+    PDF_PAGE_TRANSLATE_EVENT,
+    requestPdfPageTranslation,
 } from "../../web/edge-viewer-controls.js";
 
 describe("edge PDF viewer controls", () => {
@@ -19,5 +22,29 @@ describe("edge PDF viewer controls", () => {
         expect(buildNativePdfUrl("file:///Users/me/file.pdf")).toBe(
             "file:///Users/me/file.pdf#edge_translate_pdf_native=1"
         );
+    });
+
+    it("dispatches a PDF page translation event from the toolbar button", () => {
+        document.body.innerHTML = `
+            <button id="edgeTranslatePdfPageTranslateButton" type="button"></button>
+        `;
+
+        const seen = [];
+        window.addEventListener(PDF_PAGE_TRANSLATE_EVENT, (event) => {
+            seen.push(event.detail.source);
+        });
+
+        expect(bindPdfPageTranslateButton(document, window)).toBe(true);
+        document.getElementById("edgeTranslatePdfPageTranslateButton").click();
+
+        expect(seen).toEqual(["pdf-viewer-toolbar"]);
+    });
+
+    it("reports whether a PDF page translation request was dispatched", () => {
+        const seen = [];
+        window.addEventListener(PDF_PAGE_TRANSLATE_EVENT, () => seen.push("seen"));
+
+        expect(requestPdfPageTranslation({ windowRef: window })).toBe(true);
+        expect(seen).toEqual(["seen"]);
     });
 });

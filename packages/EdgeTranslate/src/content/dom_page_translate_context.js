@@ -77,6 +77,30 @@ const UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR = [
     "audio",
 ].join(",");
 
+const UNSAFE_INLINE_LINK_BLOCK_REPLACE_SELECTOR = [
+    "button",
+    "canvas",
+    "code",
+    "embed",
+    "iframe",
+    "img",
+    "input",
+    "kbd",
+    "math",
+    "object",
+    "option",
+    "picture",
+    "pre",
+    "samp",
+    "script",
+    "select",
+    "style",
+    "svg",
+    "textarea",
+    "video",
+    "audio",
+].join(",");
+
 function normalizeTextNodeValue(node) {
     return String((node && node.nodeValue) || "")
         .replace(/\s+/g, " ")
@@ -155,6 +179,10 @@ function buildContextTranslationGroups(nodes, options = {}) {
 
     const groups = [];
     for (const [block, entries] of buckets.entries()) {
+        if (inferDomPageTextRole(block) === "text" && entries.length > 1) {
+            entries.forEach((entry) => groups.push(createContextGroup(block, [entry])));
+            continue;
+        }
         let current = [];
         let currentLength = 0;
         for (const entry of entries) {
@@ -187,19 +215,32 @@ function createReadableBlockReplacement(group, options = {}) {
     const minNodes = options.minNodes || 2;
     const maxChars = options.maxChars || 3500;
     const preserveInlineFormatting = options.preserveInlineFormatting !== false;
+    const preserveInlineLinks = options.preserveInlineLinks !== false;
     const block = group && group.block;
     if (!block || !READABLE_REPLACE_BLOCK_TAGS.has(block.tagName)) return null;
     if (!group.nodes || group.nodes.length < minNodes) return null;
-    if (preserveInlineFormatting && block.children && block.children.length > 0) {
-        return null;
-    }
-    if (block.querySelector && block.querySelector(UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR)) {
-        return null;
-    }
 
     const meaningfulNodes = getMeaningfulTextNodes(block);
     const groupNodes = new Set(group.nodes);
     if (!meaningfulNodes.length || meaningfulNodes.some((node) => !groupNodes.has(node))) {
+        return null;
+    }
+
+    if (preserveInlineLinks) {
+        const inlineLinkReplacement = createInlineLinkBlockReplacement(block, maxChars);
+        if (inlineLinkReplacement) {
+            return {
+                ...inlineLinkReplacement,
+                role: inferDomPageTextRole(block),
+                nodes: group.nodes,
+            };
+        }
+    }
+
+    if (preserveInlineFormatting && block.children && block.children.length > 0) {
+        return null;
+    }
+    if (block.querySelector && block.querySelector(UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR)) {
         return null;
     }
 
@@ -212,6 +253,50 @@ function createReadableBlockReplacement(group, options = {}) {
         nodes: group.nodes,
         sourceText,
     };
+}
+
+function createInlineLinkBlockReplacement(block, maxChars) {
+    if (!block || !block.querySelector || !block.querySelector("a[href]")) return null;
+    if (
+        block.querySelector(UNSAFE_INLINE_LINK_BLOCK_REPLACE_SELECTOR) ||
+        block.querySelector("a[href] a[href]")
+    ) {
+        return null;
+    }
+
+    const links = [];
+    const sourceText = normalizeBlockText(serializeInlineLinkBlock(block, links));
+    if (!sourceText || !links.length || sourceText.length > maxChars) return null;
+
+    return {
+        block,
+        sourceText,
+        inlineLinks: links,
+    };
+}
+
+function serializeInlineLinkBlock(node, links) {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+    if (node.tagName === "A" && node.getAttribute("href")) {
+        const index = links.length + 1;
+        links.push({
+            href: node.getAttribute("href") || "",
+            text: normalizeBlockText(node.textContent),
+            title: node.getAttribute("title") || "",
+            target: node.getAttribute("target") || "",
+            rel: node.getAttribute("rel") || "",
+        });
+        return ` [[EDGE_TRANSLATE_LINK_${index}]]${normalizeBlockText(
+            node.textContent
+        )}[[/EDGE_TRANSLATE_LINK_${index}]] `;
+    }
+
+    return Array.from(node.childNodes || [])
+        .map((child) => serializeInlineLinkBlock(child, links))
+        .join("");
 }
 
 function splitTranslatedContext(translatedText, expectedCount) {
@@ -241,8 +326,22 @@ function sanitizeSegmentRole(role) {
     return normalized || "text";
 }
 
+const SEGMENT_ROLE_CODES = {
+    caption: "c",
+    date: "d",
+    label: "l",
+    "list-item": "i",
+    navigation: "n",
+    paragraph: "p",
+    "table-header": "h",
+    text: "x",
+    title: "t",
+};
+
 function getSegmentMarker(index, role) {
-    return `<<<EDGE_TRANSLATE_SEGMENT_${index + 1} role=${sanitizeSegmentRole(role)}>>>`;
+    const normalizedRole = sanitizeSegmentRole(role);
+    const roleCode = SEGMENT_ROLE_CODES[normalizedRole] || normalizedRole.slice(0, 3) || "x";
+    return `[[${index + 1}:${roleCode}]]`;
 }
 
 function buildSegmentedTranslationText(items) {
@@ -262,13 +361,14 @@ function splitSegmentedTranslationText(translatedText, expectedCount) {
     const translated = String(translatedText || "").trim();
     if (!translated || expectedCount <= 0) return null;
 
-    const markerPattern = /<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
+    const markerPattern =
+        /\[\[(\d+):[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
     const matches = Array.from(translated.matchAll(markerPattern));
     if (matches.length !== expectedCount) return null;
 
     const parts = new Array(expectedCount);
     for (let i = 0; i < matches.length; i += 1) {
-        const markerIndex = Number(matches[i][1] || matches[i][2]) - 1;
+        const markerIndex = Number(matches[i][1] || matches[i][2] || matches[i][3]) - 1;
         if (markerIndex < 0 || markerIndex >= expectedCount || parts[markerIndex] !== undefined) {
             return null;
         }

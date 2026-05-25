@@ -1336,7 +1336,7 @@
         "description": "지원되는 데스크톱 Chrome의 내장 Translator API를 사용합니다."
     },
     "LocalTranslatorTimeoutMs": {
-        "message": "AI 번역기 제한 시간(ms)"
+        "message": "제한 시간"
     },
     "LocalTranslatorModeGoogleAiStudio": {
         "message": "Google AI Studio",
@@ -1350,8 +1350,60 @@
         "message": "AI 모델",
         "description": "Google AI Studio 모델 이름"
     },
+    "LocalTranslatorReasoningLevel": {
+        "message": "추론 레벨",
+        "description": "Google AI Studio thinking level 설정"
+    },
     "LocalTranslatorOpenAIModel": {
         "message": "OpenAI 모델",
         "description": "OpenAI 모델 이름"
+    },
+    "LocalTranslatorOpenAIReasoningEffort": {
+        "message": "추론 레벨",
+        "description": "OpenAI reasoning_effort 설정"
+    },
+    "TranslateNormal": {
+        "message": "일반 번역",
+        "description": "일반 번역 프로필로 선택 영역을 번역"
+    },
+    "TranslatePrecise": {
+        "message": "정밀 번역",
+        "description": "정밀 번역 프로필로 선택 영역을 번역"
+    },
+    "TranslateNormalShort": {
+        "message": "일반",
+        "description": "일반 번역 짧은 이름"
+    },
+    "TranslatePreciseShort": {
+        "message": "정밀",
+        "description": "정밀 번역 짧은 이름"
+    },
+    "ToggleRealtimeCaptionTranslate": {
+        "message": "실시간 자막 번역 토글",
+        "description": "실시간 자막 번역 모드 전환"
+    },
+    "RealtimeCaptionTranslate": {
+        "message": "실시간 자막 번역",
+        "description": "YouTube에 표시되는 자막을 실시간으로 번역"
+    },
+    "PreciseTranslatorConfig": {
+        "message": "정밀 번역 모델",
+        "description": "정밀 번역 프로필 설정"
+    },
+    "PreciseTranslatorMode": {
+        "message": "정밀 모드",
+        "description": "정밀 번역에 사용할 AI 제공자 모드"
+    },
+    "PreciseTranslatorModel": {
+        "message": "정밀 Gemini 모델",
+        "description": "정밀 번역에 사용할 Google AI Studio 모델"
+    },
+    "PreciseTranslatorOpenAIModel": {
+        "message": "정밀 OpenAI 모델",
+        "description": "정밀 번역에 사용할 OpenAI 모델"
+    },
+    "PreciseTranslatorHelp": {
+        "message": "정밀 번역은 AI 번역과 같은 API 키를 쓰되, 제공자와 모델, 추론 레벨을 따로 지정할 수 있습니다.",
+        "description": "정밀 번역 도움말"
     }
 }

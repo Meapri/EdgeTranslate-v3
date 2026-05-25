@@ -1,4 +1,4 @@
-import { TranslationResult } from "../types";
+import { TranslationResult, TranslationTokenUsage } from "../types";
 import { LRUCache } from "../utils/lru";
 import { fnv1a32 } from "../utils/hash";
 
@@ -9,9 +9,16 @@ export type LocalTranslatorConfig = {
     mode?: LocalTranslatorMode | string;
     apiKey?: string;
     model?: string;
+    reasoningLevel?: string;
     openaiApiKey?: string;
     openaiModel?: string;
+    openaiReasoningEffort?: string;
     timeoutMs?: number | string;
+};
+
+export type LocalTranslationOptions = {
+    textRole?: string;
+    translationProfile?: string;
 };
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -90,19 +97,37 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-24-opt";
+const DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL = "auto";
+const DEFAULT_OPENAI_REASONING_EFFORT = "auto";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-25-youtube-caption-spoken-ko";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 16;
 const AI_TRANSLATION_SYSTEM_PROMPT = [
-    "Translate naturally while preserving meaning, tone, intent, nuance, register, context, and character voice.",
+    "Translate as a high-fidelity translation engine: preserve meaning, tone, intent, nuance, register, rhythm, emotional progression, local context, and character voice while producing natural target-language prose.",
     "Output only the translation, or only the exact JSON object when JSON is requested. Do not add notes, alternatives, labels, Markdown, or process narration.",
-    "Preserve structure exactly: subtitle cue numbers, timestamps, cue order, block boundaries, line breaks, speaker labels, tags, escaped entities, markup, tables, keys, placeholders, code spans, URLs, file paths, commands, and formatting tokens.",
+    "Work zero-shot. Do not invent examples, do not add priming text, do not turn the task into a lesson, and do not mention your reasoning.",
+    "Separate structural metadata from human-language payload before translating. Preserve only structures that are present in the input: subtitle cue numbers, timestamps, cue order, block boundaries, line breaks, speaker labels, tags, escaped entities, markup, tables, keys, placeholders, code spans, URLs, file paths, commands, and formatting tokens. Never invent subtitle cues or timestamps.",
     "Preserve numeric literals, dates, times, measurements, versions, ratings, prices, percentages, ranges, IDs, model names, product names, file names, and issue numbers exactly unless the target language has a required conventional format.",
-    "Preserve proper nouns by default: personal names, organizations, brands, services, places, titles, works, events, laws, technical terms, and account names. Use a standard established target-language form only when it is clearly conventional in context.",
-    "Do not phoneticize, respell, translate, explain, or normalize unfamiliar names, dates, or numbers. Keep forms like 2024, GPT-5.5, sk-proj, iPhone, GitHub, and Pokemon-style names as written unless the source itself translates them.",
-    "Translate only human-language payload. Resolve ambiguity conservatively from local context, keeping subtext, politeness, technical precision, humor, vulgarity, fragments, interruptions, and intentional odd phrasing.",
+    "Preserve proper nouns by default: personal names, organizations, brands, services, places, titles, works, events, laws, standards, model names, technical terms, and account names. Use a standard established target-language form only when it is clearly conventional in context.",
+    "Do not phoneticize, respell, translate, explain, split, or normalize unfamiliar names, dates, numbers, brands, services, product names, model IDs, or technical identifiers. Keep official Latin-script names and casing as written unless the source already gives a localized form.",
+    "Translate only human-language payload. Resolve ambiguity conservatively from local context, keeping subtext, irony, politeness, technical precision, humor, vulgarity, fragments, interruptions, and intentional odd phrasing.",
+    "For webpage/page-translation segments, keep every segment marker exactly once, preserve segment order, translate each segment as part of the same article context, and never merge, drop, duplicate, or invent segments. Use neighboring segments for terminology, referents, tone, and named-entity consistency only.",
+    "For long webpage text, prefer polished complete sentences in the target language. Keep repeated names and domain terms consistent across the batch. Avoid mojibake, random glyphs, repeated syllables, source-language leftovers, prompt leakage, and half-translated fragments.",
+    "Keep inline-boundary spacing natural around links and emphasized text. Do not glue unrelated words across hyperlink boundaries unless the target language convention clearly requires it.",
+    "For webpage link placeholders like [[EDGE_TRANSLATE_LINK_1]]text[[/EDGE_TRANSLATE_LINK_1]], preserve the opening and closing placeholders exactly, translate the visible text naturally, and write the surrounding sentence as one fluent sentence.",
 ].join(" ");
+
+const PAGE_TRANSLATION_SYSTEM_PROMPT = [
+    "Translate page segments only.",
+    "Keep every [[n:r]] marker once, same order.",
+    "Keep each segment's payload line count.",
+    "Preserve placeholders, URLs, code, numbers, IDs, link markers, and official names.",
+    "Output only the translation.",
+].join(" ");
+
+const REALTIME_CAPTION_SYSTEM_PROMPT =
+    "Translate YouTube captions as natural spoken subtitles. Keep order and line breaks. Output only translation.";
 
 const DICTIONARY_OUTPUT_INSTRUCTION = [
     "Dictionary task: this input is a single word or short term. Return only one valid JSON object with this exact shape:",
@@ -145,8 +170,7 @@ async function retryWithBackoff<T>(
         } catch (error: any) {
             lastError = error;
             const msg = error?.errorMsg || error?.message || "";
-            const isRetryable =
-                /429|500|502|503|rate/i.test(msg);
+            const isRetryable = /429|500|502|503|rate/i.test(msg);
             if (!isRetryable || attempt === maxRetries) throw error;
             await new Promise((r) => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
         }
@@ -165,8 +189,92 @@ function normalizeModel(model: string | undefined, fallback: string) {
     return (model || fallback).trim() || fallback;
 }
 
+function normalizeGoogleAiStudioReasoningLevel(value: string | undefined) {
+    const normalized = String(value || "")
+        .trim()
+        .toLowerCase();
+    if (["auto", "none", "minimal", "low", "medium", "high"].includes(normalized)) {
+        return normalized;
+    }
+    return DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL;
+}
+
+function normalizeOpenAiReasoningEffort(value: string | undefined) {
+    const normalized = String(value || "")
+        .trim()
+        .toLowerCase();
+    if (["auto", "none", "minimal", "low", "medium", "high", "xhigh"].includes(normalized)) {
+        return normalized;
+    }
+    return DEFAULT_OPENAI_REASONING_EFFORT;
+}
+
+function addNumbers(...values: Array<number | undefined>) {
+    let total = 0;
+    for (const value of values) {
+        const numeric = Number(value || 0);
+        if (Number.isFinite(numeric)) total += numeric;
+    }
+    return total;
+}
+
+function cleanTokenUsage(usage: TranslationTokenUsage): TranslationTokenUsage | undefined {
+    const cleaned: TranslationTokenUsage = {};
+    for (const [key, value] of Object.entries(usage) as Array<
+        [keyof TranslationTokenUsage, number | undefined]
+    >) {
+        const numeric = Number(value || 0);
+        if (Number.isFinite(numeric) && numeric > 0) cleaned[key] = numeric;
+    }
+    return Object.keys(cleaned).length ? cleaned : undefined;
+}
+
+function mergeTokenUsage(
+    a?: TranslationTokenUsage,
+    b?: TranslationTokenUsage
+): TranslationTokenUsage | undefined {
+    return cleanTokenUsage({
+        inputTokens: addNumbers(a?.inputTokens, b?.inputTokens),
+        outputTokens: addNumbers(a?.outputTokens, b?.outputTokens),
+        reasoningTokens: addNumbers(a?.reasoningTokens, b?.reasoningTokens),
+        cachedInputTokens: addNumbers(a?.cachedInputTokens, b?.cachedInputTokens),
+        totalTokens: addNumbers(a?.totalTokens, b?.totalTokens),
+    });
+}
+
+function extractGoogleAiStudioTokenUsage(payload: any): TranslationTokenUsage | undefined {
+    const usage = payload?.usageMetadata;
+    if (!usage) return undefined;
+    return cleanTokenUsage({
+        inputTokens: usage.promptTokenCount,
+        outputTokens: usage.candidatesTokenCount,
+        reasoningTokens: usage.thoughtsTokenCount,
+        cachedInputTokens: usage.cachedContentTokenCount,
+        totalTokens: usage.totalTokenCount,
+    });
+}
+
+function extractOpenAiTokenUsage(payload: any): TranslationTokenUsage | undefined {
+    const usage = payload?.usage;
+    if (!usage) return undefined;
+    return cleanTokenUsage({
+        inputTokens: usage.prompt_tokens,
+        outputTokens: usage.completion_tokens,
+        reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+        cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
+        totalTokens: usage.total_tokens,
+    });
+}
+
 function toLanguageName(language: string) {
     return LANGUAGE_NAMES[language] || language || "auto";
+}
+
+function normalizeLanguageCode(language: string) {
+    return String(language || "")
+        .trim()
+        .toLowerCase()
+        .split("-")[0];
 }
 
 function toChromeTranslatorLanguage(language: string) {
@@ -205,11 +313,24 @@ function getScriptConstraint(language: string) {
     return script ? `Output must use ${script} script only.` : "";
 }
 
+function getRealtimeCaptionStyleRule(language: string) {
+    const normalized = normalizeLanguageCode(language);
+    if (normalized === "ko") {
+        return "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese.";
+    }
+    return "Natural spoken subtitle tone; translate idioms, not word-by-word.";
+}
+
 function isDictionaryCandidate(text: string) {
     const trimmed = String(text || "").trim();
     if (!trimmed || trimmed.length > 64) return false;
     if (/https?:\/\//i.test(trimmed)) return false;
-    if (/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(trimmed)) return false;
+    if (
+        /\[\[\d+:[a-z][a-z0-9-]*]]/.test(trimmed) ||
+        /<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(trimmed)
+    ) {
+        return false;
+    }
     if (/[.!?。！？\n\r\t]/.test(trimmed)) return false;
     if (/^[「『“"'].*[」』”"']\s*\S+/.test(trimmed)) return false;
 
@@ -290,7 +411,10 @@ function getKoreanMixedScriptFragments(text: string) {
     const fragments = new Set<string>();
     const tokens = String(text || "").match(/[^\s.,!?。！？()[\]{}"']+/g) || [];
     for (const token of tokens) {
-        if (/[\uAC00-\uD7AF]/.test(token) && /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(token)) {
+        if (
+            /[\uAC00-\uD7AF]/.test(token) &&
+            /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(token)
+        ) {
             fragments.add(token);
         }
     }
@@ -337,6 +461,17 @@ function extractOpenAIMessageContent(message: any) {
             .trim();
     }
     return "";
+}
+
+function countPageSegmentMarkers(text: string) {
+    const matches = String(text || "").match(
+        /\[\[\d+:[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g
+    );
+    return matches ? matches.length : 0;
+}
+
+function hasPageTranslationSegments(text: string) {
+    return countPageSegmentMarkers(text) > 0;
 }
 
 function buildOpenAiCompletionLimit(model: string, tokenBudget: number) {
@@ -391,10 +526,12 @@ function parseStructuredDictionaryOutput(output: string, fallbackText: string) {
                     return { pos: "", meaning: item.trim(), synonyms: [] };
                 }
                 return {
-                    pos: String(item?.pos || item?.partOfSpeech || item?.part_of_speech || "")
-                        .trim(),
-                    meaning: String(item?.meaning || item?.definition || item?.translation || "")
-                        .trim(),
+                    pos: String(
+                        item?.pos || item?.partOfSpeech || item?.part_of_speech || ""
+                    ).trim(),
+                    meaning: String(
+                        item?.meaning || item?.definition || item?.translation || ""
+                    ).trim(),
                     synonyms: asArray(item?.synonyms)
                         .map((word) => String(word || "").trim())
                         .filter(Boolean),
@@ -407,12 +544,15 @@ function parseStructuredDictionaryOutput(output: string, fallbackText: string) {
                     return { pos: "", meaning: item.trim(), example: "", synonyms: [] };
                 }
                 return {
-                    pos: String(item?.pos || item?.partOfSpeech || item?.part_of_speech || "")
-                        .trim(),
-                    meaning: String(item?.meaning || item?.definition || item?.translation || "")
-                        .trim(),
-                    example: String(item?.example || item?.sourceExample || item?.sentence || "")
-                        .trim(),
+                    pos: String(
+                        item?.pos || item?.partOfSpeech || item?.part_of_speech || ""
+                    ).trim(),
+                    meaning: String(
+                        item?.meaning || item?.definition || item?.translation || ""
+                    ).trim(),
+                    example: String(
+                        item?.example || item?.sourceExample || item?.sentence || ""
+                    ).trim(),
                     synonyms: asArray(item?.synonyms)
                         .map((word) => String(word || "").trim())
                         .filter(Boolean),
@@ -460,8 +600,10 @@ class LocalTranslator {
     private mode: LocalTranslatorMode = "chromeBuiltin";
     private apiKey = "";
     private model = DEFAULT_GOOGLE_AI_STUDIO_MODEL;
+    private reasoningLevel = DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL;
     private openaiApiKey = "";
     private openaiModel = DEFAULT_OPENAI_MODEL;
+    private openaiReasoningEffort = DEFAULT_OPENAI_REASONING_EFFORT;
     private timeoutMs = DEFAULT_TIMEOUT_MS;
     private cache = new LRUCache<string, TranslationResult>({ max: 200, ttl: 10 * 60 * 1000 });
     private inflight = new Map<string, Promise<TranslationResult>>();
@@ -476,8 +618,10 @@ class LocalTranslator {
         this.mode = normalizeMode(config.mode);
         this.apiKey = (config.apiKey || "").trim();
         this.model = normalizeModel(config.model, DEFAULT_GOOGLE_AI_STUDIO_MODEL);
+        this.reasoningLevel = normalizeGoogleAiStudioReasoningLevel(config.reasoningLevel);
         this.openaiApiKey = (config.openaiApiKey || "").trim();
         this.openaiModel = normalizeModel(config.openaiModel, DEFAULT_OPENAI_MODEL);
+        this.openaiReasoningEffort = normalizeOpenAiReasoningEffort(config.openaiReasoningEffort);
         this.timeoutMs = Number(config.timeoutMs) || DEFAULT_TIMEOUT_MS;
         this.cache.clear();
         this.inflight.clear();
@@ -504,7 +648,12 @@ class LocalTranslator {
         return Promise.resolve("auto");
     }
 
-    async translate(text: string, from: string, to: string): Promise<TranslationResult> {
+    async translate(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ): Promise<TranslationResult> {
         if (!text || !text.trim()) {
             return { originalText: text || "", mainMeaning: "" };
         }
@@ -548,8 +697,15 @@ class LocalTranslator {
         }
 
         const providerModel =
-            this.mode === "openai" ? this.openaiModel : this.mode === "googleAiStudio" ? this.model : "";
-        const key = `L|${LOCAL_TRANSLATOR_PROMPT_VERSION}|${this.mode}|${providerModel}|${from}|${to}|${fnv1a32(text)}`;
+            this.mode === "openai"
+                ? this.openaiModel
+                : this.mode === "googleAiStudio"
+                ? this.model
+                : "";
+        const profileKey = this.getTranslationProfileKey(options);
+        const key = `L|${LOCAL_TRANSLATOR_PROMPT_VERSION}|${profileKey}|${
+            this.mode
+        }|${providerModel}|${from}|${to}|${fnv1a32(text)}`;
         const cached = this.cache.get(key);
         if (cached) return cached;
 
@@ -557,7 +713,7 @@ class LocalTranslator {
         if (existing) return existing;
 
         const request = localRequestLimiter
-            .run(() => this.requestTranslation(text, from, to))
+            .run(() => this.requestTranslation(text, from, to, options))
             .then((result) => {
                 this.cache.set(key, result);
                 return result;
@@ -568,19 +724,40 @@ class LocalTranslator {
         return request;
     }
 
-    private async requestTranslation(text: string, from: string, to: string) {
+    private getTranslationProfileKey(options: LocalTranslationOptions = {}) {
+        if (this.isRealtimeCaptionBatchTranslation(options)) return "realtimeCaptionBatch";
+        if (this.isRealtimeCaptionTranslation(options)) return "realtimeCaption";
+        return "default";
+    }
+
+    private isRealtimeCaptionBatchTranslation(options: LocalTranslationOptions = {}) {
+        return options.translationProfile === "realtimeCaptionBatch";
+    }
+
+    private isRealtimeCaptionTranslation(options: LocalTranslationOptions = {}) {
+        return (
+            this.isRealtimeCaptionBatchTranslation(options) ||
+            options.translationProfile === "realtimeCaption" ||
+            String(options.textRole || "").toLowerCase() === "caption"
+        );
+    }
+
+    private async requestTranslation(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ) {
         if (this.mode === "chromeBuiltin") {
             return this.requestChromeBuiltinTranslation(text, from, to);
         }
         if (this.mode === "googleAiStudio") {
             return retryWithBackoff(() =>
-                this.requestGoogleAiStudioTranslation(text, from, to)
+                this.requestGoogleAiStudioTranslation(text, from, to, options)
             );
         }
         if (this.mode === "openai") {
-            return retryWithBackoff(() =>
-                this.requestOpenAiTranslation(text, from, to)
-            );
+            return retryWithBackoff(() => this.requestOpenAiTranslation(text, from, to, options));
         }
         return this.requestChromeBuiltinTranslation(text, from, to);
     }
@@ -672,21 +849,90 @@ class LocalTranslator {
         return sourceLanguage;
     }
 
-    private buildGoogleAiStudioPrompt(text: string, from: string, to: string) {
+    private buildRealtimeCaptionPrompt(text: string, from: string, to: string) {
+        const sourceLanguage = toLanguageName(from);
+        const targetLanguage = toLanguageName(to);
+        const scriptRule = getScriptConstraint(to);
+        const styleRule = getRealtimeCaptionStyleRule(to);
+        return [
+            [
+                `Subtitle ${sourceLanguage}->${targetLanguage}.`,
+                styleRule,
+                "Keep line breaks, names, numbers, URLs.",
+                scriptRule,
+            ]
+                .filter(Boolean)
+                .join(" "),
+            "",
+            text,
+        ]
+            .filter(Boolean)
+            .join("\n");
+    }
+
+    private buildRealtimeCaptionBatchPrompt(text: string, from: string, to: string) {
+        const sourceLanguage = toLanguageName(from);
+        const targetLanguage = toLanguageName(to);
+        const scriptRule = getScriptConstraint(to);
+        const styleRule = getRealtimeCaptionStyleRule(to);
+        return [
+            [
+                `Subtitle batch ${sourceLanguage}->${targetLanguage}.`,
+                styleRule,
+                "Translate each [[n]] independently; keep every marker once, same order; no merge.",
+                "Keep names, numbers, URLs.",
+                scriptRule,
+            ]
+                .filter(Boolean)
+                .join(" "),
+            "",
+            text,
+        ]
+            .filter(Boolean)
+            .join("\n");
+    }
+
+    private buildGoogleAiStudioPrompt(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ) {
+        if (this.isRealtimeCaptionBatchTranslation(options)) {
+            return this.buildRealtimeCaptionBatchPrompt(text, from, to);
+        }
+        if (this.isRealtimeCaptionTranslation(options)) {
+            return this.buildRealtimeCaptionPrompt(text, from, to);
+        }
         const sourceLanguage = toLanguageName(from);
         const targetLanguage = toLanguageName(to);
         const scriptRule = getScriptConstraint(to);
         const dictionaryInstruction = isDictionaryCandidate(text)
             ? DICTIONARY_OUTPUT_INSTRUCTION
             : "";
+        const hasPageSegments = hasPageTranslationSegments(text);
+        const hasInlineLinks = /\[\[EDGE_TRANSLATE_LINK_\d+]]/.test(text);
+        if (hasPageSegments) {
+            const pageParts = [
+                `Translate ${sourceLanguage} -> ${targetLanguage}.`,
+                scriptRule,
+                hasInlineLinks ? "Keep link markers; translate visible link text." : "",
+                "",
+                text,
+            ];
+            return pageParts.filter(Boolean).join("\n");
+        }
         const parts = [
             "Translate the user's text.",
-            "Translate faithfully and naturally into the target language.",
+            "Translate faithfully and naturally into the target language as if the result were originally written in that language.",
+            "Preserve meaning, tone, intent, nuance, register, rhythm, emotional progression, and local context.",
             "Keep the same text form: heading stays heading, label stays label, sentence stays sentence, and list stays list.",
             "Do not summarize, explain, or add information.",
             "Respect the original formatting, line breaks, segment markers, placeholders, URLs, code, and markup.",
             "Use the customary writing system of natural Korean when Korean is the target language.",
-            "Translate or transliterate names, brands, product names, service names, and ordinary terms when that is natural in the target language. Only non-linguistic tokens may stay unchanged.",
+            "Preserve proper nouns and official names by default: people, organizations, brands, services, product names, model names, titles, places, laws, events, account names, technical terms, and identifiers.",
+            "Use a localized or translated proper-name form only when it is clearly established by context or target-language convention. Otherwise keep the name intact, especially official Latin-script names and casing.",
+            "Do not split named entities into generic translated words. Do not explain names or append glosses.",
             "For Han-script source text, translate complete semantic units. Do not partially translate compound nouns.",
             "Never create mixed-script words by combining source-script characters with target-language characters.",
             "Before finalizing, rewrite any remaining source-language fragment. Source-language text is forbidden in the output except for preserved URLs, code, IDs, and exact placeholders.",
@@ -695,8 +941,14 @@ class LocalTranslator {
             `Target language: ${targetLanguage}.`,
             scriptRule,
             dictionaryInstruction,
-            /<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(text)
-                ? "For marked segments, preserve every marker and role metadata exactly while translating only the text after each marker."
+            !hasPageSegments
+                ? "For selected or drag-translated text, treat the input as a self-contained selection. If it is a phrase or UI label, return a concise natural equivalent; if it is a sentence or paragraph, preserve voice, politeness, implied meaning, and technical precision without padding."
+                : "",
+            !hasPageSegments
+                ? "Do not over-translate proper nouns in selected text. Keep official product, app, model, repository, API, package, and company names intact unless a well-established localized form is clearly appropriate."
+                : "",
+            hasInlineLinks
+                ? "For inline link placeholders, preserve every [[EDGE_TRANSLATE_LINK_n]] and [[/EDGE_TRANSLATE_LINK_n]] marker exactly. Translate the whole sentence naturally around the link, keep spacing natural, and do not expose placeholder text to the reader."
                 : "",
             "",
             text,
@@ -704,8 +956,20 @@ class LocalTranslator {
         return parts.filter(Boolean).join("\n");
     }
 
-    private buildOpenAiPrompt(text: string, from: string, to: string) {
-        return this.buildGoogleAiStudioPrompt(text, from, to);
+    private buildOpenAiPrompt(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ) {
+        return this.buildGoogleAiStudioPrompt(text, from, to, options);
+    }
+
+    private getTranslationSystemPrompt(text: string, options: LocalTranslationOptions = {}) {
+        if (this.isRealtimeCaptionTranslation(options)) return REALTIME_CAPTION_SYSTEM_PROMPT;
+        return hasPageTranslationSegments(text)
+            ? PAGE_TRANSLATION_SYSTEM_PROMPT
+            : AI_TRANSLATION_SYSTEM_PROMPT;
     }
 
     private parseGoogleAiStudioResponse(payload: any) {
@@ -723,28 +987,103 @@ class LocalTranslator {
         return extractOpenAIMessageContent(payload?.choices?.[0]?.message);
     }
 
-    private getGoogleAiStudioCompatibilityModes() {
-        if (this.shouldStartGoogleAiStudioWithBareRequest()) {
+    private getGoogleAiStudioCompatibilityModes(options: LocalTranslationOptions = {}) {
+        if (this.shouldStartGoogleAiStudioWithBareRequest(options)) {
             return ["bare", "minimal"] as const;
         }
         return ["minimal", "bare"] as const;
     }
 
-    private shouldStartGoogleAiStudioWithBareRequest() {
+    private shouldStartGoogleAiStudioWithBareRequest(options: LocalTranslationOptions = {}) {
+        if (this.buildGoogleAiStudioThinkingConfig(options)) return false;
         const model = this.model.toLowerCase();
         return /^gemini-(?:3(?:\.\d+)?-pro|pro-latest)(?:$|-)/.test(model);
     }
 
+    private shouldAvoidGoogleAiStudioOutputLimit() {
+        return /^gemini-3(?:\.|-|$)/i.test(this.model);
+    }
+
+    private isGemini3Model() {
+        return /^gemini-(?:3(?:\.|-)|flash-latest|flash-lite-latest|pro-latest)/i.test(this.model);
+    }
+
+    private isGemini3ProModel() {
+        return /^gemini-(?:3(?:\.\d+)?-pro|pro-latest)(?:$|-)/i.test(this.model);
+    }
+
+    private isGemini3FlashModel() {
+        return /^gemini-(?:3(?:\.\d+)?-flash|3(?:\.\d+)?-flash-lite|flash-latest|flash-lite-latest)(?:$|-)/i.test(
+            this.model
+        );
+    }
+
+    private isGemini25Model() {
+        return /^gemini-2\.5/i.test(this.model);
+    }
+
+    private isGemini25ProModel() {
+        return /^gemini-2\.5-pro(?:$|-)/i.test(this.model);
+    }
+
+    private getEffectiveGoogleAiStudioReasoningLevel(options: LocalTranslationOptions = {}) {
+        if (!this.isRealtimeCaptionTranslation(options)) return this.reasoningLevel;
+        if (this.isGemini3ProModel()) return "low";
+        if (this.isGemini3FlashModel()) return "minimal";
+        if (this.isGemini25Model()) return this.isGemini25ProModel() ? "low" : "none";
+        return "auto";
+    }
+
+    private buildGoogleAiStudioThinkingConfig(options: LocalTranslationOptions = {}) {
+        const level = this.getEffectiveGoogleAiStudioReasoningLevel(options);
+        if (level === "auto") return undefined;
+        if (this.isGemini3Model()) {
+            if (this.isGemini3ProModel()) {
+                if (level !== "low" && level !== "high") return undefined;
+                return { thinkingLevel: level };
+            }
+            if (this.isGemini3FlashModel()) {
+                if (!["minimal", "low", "medium", "high"].includes(level)) return undefined;
+                return { thinkingLevel: level };
+            }
+            return undefined;
+        }
+        if (!this.isGemini25Model()) return undefined;
+
+        if (level === "none") {
+            return this.isGemini25ProModel() ? undefined : { thinkingBudget: 0 };
+        }
+        const budgetByLevel: Record<string, number> = {
+            minimal: 1024,
+            low: 1024,
+            medium: 8192,
+            high: 24576,
+        };
+        const thinkingBudget = budgetByLevel[level];
+        return typeof thinkingBudget === "number" ? { thinkingBudget } : undefined;
+    }
+
     private buildGoogleAiStudioGenerationConfig(
         inputLength?: number,
-        compatibilityMode: "minimal" | "bare" = "minimal"
+        compatibilityMode: "minimal" | "bare" = "minimal",
+        options: LocalTranslationOptions = {}
     ) {
         if (compatibilityMode === "bare") return undefined;
         const config: Record<string, any> = { temperature: 0 };
-        if (inputLength) {
-            config.maxOutputTokens = Math.max(256, Math.ceil(inputLength * 3));
+        const thinkingConfig = this.buildGoogleAiStudioThinkingConfig(options);
+        if (thinkingConfig) config.thinkingConfig = thinkingConfig;
+        if (this.isRealtimeCaptionTranslation(options)) {
+            config.maxOutputTokens = Math.max(96, Math.ceil((inputLength || 24) * 2));
+            return config;
+        }
+        if (inputLength && !this.shouldAvoidGoogleAiStudioOutputLimit()) {
+            config.maxOutputTokens = Math.max(512, Math.ceil(inputLength * 4));
         }
         return config;
+    }
+
+    private isGoogleAiStudioTruncatedPayload(payload: any) {
+        return payload?.candidates?.[0]?.finishReason === "MAX_TOKENS";
     }
 
     private shouldRetryGoogleAiStudioWithCompatibilityConfig(error: any) {
@@ -769,7 +1108,7 @@ class LocalTranslator {
             "Repair only the listed problematic fragments in the Korean translation.",
             "Do not retranslate the whole sentence or paragraph.",
             "Keep the same grammatical span as the fragment.",
-            "Return only JSON: {\"repairs\":[{\"source\":\"...\",\"translation\":\"...\"}]}",
+            'Return only JSON: {"repairs":[{"source":"...","translation":"..."}]}',
             "",
             "Original source text:",
             sourceText,
@@ -782,10 +1121,14 @@ class LocalTranslator {
         ].join("\n");
     }
 
-    private async repairKoreanMixedScriptTranslation(translated: string, sourceText: string, to: string) {
-        if (toChromeTranslatorLanguage(to) !== "ko") return translated;
+    private async repairKoreanMixedScriptTranslation(
+        translated: string,
+        sourceText: string,
+        to: string
+    ) {
+        if (toChromeTranslatorLanguage(to) !== "ko") return { translated };
         const fragments = getKoreanMixedScriptFragments(translated);
-        if (!fragments.length) return translated;
+        if (!fragments.length) return { translated };
 
         const generationConfig = this.buildGoogleAiStudioGenerationConfig(
             translated.length,
@@ -829,7 +1172,8 @@ class LocalTranslator {
             }
         );
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) return translated;
+        const tokenUsage = extractGoogleAiStudioTokenUsage(payload);
+        if (!response.ok) return { translated, tokenUsage };
 
         const repairs = parseGeminiNanoScriptRepairs(this.parseGoogleAiStudioResponse(payload));
         let repairedText = translated;
@@ -838,27 +1182,38 @@ class LocalTranslator {
             if (!isAcceptableKoreanFragmentRepair(repair.source, repair.translation)) continue;
             repairedText = repairedText.replace(repair.source, repair.translation);
         }
-        return repairedText;
+        return { translated: repairedText, tokenUsage };
     }
 
-    private async requestGoogleAiStudioTranslation(text: string, from: string, to: string) {
+    private async requestGoogleAiStudioTranslation(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
+            const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const model = encodeURIComponent(this.model);
             const requestPayload = async (compatibilityMode: "minimal" | "bare") => {
                 const generationConfig = this.buildGoogleAiStudioGenerationConfig(
                     text.length,
-                    compatibilityMode
+                    compatibilityMode,
+                    options
                 );
                 const body: Record<string, any> = {
                     systemInstruction: {
-                        parts: [{ text: AI_TRANSLATION_SYSTEM_PROMPT }],
+                        parts: [{ text: this.getTranslationSystemPrompt(text, options) }],
                     },
                     contents: [
                         {
                             role: "user",
-                            parts: [{ text: this.buildGoogleAiStudioPrompt(text, from, to) }],
+                            parts: [
+                                {
+                                    text: this.buildGoogleAiStudioPrompt(text, from, to, options),
+                                },
+                            ],
                         },
                     ],
                 };
@@ -888,34 +1243,43 @@ class LocalTranslator {
                 return payload;
             };
             let payload: any;
-            const compatibilityModes = this.getGoogleAiStudioCompatibilityModes();
+            let tokenUsage: TranslationTokenUsage | undefined;
+            const compatibilityModes = this.getGoogleAiStudioCompatibilityModes(options);
             for (let index = 0; index < compatibilityModes.length; index += 1) {
                 const mode = compatibilityModes[index];
                 const isLastMode = index === compatibilityModes.length - 1;
                 try {
                     payload = await requestPayload(mode);
+                    tokenUsage = mergeTokenUsage(
+                        tokenUsage,
+                        extractGoogleAiStudioTokenUsage(payload)
+                    );
+                    if (this.isGoogleAiStudioTruncatedPayload(payload) && !isLastMode) {
+                        continue;
+                    }
                     if (!this.parseGoogleAiStudioResponse(payload) && !isLastMode) {
                         continue;
                     }
                     break;
                 } catch (error) {
                     const canRetry =
-                        !isLastMode &&
-                        this.shouldRetryGoogleAiStudioWithCompatibilityConfig(error);
+                        !isLastMode && this.shouldRetryGoogleAiStudioWithCompatibilityConfig(error);
                     if (!canRetry) throw error;
                 }
             }
 
             const rawOutput = this.parseGoogleAiStudioResponse(payload);
-            const structured = isDictionaryCandidate(text)
-                ? parseStructuredDictionaryOutput(rawOutput, text)
-                : null;
+            const structured =
+                !isRealtimeCaption && isDictionaryCandidate(text)
+                    ? parseStructuredDictionaryOutput(rawOutput, text)
+                    : null;
             if (structured) {
                 return {
                     ...structured,
                     translatedText: structured.mainMeaning,
                     sourceLanguage: from,
                     targetLanguage: to,
+                    tokenUsage,
                 } as TranslationResult;
             }
 
@@ -924,7 +1288,22 @@ class LocalTranslator {
                 throw new Error("Google AI Studio returned an empty translation.");
             }
             try {
-                translated = await this.repairKoreanMixedScriptTranslation(translated, text, to);
+                if (this.isRealtimeCaptionTranslation(options)) {
+                    return {
+                        originalText: text,
+                        mainMeaning: translated,
+                        sourceLanguage: from,
+                        targetLanguage: to,
+                        tokenUsage,
+                    } as TranslationResult;
+                }
+                const repairResult = await this.repairKoreanMixedScriptTranslation(
+                    translated,
+                    text,
+                    to
+                );
+                translated = repairResult.translated;
+                tokenUsage = mergeTokenUsage(tokenUsage, repairResult.tokenUsage);
             } catch {
                 // Keep the primary translation if the optional repair pass fails.
             }
@@ -934,6 +1313,7 @@ class LocalTranslator {
                 mainMeaning: translated,
                 sourceLanguage: from,
                 targetLanguage: to,
+                tokenUsage,
             } as TranslationResult;
         } catch (error: any) {
             throw {
@@ -955,53 +1335,157 @@ class LocalTranslator {
         }
     }
 
-    private async requestOpenAiTranslation(text: string, from: string, to: string) {
+    private shouldUseOpenAiReasoningEffort() {
+        return (
+            /^(?:gpt-5|o[1-9])/i.test(this.openaiModel) && !/chat-latest/i.test(this.openaiModel)
+        );
+    }
+
+    private getOpenAiReasoningEffort(options: LocalTranslationOptions = {}) {
+        if (this.isRealtimeCaptionTranslation(options)) {
+            if (!this.shouldUseOpenAiReasoningEffort()) return "";
+            if (/^gpt-5(?:\.\d+)?-pro(?:$|-)/i.test(this.openaiModel)) return "high";
+            if (/^gpt-5\.(?:[1-9]|\d{2,})(?:$|-)/i.test(this.openaiModel)) return "none";
+            if (/^gpt-5/i.test(this.openaiModel)) return "minimal";
+            return "low";
+        }
+        if (this.openaiReasoningEffort === "auto") return "";
+        if (!this.shouldUseOpenAiReasoningEffort()) return "";
+        if (/^gpt-5(?:\.\d+)?-pro(?:$|-)/i.test(this.openaiModel)) {
+            return this.openaiReasoningEffort === "high" ? "high" : "";
+        }
+        if (/^gpt-5\.(?:[2-9]|\d{2,})(?:$|-)/i.test(this.openaiModel)) {
+            return ["none", "low", "medium", "high", "xhigh"].includes(this.openaiReasoningEffort)
+                ? this.openaiReasoningEffort
+                : "";
+        }
+        if (/^gpt-5\.1-codex-max(?:$|-)/i.test(this.openaiModel)) {
+            return ["none", "medium", "high", "xhigh"].includes(this.openaiReasoningEffort)
+                ? this.openaiReasoningEffort
+                : "";
+        }
+        if (/^gpt-5\.1(?:$|-)/i.test(this.openaiModel)) {
+            return ["none", "low", "medium", "high"].includes(this.openaiReasoningEffort)
+                ? this.openaiReasoningEffort
+                : "";
+        }
+        if (/^gpt-5/i.test(this.openaiModel)) {
+            return ["minimal", "low", "medium", "high"].includes(this.openaiReasoningEffort)
+                ? this.openaiReasoningEffort
+                : "";
+        }
+        return ["low", "medium", "high", "xhigh"].includes(this.openaiReasoningEffort)
+            ? this.openaiReasoningEffort
+            : "";
+    }
+
+    private shouldRetryOpenAiWithoutReasoningConfig(payload: any) {
+        const message = String(payload?.error?.message || "").toLowerCase();
+        return /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|invalid.*reasoning/.test(
+            message
+        );
+    }
+
+    private async requestOpenAiTranslation(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
-            const response = await fetch(OPENAI_CHAT_COMPLETIONS_ENDPOINT, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${this.openaiApiKey}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    model: this.openaiModel,
-                    messages: [
-                        {
-                            role: "system",
-                            content: AI_TRANSLATION_SYSTEM_PROMPT,
-                        },
-                        {
-                            role: "user",
-                            content: this.buildOpenAiPrompt(text, from, to),
-                        },
-                    ],
-                    ...(isDictionaryCandidate(text)
-                        ? { response_format: { type: "json_object" } }
-                        : {}),
-                    ...buildOpenAiCompletionLimit(this.openaiModel, Math.max(256, text.length * 3)),
-                }),
-                signal: controller.signal,
+            const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
+            const reasoningEffort = this.getOpenAiReasoningEffort(options);
+            const expectedPageSegments = countPageSegmentMarkers(text);
+            const buildBody = (includeReasoningEffort = true, tokenMultiplier = 4) => ({
+                model: this.openaiModel,
+                messages: [
+                    {
+                        role: "system",
+                        content: this.getTranslationSystemPrompt(text, options),
+                    },
+                    {
+                        role: "user",
+                        content: this.buildOpenAiPrompt(text, from, to, options),
+                    },
+                ],
+                ...(!isRealtimeCaption && isDictionaryCandidate(text)
+                    ? { response_format: { type: "json_object" } }
+                    : {}),
+                ...(includeReasoningEffort && reasoningEffort
+                    ? { reasoning_effort: reasoningEffort }
+                    : {}),
+                ...buildOpenAiCompletionLimit(
+                    this.openaiModel,
+                    isRealtimeCaption
+                        ? Math.max(96, text.length * 2)
+                        : Math.max(
+                              512 * Math.max(1, tokenMultiplier / 4),
+                              text.length * tokenMultiplier
+                          )
+                ),
             });
+            const requestPayload = async (includeReasoningEffort = true, tokenMultiplier = 4) => {
+                const response = await fetch(OPENAI_CHAT_COMPLETIONS_ENDPOINT, {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${this.openaiApiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(buildBody(includeReasoningEffort, tokenMultiplier)),
+                    signal: controller.signal,
+                });
 
-            const payload = await response.json().catch(() => ({}));
+                const payload = await response.json().catch(() => ({}));
+                return { response, payload };
+            };
+
+            let includeReasoningConfig = true;
+            let { response, payload } = await requestPayload(includeReasoningConfig, 4);
+            if (
+                !response.ok &&
+                reasoningEffort &&
+                this.shouldRetryOpenAiWithoutReasoningConfig(payload)
+            ) {
+                includeReasoningConfig = false;
+                ({ response, payload } = await requestPayload(includeReasoningConfig, 4));
+            }
             if (!response.ok) {
                 throw new Error(
                     payload?.error?.message || `OpenAI API request failed with ${response.status}`
                 );
             }
-
-            const rawOutput = this.parseOpenAiResponse(payload);
-            const structured = isDictionaryCandidate(text)
-                ? parseStructuredDictionaryOutput(rawOutput, text)
-                : null;
+            let tokenUsage = extractOpenAiTokenUsage(payload);
+            let rawOutput = this.parseOpenAiResponse(payload);
+            const outputSegments = countPageSegmentMarkers(rawOutput);
+            const finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+            const shouldRetryForCompletion =
+                !isRealtimeCaption &&
+                (finishReason === "length" ||
+                    (expectedPageSegments > 0 && outputSegments < expectedPageSegments));
+            if (shouldRetryForCompletion) {
+                const retry = await requestPayload(includeReasoningConfig, 8);
+                if (retry.response.ok) {
+                    tokenUsage = mergeTokenUsage(
+                        tokenUsage,
+                        extractOpenAiTokenUsage(retry.payload)
+                    );
+                    payload = retry.payload;
+                    rawOutput = this.parseOpenAiResponse(payload);
+                }
+            }
+            const structured =
+                !this.isRealtimeCaptionTranslation(options) && isDictionaryCandidate(text)
+                    ? parseStructuredDictionaryOutput(rawOutput, text)
+                    : null;
             if (structured) {
                 return {
                     ...structured,
                     translatedText: structured.mainMeaning,
                     sourceLanguage: from,
                     targetLanguage: to,
+                    tokenUsage,
                 } as TranslationResult;
             }
 
@@ -1015,6 +1499,7 @@ class LocalTranslator {
                 mainMeaning: translated,
                 sourceLanguage: from,
                 targetLanguage: to,
+                tokenUsage,
             } as TranslationResult;
         } catch (error: any) {
             throw {

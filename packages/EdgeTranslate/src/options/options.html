@@ -173,17 +173,7 @@
                 <div class="row" id="local-translator-google-settings">
                     <div class="column provider-heading" data-local-mode="googleAiStudio">
                         <span class="provider-badge provider-badge-gemini" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" focusable="false">
-                                <defs>
-                                    <linearGradient id="options-gemini-gradient" x1="3" y1="20" x2="21" y2="4" gradientUnits="userSpaceOnUse">
-                                        <stop offset="0" stop-color="#34A853" />
-                                        <stop offset="0.33" stop-color="#4285F4" />
-                                        <stop offset="0.68" stop-color="#A142F4" />
-                                        <stop offset="1" stop-color="#EA4335" />
-                                    </linearGradient>
-                                </defs>
-                                <path fill="url(#options-gemini-gradient)" d="M12 2.25c.38 3.5 1.42 5.88 3.12 7.14 1.45 1.08 3.66 1.83 6.63 2.26-3.02.46-5.25 1.25-6.69 2.38-1.65 1.29-2.67 3.7-3.06 7.22-.4-3.52-1.43-5.93-3.08-7.22-1.45-1.13-3.67-1.92-6.67-2.38 2.96-.43 5.16-1.18 6.61-2.26C10.56 8.13 11.61 5.75 12 2.25Z" />
-                            </svg>
+                            <img src="../brand/gemini.svg" alt="" />
                         </span>
                         <span>Google AI Studio</span>
                     </div>
@@ -216,37 +206,48 @@
                                 id="local-translator-model"
                             >
                                 <option value="gemini-3.5-flash">gemini-3.5-flash</option>
-                                <option value="gemini-3.1-flash-lite">
-                                    gemini-3.1-flash-lite
-                                </option>
+                                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
                                 <option value="gemini-3.1-flash-lite-preview">
                                     gemini-3.1-flash-lite-preview
                                 </option>
                                 <option value="gemini-3.1-pro-preview">
                                     gemini-3.1-pro-preview
                                 </option>
-                                <option value="gemini-3-pro-preview">
-                                    gemini-3-pro-preview
-                                </option>
+                                <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
                                 <option value="gemini-3-flash-preview">
                                     gemini-3-flash-preview
                                 </option>
-                                <option value="gemini-2.5-flash-lite">
-                                    gemini-2.5-flash-lite
-                                </option>
+                                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
                                 <option value="gemini-2.5-flash">gemini-2.5-flash</option>
                                 <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                                <option value="gemini-flash-latest">
-                                    gemini-flash-latest
-                                </option>
+                                <option value="gemini-flash-latest">gemini-flash-latest</option>
                                 <option value="gemini-flash-lite-latest">
                                     gemini-flash-lite-latest
                                 </option>
-                                <option value="gemini-pro-latest">
-                                    gemini-pro-latest
-                                </option>
+                                <option value="gemini-pro-latest">gemini-pro-latest</option>
                                 <option value="gemma-4-31b-it">gemma-4-31b-it</option>
                                 <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="column" data-local-mode="googleAiStudio">
+                        <label
+                            for="local-translator-reasoning-level"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorReasoningLevel"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="LocalTranslatorConfig reasoningLevel"
+                                id="local-translator-reasoning-level"
+                            >
+                                <option value="auto">Auto</option>
+                                <option value="none">None</option>
+                                <option value="minimal">Minimal</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
                             </select>
                         </label>
                     </div>
@@ -257,35 +258,24 @@
                             data-i18n-name="LocalTranslatorTimeoutMs"
                             data-insert-pos="afterBegin"
                         >
-                            <input
-                                type="number"
-                                setting-type="text"
+                            <select
+                                setting-type="select"
                                 setting-path="LocalTranslatorConfig timeoutMs"
                                 id="local-translator-timeout"
-                                min="1000"
-                                step="1000"
-                            />
+                            >
+                                <option value="30000">30s</option>
+                                <option value="60000">60s</option>
+                                <option value="120000">120s</option>
+                                <option value="180000">180s</option>
+                                <option value="300000">300s</option>
+                            </select>
                         </label>
                     </div>
                 </div>
                 <div class="row" id="local-translator-openai-settings">
                     <div class="column provider-heading" data-local-mode="openai">
                         <span class="provider-badge provider-badge-chatgpt" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" focusable="false">
-                                <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M12 4.25c1.5-1.35 3.85-.6 4.35 1.34.2.78.06 1.55-.34 2.17" />
-                                    <path d="M16.02 7.76c1.98-.43 3.77 1.27 3.43 3.25-.14.82-.61 1.48-1.27 1.88" />
-                                    <path d="M18.18 12.89c1.06 1.72-.03 3.94-2.03 4.16-.78.09-1.5-.15-2.06-.62" />
-                                    <path d="M14.09 16.43c-.66 1.91-3.02 2.55-4.36 1.08-.55-.6-.78-1.36-.68-2.1" />
-                                    <path d="M9.05 15.41c-1.99.36-3.72-1.39-3.3-3.35.17-.8.66-1.44 1.32-1.82" />
-                                    <path d="M7.07 10.24c-1-1.76.16-3.93 2.16-4.08.78-.06 1.49.21 2.03.7" />
-                                    <path d="M8.82 8.4 12 6.56l3.18 1.84v3.68L12 13.92l-3.18-1.84V8.4Z" />
-                                    <path d="m12 13.92 3.18 1.84" />
-                                    <path d="M8.82 12.08v3.68" />
-                                    <path d="M15.18 8.4 18 6.78" />
-                                    <path d="M6 12.08l2.82-1.63" />
-                                </g>
-                            </svg>
+                            <img src="../brand/chatgpt.svg" alt="" />
                         </span>
                         <span>OpenAI</span>
                     </div>
@@ -319,47 +309,225 @@
                             >
                                 <option value="gpt-5.5">gpt-5.5</option>
                                 <option value="gpt-5.5-2026-04-23">gpt-5.5-2026-04-23</option>
-                                <option value="gpt-5.5-pro">gpt-5.5-pro</option>
-                                <option value="gpt-5.5-pro-2026-04-23">gpt-5.5-pro-2026-04-23</option>
                                 <option value="gpt-5.4">gpt-5.4</option>
                                 <option value="gpt-5.4-2026-03-05">gpt-5.4-2026-03-05</option>
-                                <option value="gpt-5.4-pro">gpt-5.4-pro</option>
-                                <option value="gpt-5.4-pro-2026-03-05">gpt-5.4-pro-2026-03-05</option>
                                 <option value="gpt-5.4-mini">gpt-5.4-mini</option>
-                                <option value="gpt-5.4-mini-2026-03-17">gpt-5.4-mini-2026-03-17</option>
+                                <option value="gpt-5.4-mini-2026-03-17">
+                                    gpt-5.4-mini-2026-03-17
+                                </option>
                                 <option value="gpt-5.4-nano">gpt-5.4-nano</option>
-                                <option value="gpt-5.4-nano-2026-03-17">gpt-5.4-nano-2026-03-17</option>
+                                <option value="gpt-5.4-nano-2026-03-17">
+                                    gpt-5.4-nano-2026-03-17
+                                </option>
                                 <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
                                 <option value="gpt-5.2">gpt-5.2</option>
                                 <option value="gpt-5.2-2025-12-11">gpt-5.2-2025-12-11</option>
-                                <option value="gpt-5.2-pro">gpt-5.2-pro</option>
-                                <option value="gpt-5.2-pro-2025-12-11">gpt-5.2-pro-2025-12-11</option>
                                 <option value="gpt-5.2-chat-latest">gpt-5.2-chat-latest</option>
                                 <option value="gpt-5.1">gpt-5.1</option>
                                 <option value="gpt-5.1-2025-11-13">gpt-5.1-2025-11-13</option>
                                 <option value="gpt-5.1-chat-latest">gpt-5.1-chat-latest</option>
                                 <option value="gpt-5">gpt-5</option>
                                 <option value="gpt-5-2025-08-07">gpt-5-2025-08-07</option>
-                                <option value="gpt-5-pro">gpt-5-pro</option>
-                                <option value="gpt-5-pro-2025-10-06">gpt-5-pro-2025-10-06</option>
                                 <option value="gpt-5-mini">gpt-5-mini</option>
                                 <option value="gpt-5-mini-2025-08-07">gpt-5-mini-2025-08-07</option>
                                 <option value="gpt-5-nano">gpt-5-nano</option>
                                 <option value="gpt-5-nano-2025-08-07">gpt-5-nano-2025-08-07</option>
                                 <option value="gpt-5-chat-latest">gpt-5-chat-latest</option>
                                 <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-2025-04-14">gpt-4.1-2025-04-14</option>
                                 <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                                <option value="gpt-4.1-mini-2025-04-14">
+                                    gpt-4.1-mini-2025-04-14
+                                </option>
                                 <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                                <option value="gpt-4.1-nano-2025-04-14">
+                                    gpt-4.1-nano-2025-04-14
+                                </option>
                                 <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4o-2024-11-20">gpt-4o-2024-11-20</option>
+                                <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06</option>
+                                <option value="gpt-4o-2024-05-13">gpt-4o-2024-05-13</option>
                                 <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="gpt-4o-mini-2024-07-18">
+                                    gpt-4o-mini-2024-07-18
+                                </option>
+                                <option value="gpt-4-turbo">gpt-4-turbo</option>
+                                <option value="gpt-4-turbo-2024-04-09">
+                                    gpt-4-turbo-2024-04-09
+                                </option>
+                                <option value="gpt-4">gpt-4</option>
+                                <option value="gpt-4-0613">gpt-4-0613</option>
+                                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                                <option value="gpt-3.5-turbo-0125">gpt-3.5-turbo-0125</option>
+                                <option value="gpt-3.5-turbo-1106">gpt-3.5-turbo-1106</option>
+                                <option value="gpt-3.5-turbo-16k">gpt-3.5-turbo-16k</option>
+                                <option value="o1">o1</option>
+                                <option value="o1-2024-12-17">o1-2024-12-17</option>
                                 <option value="o3">o3</option>
+                                <option value="o3-2025-04-16">o3-2025-04-16</option>
+                                <option value="o3-mini">o3-mini</option>
+                                <option value="o3-mini-2025-01-31">o3-mini-2025-01-31</option>
                                 <option value="o4-mini">o4-mini</option>
-                                <option value="o3-pro">o3-pro</option>
+                                <option value="o4-mini-2025-04-16">o4-mini-2025-04-16</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="column" data-local-mode="openai">
+                        <label
+                            for="local-translator-openai-reasoning-effort"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="LocalTranslatorConfig openaiReasoningEffort"
+                                id="local-translator-openai-reasoning-effort"
+                            >
+                                <option value="auto">Auto</option>
+                                <option value="none">None</option>
+                                <option value="minimal">Minimal</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="xhigh">XHigh</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="column" data-local-mode="openai">
+                        <label
+                            for="local-translator-openai-timeout"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorTimeoutMs"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="LocalTranslatorConfig timeoutMs"
+                                id="local-translator-openai-timeout"
+                            >
+                                <option value="30000">30s</option>
+                                <option value="60000">60s</option>
+                                <option value="120000">120s</option>
+                                <option value="180000">180s</option>
+                                <option value="300000">300s</option>
                             </select>
                         </label>
                     </div>
                 </div>
                 <p class="i18n" data-i18n-name="LocalTranslatorHelp"></p>
+
+                <label class="setting-title i18n" data-i18n-name="PreciseTranslatorConfig"></label>
+                <div class="row">
+                    <div class="column">
+                        <label
+                            for="precise-translator-mode"
+                            class="checked-label i18n"
+                            data-i18n-name="PreciseTranslatorMode"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="PreciseTranslatorConfig mode"
+                                id="precise-translator-mode"
+                            >
+                                <option
+                                    value="chromeBuiltin"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeChromeBuiltin"
+                                ></option>
+                                <option
+                                    value="googleAiStudio"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeGoogleAiStudio"
+                                ></option>
+                                <option
+                                    value="openai"
+                                    class="i18n"
+                                    data-i18n-name="LocalTranslatorModeOpenAI"
+                                ></option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <div class="row" id="precise-translator-google-settings">
+                    <div class="column" data-precise-mode="googleAiStudio">
+                        <label
+                            for="precise-translator-model"
+                            class="checked-label i18n"
+                            data-i18n-name="PreciseTranslatorModel"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="PreciseTranslatorConfig model"
+                                id="precise-translator-model"
+                                data-model-options="googleAiStudio"
+                            ></select>
+                        </label>
+                    </div>
+                    <div class="column" data-precise-mode="googleAiStudio">
+                        <label
+                            for="precise-translator-reasoning-level"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorReasoningLevel"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="PreciseTranslatorConfig reasoningLevel"
+                                id="precise-translator-reasoning-level"
+                            >
+                                <option value="auto">Auto</option>
+                                <option value="none">None</option>
+                                <option value="minimal">Minimal</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <div class="row" id="precise-translator-openai-settings">
+                    <div class="column" data-precise-mode="openai">
+                        <label
+                            for="precise-translator-openai-model"
+                            class="checked-label i18n"
+                            data-i18n-name="PreciseTranslatorOpenAIModel"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="PreciseTranslatorConfig openaiModel"
+                                id="precise-translator-openai-model"
+                                data-model-options="openai"
+                            ></select>
+                        </label>
+                    </div>
+                    <div class="column" data-precise-mode="openai">
+                        <label
+                            for="precise-translator-openai-reasoning-effort"
+                            class="checked-label i18n"
+                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
+                            data-insert-pos="afterBegin"
+                        >
+                            <select
+                                setting-type="select"
+                                setting-path="PreciseTranslatorConfig openaiReasoningEffort"
+                                id="precise-translator-openai-reasoning-effort"
+                            >
+                                <option value="auto">Auto</option>
+                                <option value="none">None</option>
+                                <option value="minimal">Minimal</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="xhigh">XHigh</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <p class="i18n" data-i18n-name="PreciseTranslatorHelp"></p>
 
                 <label class="setting-title i18n" data-i18n-name="HybridTranslatorConfig"></label>
                 <div class="row">
@@ -611,6 +779,23 @@
                                 for="translate-after-dbl-click"
                                 class="checked-label i18n"
                                 data-i18n-name="TranslateAfterDblClick"
+                            ></label>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="column">
+                            <input
+                                type="checkbox"
+                                setting-type="switch"
+                                setting-path="OtherSettings RealtimeCaptionTranslate"
+                                class="switch"
+                                id="realtime-caption-translate"
+                            />
+                            <span class="space"></span>
+                            <label
+                                for="realtime-caption-translate"
+                                class="checked-label i18n"
+                                data-i18n-name="RealtimeCaptionTranslate"
                             ></label>
                         </div>
                     </div>

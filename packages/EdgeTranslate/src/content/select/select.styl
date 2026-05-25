@@ -1,6 +1,7 @@
 @import '../display/library/notifier/notifier.styl';
 
-image-size = 32px;
+image-size = 40px;
+menu-width = 132px;
 motion-fast = 120ms cubic-bezier(0.2, 0, 0, 1);
 motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
 
@@ -9,28 +10,28 @@ motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
  */
 #edge-translate-button {
     display: inline-block !important;
-    width: image-size !important;
-    min-width: image-size !important;
-    max-width: image-size !important;
+    width: menu-width !important;
+    min-width: menu-width !important;
+    max-width: menu-width !important;
     height: image-size !important;
     min-height: image-size !important;
     max-height: image-size !important;
     padding: 0 !important;
     margin: 0 !important;
     position: fixed !important;
-    box-shadow: 0 2px 6px rgba(60, 64, 67, .18), 0 0 0 1px rgba(225, 227, 225, .9) !important;
+    box-shadow: 0 2px 6px rgba(60, 64, 67, .16), 0 8px 20px rgba(60, 64, 67, .12) !important;
     cursor: pointer !important;
-    border-radius: 50% !important;
+    border-radius: 999px !important;
     z-index: 2147483647 !important;
     box-sizing: content-box !important;
     overflow: hidden !important;
-    border: 2px solid #fff !important;
+    border: 1px solid rgba(255, 255, 255, .82) !important;
     transition: box-shadow motion-standard, transform motion-standard, filter motion-standard !important; // set transtition effect when hover occurs
     animation: fade-in 180ms cubic-bezier(0.2, 0, 0, 1) !important; // set fade-in animation on selection icon
 
     &:hover {
-        box-shadow: 0 6px 14px rgba(60, 64, 67, .24), 0 0 0 4px rgba(11, 87, 208, .12) !important;
-        transform: scale(1.05) !important;
+        box-shadow: 0 6px 14px rgba(60, 64, 67, .22), 0 0 0 4px rgba(11, 87, 208, .10) !important;
+        transform: scale(1.03) !important;
         filter: saturate(1.08) !important;
     }
 

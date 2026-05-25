@@ -1564,7 +1564,17 @@ html[data-theme="light"] #etThemeToggle .icon-moon {
   background: var(--et-state-hover) !important;
 }
 
-/* EdgeTranslate close button */
+/* EdgeTranslate PDF toolbar buttons */
+#edgeTranslatePdfPageTranslateButton::before {
+  content: "A";
+  mask-image: none !important;
+  background: none !important;
+  color: var(--et-primary);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 #edgeTranslateClosePdfReaderButton::before {
   content: "×";
   mask-image: none !important;
@@ -1575,6 +1585,7 @@ html[data-theme="light"] #etThemeToggle .icon-moon {
   line-height: 1;
 }
 
+#edgeTranslatePdfPageTranslateButton span,
 #edgeTranslateClosePdfReaderButton span {
   position: absolute;
   width: 1px;
@@ -2937,6 +2948,7 @@ input[type="range"] {
 }
 
 #toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-pdf-translate-control,
 #toolbarViewerRight > .et-print-controls,
 #toolbarViewerRight > .et-more-control {
   height: var(--et-toolbar-group-height) !important;
@@ -2948,6 +2960,7 @@ input[type="range"] {
 }
 
 #toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-pdf-translate-control,
 #toolbarViewerRight > .et-more-control {
   display: inline-flex !important;
   align-items: center !important;
@@ -2975,6 +2988,7 @@ input[type="range"] {
 
 #editorModeButtons .toolbarButtonWithContainer,
 #toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-pdf-translate-control,
 #toolbarViewerRight > .et-more-control {
   position: relative !important;
 }
@@ -3692,6 +3706,7 @@ html[data-theme="dark"] #toolbarViewerMiddle > .toolbarHorizontalGroup,
 html[data-theme="dark"] #editorModeButtons,
 html[data-theme="dark"] #scaleSelectContainer,
 html[data-theme="dark"] #toolbarViewerRight > .et-theme-control,
+html[data-theme="dark"] #toolbarViewerRight > .et-pdf-translate-control,
 html[data-theme="dark"] #toolbarViewerRight > .et-print-controls,
 html[data-theme="dark"] #toolbarViewerRight > .et-more-control {
   background: #262c34 !important;
@@ -3967,6 +3982,7 @@ body,
 #toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous),
 #toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton),
 #toolbarViewerRight > .et-theme-control,
+#toolbarViewerRight > .et-pdf-translate-control,
 #toolbarViewerRight > .et-print-controls,
 #toolbarViewerRight > .et-more-control,
 #editorModeButtons,
@@ -4460,6 +4476,7 @@ html[data-theme="dark"] #viewsManager #viewsManagerHeader,
 html[data-theme="dark"] #toolbarViewerLeft > .toolbarHorizontalGroup:has(#previous),
 html[data-theme="dark"] #toolbarViewerMiddle > .toolbarHorizontalGroup:has(#zoomOutButton),
 html[data-theme="dark"] #toolbarViewerRight > .et-theme-control,
+html[data-theme="dark"] #toolbarViewerRight > .et-pdf-translate-control,
 html[data-theme="dark"] #toolbarViewerRight > .et-print-controls,
 html[data-theme="dark"] #toolbarViewerRight > .et-more-control,
 html[data-theme="dark"] #editorModeButtons,

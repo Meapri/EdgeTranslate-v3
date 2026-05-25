@@ -102,6 +102,11 @@ describe("LocalTranslator", () => {
                         },
                     },
                 ],
+                usageMetadata: {
+                    promptTokenCount: 31,
+                    candidatesTokenCount: 7,
+                    totalTokenCount: 38,
+                },
             }),
         });
         global.fetch = fetchMock as any;
@@ -119,6 +124,11 @@ describe("LocalTranslator", () => {
             mainMeaning: "안녕",
             sourceLanguage: "en",
             targetLanguage: "ko",
+            tokenUsage: {
+                inputTokens: 31,
+                outputTokens: 7,
+                totalTokens: 38,
+            },
         });
         expect(fetchMock.mock.calls[0][0]).toBe(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=studio-test-key"
@@ -128,22 +138,115 @@ describe("LocalTranslator", () => {
             headers: { "Content-Type": "application/json" },
         });
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.systemInstruction.parts[0].text).toContain(
-            "Translate naturally while preserving meaning"
-        );
+        expect(body.systemInstruction.parts[0].text).toContain("high-fidelity translation engine");
         expect(body.systemInstruction.parts[0].text).toContain("Output only the translation");
         expect(body.systemInstruction.parts[0].text).toContain("subtitle cue numbers");
         expect(body.systemInstruction.parts[0].text).toContain("Preserve numeric literals");
         expect(body.systemInstruction.parts[0].text).toContain("Preserve proper nouns");
+        expect(body.systemInstruction.parts[0].text).toContain("official Latin-script names");
+        expect(body.systemInstruction.parts[0].text).toContain("long webpage text");
         expect(body.generationConfig.temperature).toBe(0);
-        expect(body.generationConfig.maxOutputTokens).toBe(256);
+        expect(body.generationConfig.maxOutputTokens).toBe(512);
+        expect(body.generationConfig.thinkingConfig).toBeUndefined();
         expect(body.generationConfig.candidateCount).toBeUndefined();
         expect(body.generationConfig.topK).toBeUndefined();
-        expect(body.generationConfig.thinkingConfig).toBeUndefined();
         expect(body.contents[0].parts[0].text).toContain("Source language: English");
         expect(body.contents[0].parts[0].text).toContain("Target language: Korean");
+        expect(body.contents[0].parts[0].text).toContain(
+            "Preserve proper nouns and official names"
+        );
+        expect(body.contents[0].parts[0].text).not.toContain("Translate or transliterate names");
         expect(body.contents[0].parts[0].text).not.toContain("marked segments");
         expect(body.contents[0].parts[0].text).toContain("hello there.");
+    });
+
+    test("uses ultra-light Google AI Studio prompts for realtime captions", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "다시 오신 걸 환영합니다." }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+            reasoningLevel: "high",
+        });
+        const result = await translator.translate("Welcome back.", "en", "ko", {
+            textRole: "caption",
+            translationProfile: "realtimeCaption",
+        });
+
+        expect(result.mainMeaning).toBe("다시 오신 걸 환영합니다.");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.systemInstruction.parts[0].text).toBe(
+            "Translate YouTube captions as natural spoken subtitles. Keep order and line breaks. Output only translation."
+        );
+        expect(body.contents[0].parts[0].text).toContain("Subtitle English->Korean.");
+        expect(body.contents[0].parts[0].text).toContain(
+            "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese."
+        );
+        expect(body.contents[0].parts[0].text).toContain("Keep line breaks, names, numbers, URLs.");
+        expect(body.contents[0].parts[0].text).not.toContain(
+            "Preserve proper nouns and official names"
+        );
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+        expect(body.generationConfig.maxOutputTokens).toBe(96);
+    });
+
+    test("uses marker-preserving Google AI Studio prompts for realtime caption batches", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [
+                    {
+                        content: {
+                            parts: [
+                                {
+                                    text: "[[0]] 안녕하세요.\n[[1]] 바로 시작하겠습니다.",
+                                },
+                            ],
+                        },
+                    },
+                ],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const result = await translator.translate(
+            "[[0]] Hey everyone.\n[[1]] Let's get started.",
+            "en",
+            "ko",
+            {
+                textRole: "caption",
+                translationProfile: "realtimeCaptionBatch",
+            }
+        );
+
+        expect(result.mainMeaning).toContain("[[0]] 안녕하세요.");
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.contents[0].parts[0].text).toContain("Subtitle batch English->Korean.");
+        expect(body.contents[0].parts[0].text).toContain(
+            "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese."
+        );
+        expect(body.contents[0].parts[0].text).toContain(
+            "Translate each [[n]] independently; keep every marker once, same order; no merge."
+        );
+        expect(body.contents[0].parts[0].text).toContain("[[1]] Let's get started.");
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
     });
 
     test("starts Google AI Studio models with minimal generation config", async () => {
@@ -171,9 +274,54 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.candidateCount).toBeUndefined();
         expect(body.generationConfig.thinkingConfig).toBeUndefined();
         expect(body.generationConfig.temperature).toBe(0);
+        expect(body.generationConfig.maxOutputTokens).toBeUndefined();
     });
 
-    test("uses bare Google AI Studio requests for Gemini 3.1 Pro", async () => {
+    test("uses compact page-translation guidance for proper nouns and inline links", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [
+                    {
+                        content: {
+                            parts: [{ text: "[[1:p]]\nLM Studio는 llama.cpp를 지원합니다." }],
+                        },
+                    },
+                ],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+        });
+        await translator.translate(
+            "[[1:p]]\nLM Studio supports [[EDGE_TRANSLATE_LINK_1]]llama.cpp[[/EDGE_TRANSLATE_LINK_1]].",
+            "en",
+            "ko"
+        );
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const prompt = body.contents[0].parts[0].text;
+        expect(body.systemInstruction.parts[0].text).toContain("Translate page segments only");
+        expect(body.systemInstruction.parts[0].text).toContain("Keep every [[n:r]] marker once");
+        expect(body.systemInstruction.parts[0].text).toContain(
+            "Keep each segment's payload line count"
+        );
+        expect(body.systemInstruction.parts[0].text).not.toContain(
+            "subtitle cue numbers, timestamps"
+        );
+        expect(prompt).toContain("Translate English -> Korean.");
+        expect(prompt).toContain("Keep link markers; translate visible link text.");
+        expect(prompt).not.toContain("same number of translated payload lines");
+        expect(prompt).not.toContain("Use neighboring segments only to keep terminology");
+        expect(prompt).toContain("[[EDGE_TRANSLATE_LINK_1]]llama.cpp[[/EDGE_TRANSLATE_LINK_1]]");
+    });
+
+    test("uses official Gemini 3 Pro thinking levels when configured", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -188,6 +336,7 @@ describe("LocalTranslator", () => {
             mode: "googleAiStudio",
             apiKey: "studio-test-key",
             model: "gemini-3.1-pro-preview",
+            reasoningLevel: "low",
         });
         await translator.translate("hello", "en", "ko");
 
@@ -195,7 +344,77 @@ describe("LocalTranslator", () => {
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=studio-test-key"
         );
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.generationConfig).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
+        expect(body.generationConfig.maxOutputTokens).toBeUndefined();
+    });
+
+    test("uses official Gemini 3 Flash thinking levels when configured", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-3.5-flash",
+            reasoningLevel: "high",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "high" });
+    });
+
+    test("uses official Gemini 2.5 thinking budget mappings when configured", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+            reasoningLevel: "medium",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+    });
+
+    test("uses the official Gemini 2.5 thinking-off value when supported", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+            reasoningLevel: "none",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
     });
 
     test("falls back to bare Google AI Studio requests when minimal config returns empty output", async () => {
@@ -226,6 +445,60 @@ describe("LocalTranslator", () => {
         const result = await translator.translate("hello", "en", "ko");
 
         expect(result.mainMeaning).toBe("안녕");
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(retryBody.generationConfig).toBeUndefined();
+    });
+
+    test("falls back to bare Google AI Studio requests when output is truncated", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [
+                        {
+                            finishReason: "MAX_TOKENS",
+                            content: { parts: [{ text: "Online -> 포켓몬센터 온라인." }] },
+                        },
+                    ],
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [
+                        {
+                            content: {
+                                parts: [
+                                    {
+                                        text: "[[1:p]]평소 포켓몬센터 온라인을 이용해 주셔서 감사합니다.",
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const result = await translator.translate(
+            "[[1:p]]\n平素よりポケモンセンターオンラインをご利用いただき、ありがとうございます。",
+            "auto",
+            "ko"
+        );
+
+        expect(result.mainMeaning).toBe(
+            "[[1:p]]평소 포켓몬센터 온라인을 이용해 주셔서 감사합니다."
+        );
         expect(fetchMock).toHaveBeenCalledTimes(2);
         const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
         expect(retryBody.generationConfig).toBeUndefined();
@@ -274,8 +547,7 @@ describe("LocalTranslator", () => {
                 status: 400,
                 json: async () => ({
                     error: {
-                        message:
-                            "Budget 0 is invalid. This model only works in thinking mode.",
+                        message: "Budget 0 is invalid. This model only works in thinking mode.",
                     },
                 }),
             })
@@ -466,7 +738,7 @@ describe("LocalTranslator", () => {
         );
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.systemInstruction.parts[0].text).toContain(
-            "preserving meaning, tone, intent, nuance"
+            "preserve meaning, tone, intent, nuance"
         );
         expect(body.contents[0].parts[0].text).toContain("Source language: Japanese");
         expect(body.contents[0].parts[0].text).toContain("Target language: Korean");
@@ -523,9 +795,32 @@ describe("LocalTranslator", () => {
         );
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.temperature).toBe(0);
-        expect(body.generationConfig.maxOutputTokens).toBe(256);
+        expect(body.generationConfig.maxOutputTokens).toBe(512);
         expect(body.generationConfig.candidateCount).toBeUndefined();
         expect(body.generationConfig.topK).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toBeUndefined();
+    });
+
+    test("omits Google AI Studio thinking config in auto mode", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-3.5-flash",
+            reasoningLevel: "auto",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.thinkingConfig).toBeUndefined();
     });
 
@@ -546,6 +841,13 @@ describe("LocalTranslator", () => {
                         },
                     },
                 ],
+                usage: {
+                    prompt_tokens: 44,
+                    completion_tokens: 5,
+                    total_tokens: 49,
+                    completion_tokens_details: { reasoning_tokens: 2 },
+                    prompt_tokens_details: { cached_tokens: 9 },
+                },
             }),
         });
         global.fetch = fetchMock as any;
@@ -563,6 +865,13 @@ describe("LocalTranslator", () => {
             mainMeaning: "안녕",
             sourceLanguage: "en",
             targetLanguage: "ko",
+            tokenUsage: {
+                inputTokens: 44,
+                outputTokens: 5,
+                reasoningTokens: 2,
+                cachedInputTokens: 9,
+                totalTokens: 49,
+            },
         });
         expect(fetchMock.mock.calls[0][0]).toBe("https://api.openai.com/v1/chat/completions");
         expect(fetchMock.mock.calls[0][1]).toMatchObject({
@@ -574,19 +883,310 @@ describe("LocalTranslator", () => {
         });
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.model).toBe("gpt-5.5");
+        expect(body.reasoning_effort).toBeUndefined();
         expect(body.temperature).toBeUndefined();
         expect(body.response_format).toBeUndefined();
         expect(body.max_completion_tokens).toBeGreaterThan(0);
         expect(body.max_tokens).toBeUndefined();
         expect(body.messages[0].role).toBe("system");
-        expect(body.messages[0].content).toContain("Translate naturally while preserving meaning");
+        expect(body.messages[0].content).toContain("high-fidelity translation engine");
         expect(body.messages[0].content).toContain("Output only the translation");
         expect(body.messages[0].content).toContain("subtitle cue numbers");
         expect(body.messages[0].content).toContain("Preserve numeric literals");
         expect(body.messages[0].content).toContain("Preserve proper nouns");
+        expect(body.messages[0].content).toContain("official Latin-script names");
         expect(body.messages[1].content).toContain("Source language: English");
         expect(body.messages[1].content).toContain("Target language: Korean");
+        expect(body.messages[1].content).toContain("Preserve proper nouns and official names");
+        expect(body.messages[1].content).not.toContain("Translate or transliterate names");
         expect(body.messages[1].content).toContain("hello there.");
+    });
+
+    test("uses ultra-light OpenAI prompts and tiny output budget for realtime captions", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "곧 시작합니다." } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+            openaiReasoningEffort: "high",
+        });
+        const result = await translator.translate("Starting soon.", "en", "ko", {
+            textRole: "caption",
+            translationProfile: "realtimeCaption",
+        });
+
+        expect(result.mainMeaning).toBe("곧 시작합니다.");
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.messages[0].content).toBe(
+            "Translate YouTube captions as natural spoken subtitles. Keep order and line breaks. Output only translation."
+        );
+        expect(body.messages[1].content).toContain("Subtitle English->Korean.");
+        expect(body.messages[1].content).toContain(
+            "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese."
+        );
+        expect(body.messages[1].content).toContain("Keep line breaks, names, numbers, URLs.");
+        expect(body.messages[1].content).not.toContain("Preserve proper nouns and official names");
+        expect(body.reasoning_effort).toBe("none");
+        expect(body.max_completion_tokens).toBe(96);
+        expect(body.response_format).toBeUndefined();
+    });
+
+    test("honors explicit OpenAI reasoning effort", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.5",
+            openaiReasoningEffort: "high",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.reasoning_effort).toBe("high");
+    });
+
+    test("retries OpenAI page segment translations when the model omits segments", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            finish_reason: "stop",
+                            message: {
+                                content: ["[[1:p]]", "첫 번째 문장."].join("\n"),
+                            },
+                        },
+                    ],
+                    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            finish_reason: "stop",
+                            message: {
+                                content: [
+                                    "[[1:p]]",
+                                    "첫 번째 문장.",
+                                    "[[2:p]]",
+                                    "두 번째 문장.",
+                                ].join("\n"),
+                            },
+                        },
+                    ],
+                    usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+        const result = await translator.translate(
+            ["[[1:p]]", "First sentence.", "[[2:p]]", "Second sentence."].join("\n"),
+            "en",
+            "ko"
+        );
+
+        expect(result.mainMeaning).toContain("[[2:p]]");
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 200,
+            outputTokens: 60,
+            totalTokens: 260,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(secondBody.max_completion_tokens).toBeGreaterThan(firstBody.max_completion_tokens);
+    });
+
+    test("uses OpenAI GPT 5.4 mini official reasoning values", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+            openaiReasoningEffort: "xhigh",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.reasoning_effort).toBe("xhigh");
+    });
+
+    test("does not send unsupported minimal reasoning to OpenAI GPT 5.4 mini", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+            openaiReasoningEffort: "minimal",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.reasoning_effort).toBeUndefined();
+    });
+
+    test("keeps legacy GPT-5 minimal reasoning but blocks xhigh", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const minimalTranslator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5",
+            openaiReasoningEffort: "minimal",
+        });
+        await minimalTranslator.translate("hello", "en", "ko");
+
+        const xhighTranslator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5",
+            openaiReasoningEffort: "xhigh",
+        });
+        await xhighTranslator.translate("hello", "en", "ko");
+
+        const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(firstBody.reasoning_effort).toBe("minimal");
+        expect(secondBody.reasoning_effort).toBeUndefined();
+    });
+
+    test("uses xhigh for OpenAI o-series reasoning models", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "o3",
+            openaiReasoningEffort: "xhigh",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.reasoning_effort).toBe("xhigh");
+    });
+
+    test("does not send OpenAI reasoning effort to non-reasoning models", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4o-mini",
+            openaiReasoningEffort: "high",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.reasoning_effort).toBeUndefined();
+    });
+
+    test("retries OpenAI without reasoning effort when the API rejects the parameter", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                json: async () => ({
+                    error: {
+                        message: "Unsupported parameter: reasoning_effort",
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [{ message: { content: "안녕" } }],
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.5",
+            openaiReasoningEffort: "high",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(firstBody.reasoning_effort).toBe("high");
+        expect(retryBody.reasoning_effort).toBeUndefined();
     });
 
     test("adds dictionary details for OpenAI single-word translation", async () => {

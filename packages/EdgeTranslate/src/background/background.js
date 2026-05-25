@@ -16,7 +16,11 @@ import { promiseTabs } from "common/scripts/promise.js";
 import Channel from "common/scripts/channel.js";
 // map language abbreviation from browser languages to translation languages
 import { BROWSER_LANGUAGES_MAP } from "common/scripts/languages.js";
-import { DEFAULT_SETTINGS, setDefaultSettings } from "common/scripts/settings.js";
+import {
+    DEFAULT_SETTINGS,
+    getOrSetDefaultSettings,
+    setDefaultSettings,
+} from "common/scripts/settings.js";
 
 initializeBackgroundErrorHandling({ logWarn });
 setupServiceWorkerMocks();
@@ -37,6 +41,38 @@ try {
  * Setup context menus - moved inside onInstalled to work with service worker
  */
 let contextMenusInitialized = false;
+const REALTIME_CAPTION_MENU_ID = "toggle_realtime_caption_translate";
+
+function updateRealtimeCaptionContextMenu(checked) {
+    try {
+        chrome.contextMenus.update(REALTIME_CAPTION_MENU_ID, {
+            checked: Boolean(checked),
+        });
+        void chrome.runtime.lastError;
+    } catch {}
+}
+
+function syncRealtimeCaptionContextMenuState() {
+    getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS)
+        .then((result) => {
+            updateRealtimeCaptionContextMenu(
+                Boolean(result.OtherSettings?.RealtimeCaptionTranslate)
+            );
+        })
+        .catch(() => {});
+}
+
+function saveRealtimeCaptionTranslateSetting(enabled) {
+    return getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS).then((result) => {
+        const nextOtherSettings = {
+            ...(result.OtherSettings || {}),
+            RealtimeCaptionTranslate: Boolean(enabled),
+        };
+        return new Promise((resolve) => {
+            chrome.storage.sync.set({ OtherSettings: nextOtherSettings }, resolve);
+        });
+    });
+}
 
 function setupContextMenus() {
     if (contextMenusInitialized) return;
@@ -44,7 +80,13 @@ function setupContextMenus() {
     const createAll = () => {
         chrome.contextMenus.create({
             id: "translate",
-            title: `${chrome.i18n.getMessage("Translate")} '%s'`,
+            title: `${chrome.i18n.getMessage("TranslateNormal")} '%s'`,
+            contexts: ["selection"],
+        });
+
+        chrome.contextMenus.create({
+            id: "translate_precise",
+            title: `${chrome.i18n.getMessage("TranslatePrecise")} '%s'`,
             contexts: ["selection"],
         });
 
@@ -80,6 +122,14 @@ function setupContextMenus() {
         }
 
         chrome.contextMenus.create({
+            id: REALTIME_CAPTION_MENU_ID,
+            title: chrome.i18n.getMessage("ToggleRealtimeCaptionTranslate"),
+            type: "checkbox",
+            checked: false,
+            contexts: ["page", "action"],
+        });
+
+        chrome.contextMenus.create({
             id: "add_url_blacklist",
             title: chrome.i18n.getMessage("AddUrlBlacklist"),
             contexts: ["action"],
@@ -112,6 +162,7 @@ function setupContextMenus() {
         });
 
         contextMenusInitialized = true;
+        syncRealtimeCaptionContextMenuState();
     };
 
     try {
@@ -200,6 +251,13 @@ chrome.runtime.onStartup.addListener(() => {
     setupContextMenus();
 });
 
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "sync" || !changes.OtherSettings) return;
+    updateRealtimeCaptionContextMenu(
+        Boolean(changes.OtherSettings.newValue?.RealtimeCaptionTranslate)
+    );
+});
+
 /**
  * Create communication channel.
  */
@@ -238,23 +296,44 @@ if (chrome.notifications && typeof chrome.notifications.onClicked?.addListener =
  * 添加点击菜单后的处理事件
  */
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+    const translateSelection = (translationProfile = "normal") => {
+        channel
+            .requestToTab(tab.id, "get_selection")
+            .then(({ text, position, textRole, textSegments }) => {
+                if (text) {
+                    return TRANSLATOR_MANAGER.translate(
+                        text,
+                        position,
+                        { tab },
+                        textRole,
+                        textSegments,
+                        translationProfile
+                    );
+                }
+                return Promise.reject();
+            })
+            .catch((error) => {
+                // If content scripts can not access the tab selection, use info.selectionText instead.
+                if (info.selectionText.trim()) {
+                    return TRANSLATOR_MANAGER.translate(
+                        info.selectionText,
+                        null,
+                        { tab },
+                        "text",
+                        [],
+                        translationProfile
+                    );
+                }
+                return Promise.resolve(error);
+            });
+    };
+
     switch (info.menuItemId) {
         case "translate":
-            channel
-                .requestToTab(tab.id, "get_selection")
-                .then(({ text, position }) => {
-                    if (text) {
-                        return TRANSLATOR_MANAGER.translate(text, position);
-                    }
-                    return Promise.reject();
-                })
-                .catch((error) => {
-                    // If content scripts can not access the tab the selection, use info.selectionText instead.
-                    if (info.selectionText.trim()) {
-                        return TRANSLATOR_MANAGER.translate(info.selectionText, null);
-                    }
-                    return Promise.resolve(error);
-                });
+            translateSelection("normal");
+            break;
+        case "translate_precise":
+            translateSelection("precise");
             break;
         case "translate_page":
             translatePage(channel);
@@ -262,6 +341,13 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         case "translate_page_google":
             executeGoogleScript(channel);
             break;
+        case REALTIME_CAPTION_MENU_ID: {
+            const enabled = Boolean(info.checked);
+            updateRealtimeCaptionContextMenu(enabled);
+            saveRealtimeCaptionTranslateSetting(enabled);
+            channel.emitToTabs(tab.id, "set_realtime_caption_translate", { enabled });
+            break;
+        }
         case "settings":
             chrome.runtime.openOptionsPage();
             break;

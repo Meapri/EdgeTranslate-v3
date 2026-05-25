@@ -31,8 +31,12 @@ function translatePage(channel) {
             translator === "ChromeBuiltinPageTranslate"
         ) {
             const engine = localConfig.mode === "openai" ? "openai" : "googleAiStudio";
+            const model =
+                engine === "openai" ? localConfig.openaiModel || "" : localConfig.model || "";
             executeDomPageTranslate(channel, {
                 engine,
+                model,
+                translatorId: "LocalTranslate",
                 sl: (result.languageSetting && result.languageSetting.sl) || "auto",
                 tl: (result.languageSetting && result.languageSetting.tl) || "en",
             });
@@ -47,7 +51,7 @@ function translatePage(channel) {
  * Execute DOM-based page translation in the active tab.
  *
  * @param {import("../../common/scripts/channel.js").default} channel Communication channel.
- * @param {{ engine?: string, sl?: string, tl?: string }} detail Page translation options.
+ * @param {{ engine?: string, model?: string, translatorId?: string, sl?: string, tl?: string }} detail Page translation options.
  */
 function executeDomPageTranslate(channel, detail = {}) {
     promiseTabs.query({ active: true, currentWindow: true }).then((tabs) => {

@@ -444,6 +444,7 @@ function getGeminiNanoCreateOptions(sourceLanguage, targetLanguage) {
             },
         ],
         temperature: 0,
+        topK: 1,
     };
 }
 

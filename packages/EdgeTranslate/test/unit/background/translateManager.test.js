@@ -181,6 +181,52 @@ describe("TranslatorManager selection role wrapping", () => {
         ).toBe(false);
     });
 
+    test("routes precise selection translation through the precise local translator", async () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.config_loader = Promise.resolve();
+        manager.resolveTargetTabId = jest.fn(async () => 42);
+        manager.channel = { emitToTabs: jest.fn() };
+        manager.LANGUAGE_SETTING = { sl: "en", tl: "ko" };
+        manager.IN_MUTUAL_MODE = false;
+        manager.DEFAULT_TRANSLATOR = "GoogleTranslate";
+        manager.HYBRID_TRANSLATOR_CONFIG = { selections: {} };
+        manager.cacheOptions = { maxKeyTextLength: 500, translateTtlMs: 1000 };
+        manager.translationCache = { get: jest.fn(() => null), set: jest.fn() };
+        manager.inflightTranslate = new Map();
+        manager.detect = jest.fn();
+        const normalTranslator = {
+            translate: jest.fn(async () => ({
+                originalText: "source",
+                mainMeaning: "일반 번역",
+            })),
+        };
+        const preciseTranslator = {
+            translate: jest.fn(async () => ({
+                originalText: "source",
+                mainMeaning: "정밀 번역",
+            })),
+        };
+        manager.TRANSLATORS = {
+            GoogleTranslate: normalTranslator,
+            PreciseLocalTranslate: preciseTranslator,
+        };
+
+        await manager.translate("source", [10, 20], { tab: { id: 42 } }, "text", [], "precise");
+
+        expect(preciseTranslator.translate).toHaveBeenCalledWith("source", "en", "ko");
+        expect(normalTranslator.translate).not.toHaveBeenCalled();
+        expect(manager.channel.emitToTabs.mock.calls[0]).toMatchObject([
+            42,
+            "start_translating",
+            { text: "source", position: [10, 20] },
+        ]);
+        expect(manager.channel.emitToTabs.mock.calls[1]).toMatchObject([
+            42,
+            "translating_finished",
+            { mainMeaning: "정밀 번역", originalText: "source" },
+        ]);
+    });
+
     test("does not add Google plus on-device translator when both providers are available", () => {
         const manager = Object.create(TranslatorManager.prototype);
         manager.LOCAL_TRANSLATOR_CONFIG = { enabled: true, mode: "chromeBuiltin" };

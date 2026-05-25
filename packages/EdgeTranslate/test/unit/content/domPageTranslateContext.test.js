@@ -39,6 +39,25 @@ describe("DOM page translation context grouping", () => {
         );
     });
 
+    it("splits generic text containers into one segment per text node", () => {
+        document.body.innerHTML = `
+            <div id="generic">
+                <span>First generic fragment that should not require line-count preservation.</span>
+                <span>Second generic fragment that should travel as its own segment.</span>
+            </div>
+        `;
+        const nodes = Array.from(
+            document.querySelectorAll("#generic span"),
+            (span) => span.firstChild
+        );
+
+        const groups = buildContextTranslationGroups(nodes);
+
+        expect(groups).toHaveLength(2);
+        expect(groups.map((group) => group.role)).toEqual(["text", "text"]);
+        expect(groups.map((group) => group.nodes)).toEqual([[nodes[0]], [nodes[1]]]);
+    });
+
     it("infers DOM text roles for page translation hints", () => {
         document.body.innerHTML = `
             <article>
@@ -131,21 +150,21 @@ describe("DOM page translation context grouping", () => {
 
         expect(source).toBe(
             [
-                "<<<EDGE_TRANSLATE_SEGMENT_1 role=text>>>",
+                "[[1:x]]",
                 "First paragraph.",
-                "<<<EDGE_TRANSLATE_SEGMENT_2 role=text>>>",
+                "[[2:x]]",
                 "Second paragraph with more text.",
-                "<<<EDGE_TRANSLATE_SEGMENT_3 role=text>>>",
+                "[[3:x]]",
                 "Third paragraph.",
             ].join("\n")
         );
 
         const translated = [
-            "<<<EDGE_TRANSLATE_SEGMENT_1 role=text>>>",
+            "[[1:x]]",
             "첫 번째 문단입니다.",
-            "<<<EDGE_TRANSLATE_SEGMENT_2 role=text>>>",
+            "[[2:x]]",
             "두 번째 문단입니다.",
-            "<<<EDGE_TRANSLATE_SEGMENT_3 role=text>>>",
+            "[[3:x]]",
             "세 번째 문단입니다.",
         ].join("\n");
 
@@ -165,14 +184,28 @@ describe("DOM page translation context grouping", () => {
 
         expect(source).toBe(
             [
-                "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>",
+                "[[1:t]]",
                 "Notice title",
-                "<<<EDGE_TRANSLATE_SEGMENT_2 role=date>>>",
+                "[[2:d]]",
                 "2025年07月03日（木）",
-                "<<<EDGE_TRANSLATE_SEGMENT_3 role=paragraph>>>",
+                "[[3:p]]",
                 "Article body text.",
             ].join("\n")
         );
+
+        expect(
+            splitSegmentedTranslationText(
+                [
+                    "[[1:t]]",
+                    "공지 제목",
+                    "[[2:d]]",
+                    "2025년 07월 03일(목)",
+                    "[[3:p]]",
+                    "본문입니다.",
+                ].join("\n"),
+                3
+            )
+        ).toEqual(["공지 제목", "2025년 07월 03일(목)", "본문입니다."]);
 
         expect(
             splitSegmentedTranslationText(

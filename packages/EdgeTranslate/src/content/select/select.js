@@ -35,36 +35,130 @@ translationButtonContainer.style.backgroundColor = "white"; // programatically s
  * When the user clicks the translation button, the translationButtonContainer will be mounted at document.documentElement and the load event will be triggered.
  */
 function renderButton() {
-    const buttonImage = document.createElement("img");
-    buttonImage.src = ImageData;
-    const BUTTON_SIZE = "20px";
-    Object.assign(buttonImage.style, {
-        width: BUTTON_SIZE,
-        height: BUTTON_SIZE,
-        minWidth: 0,
-        maxWidth: BUTTON_SIZE,
-        minHeight: 0,
-        maxHeight: BUTTON_SIZE,
-        padding: 0,
-        border: 0,
+    const parent = getInnerParent(translationButtonContainer);
+    if (parent.dataset.edgeTranslateRendered === "true") return;
+    parent.dataset.edgeTranslateRendered = "true";
+
+    const makeIcon = () => {
+        const iconWrap = document.createElement("span");
+        const buttonImage = document.createElement("img");
+        buttonImage.src = ImageData;
+        Object.assign(buttonImage.style, {
+            width: "17px",
+            height: "17px",
+            minWidth: 0,
+            maxWidth: "17px",
+            minHeight: 0,
+            maxHeight: "17px",
+            padding: 0,
+            border: 0,
+            margin: 0,
+            verticalAlign: 0, // fix the style problem in some websites
+            filter: "none", // https://github.com/EdgeTranslate/EdgeTranslate/projects/2#card-58817626
+        });
+        Object.assign(iconWrap.style, {
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "22px",
+            height: "22px",
+            borderRadius: "999px",
+            background: "rgba(255, 255, 255, .72)",
+            boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, .5)",
+            flex: "0 0 auto",
+        });
+        iconWrap.appendChild(buttonImage);
+        return iconWrap;
+    };
+
+    const menu = document.createElement("div");
+    Object.assign(menu.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        height: "38px",
+        minWidth: "128px",
+        padding: "0 5px",
         margin: 0,
-        verticalAlign: 0, // fix the style problem in some websites
-        filter: "none", // https://github.com/EdgeTranslate/EdgeTranslate/projects/2#card-58817626
-    });
-    const translationButton = document.createElement("div");
-    Object.assign(translationButton.style, {
-        width: BUTTON_SIZE,
-        height: BUTTON_SIZE,
-        padding: "6px",
-        margin: 0,
-        borderRadius: "50%",
-        boxSizing: "content-box",
+        borderRadius: "20px",
+        boxSizing: "border-box",
         overflow: "hidden",
-        border: "none",
-        cursor: "pointer",
+        border: "1px solid rgba(68, 71, 70, .12)",
+        background: "linear-gradient(180deg, #fbfcff 0%, #f4f7fb 100%)",
+        color: "#1f1f1f",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif",
+        fontSize: "12px",
+        fontWeight: "600",
+        lineHeight: "1",
+        letterSpacing: 0,
+        boxShadow: "0 2px 6px rgba(60, 64, 67, .12)",
     });
-    translationButton.appendChild(buttonImage);
-    getInnerParent(translationButtonContainer).appendChild(translationButton);
+
+    const makeActionButton = (label, title, profile) => {
+        const button = document.createElement("button");
+        const isNormal = profile === "normal";
+        Object.assign(button.style, {
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "4px",
+            height: "30px",
+            minWidth: isNormal ? "68px" : "46px",
+            padding: isNormal ? "0 8px 0 4px" : "0 10px",
+            border: "none",
+            borderRadius: "16px",
+            background: isNormal ? "#d3e3fd" : "transparent",
+            color: isNormal ? "#041e49" : "#444746",
+            cursor: "pointer",
+            font: "inherit",
+            whiteSpace: "nowrap",
+            outline: "none",
+            transition:
+                "background 140ms cubic-bezier(.2,0,0,1), box-shadow 140ms cubic-bezier(.2,0,0,1), transform 140ms cubic-bezier(.2,0,0,1)",
+            WebkitTapHighlightColor: "transparent",
+        });
+        button.title = title;
+        if (isNormal) button.appendChild(makeIcon());
+        button.appendChild(document.createTextNode(label));
+        button.addEventListener("mouseenter", () => {
+            button.style.background = isNormal ? "#c2d7f2" : "rgba(68, 71, 70, .08)";
+            button.style.boxShadow = isNormal ? "0 1px 2px rgba(60, 64, 67, .18)" : "none";
+        });
+        button.addEventListener("mouseleave", () => {
+            button.style.background = isNormal ? "#d3e3fd" : "transparent";
+            button.style.boxShadow = "none";
+            button.style.transform = "translateY(0)";
+        });
+        button.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            button.style.transform = "translateY(1px)";
+            if (event.button === 0) translateSubmit(profile);
+        });
+        button.addEventListener("mouseup", () => {
+            button.style.transform = "translateY(0)";
+        });
+        button.addEventListener("contextmenu", (event) => event.preventDefault());
+        return button;
+    };
+
+    const normalLabel = chrome.i18n.getMessage("TranslateNormalShort") || "Normal";
+    const preciseLabel = chrome.i18n.getMessage("TranslatePreciseShort") || "Precise";
+    menu.appendChild(
+        makeActionButton(
+            normalLabel,
+            chrome.i18n.getMessage("TranslateNormal") || "Normal translation",
+            "normal"
+        )
+    );
+    menu.appendChild(
+        makeActionButton(
+            preciseLabel,
+            chrome.i18n.getMessage("TranslatePrecise") || "Precise translation",
+            "precise"
+        )
+    );
+    parent.appendChild(menu);
 
     const CleanStyle = {
         padding: 0,
@@ -77,8 +171,6 @@ function renderButton() {
         CleanStyle
     );
     Object.assign(translationButtonContainer.contentDocument?.body.style || {}, CleanStyle);
-    translationButton.addEventListener("mousedown", buttonClickHandler);
-    translationButton.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 translationButtonContainer.addEventListener("load", renderButton);
 
@@ -163,16 +255,6 @@ window.addEventListener("DOMContentLoaded", () => {
  *
  * @param {MouseEvent} event 鼠标点击事件
  */
-function buttonClickHandler(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.button === 0) {
-        translateSubmit();
-    } else if (event.button === 2) {
-        pronounceSubmit();
-    }
-}
-
 /**
  * Use this function to show the translation buttion.
  */
@@ -537,9 +619,10 @@ function normalizePdfSelectionText(input) {
 /**
  * 处理点击翻译按钮后的事件
  */
-function translateSubmit() {
+function translateSubmit(translationProfile = "normal") {
     let selection = getSelection();
     if (selection.text && selection.text.length > 0) {
+        selection.translationProfile = translationProfile;
         channel.request("translate", selection).then(() => {
             getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS).then((result) => {
                 // to check whether user need to cancel text selection after translation finished

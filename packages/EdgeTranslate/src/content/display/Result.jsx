@@ -170,7 +170,6 @@ export default function Result(props) {
                                         e.stopPropagation();
                                         if (stopping) return;
 
-                                        console.log("Target TTS stop clicked");
                                         setStopping(true);
                                         // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
                                         const emitPromise = channel.emit("frame_closed");
@@ -252,7 +251,6 @@ export default function Result(props) {
                                         e.stopPropagation();
                                         if (stopping) return;
 
-                                        console.log("Source TTS stop clicked");
                                         setStopping(true);
                                         // frame_closed 이벤트 직접 발송 (번역창 닫을 때와 동일한 방식)
                                         const emitPromise = channel.emit("frame_closed");

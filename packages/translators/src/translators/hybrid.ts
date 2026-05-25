@@ -22,7 +22,8 @@ export type HybridConfig = {
     selections: Selections;
     translators: HybridSupportedTranslators[]; // a collection of used translators which is generated based on selections. The generating process is in options.js.
 };
-export type Selections = Record<keyof TranslationResult, HybridSupportedTranslators>;
+type HybridSelectableField = Exclude<keyof TranslationResult, "tokenUsage">;
+export type Selections = Record<HybridSelectableField, HybridSupportedTranslators>;
 
 class HybridTranslator {
     channel: any; // communication channel.
@@ -300,9 +301,8 @@ class HybridTranslator {
                             Example[];
                     }
                 }
-            } catch (error) {
-                console.log(`${item} ${this.CONFIG.selections[item]}`);
-                console.log(error);
+            } catch {
+                this.stats.errors += 1;
             }
         }
         
