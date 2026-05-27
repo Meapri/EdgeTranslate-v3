@@ -139,6 +139,30 @@ describe("DOM page translation banner", () => {
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 1800, maxItems: 1 });
     });
 
+    it("marks quiet AI page translation requests with the page profile", async () => {
+        const controller = new BannerController();
+        controller.channel.request = jest.fn().mockResolvedValue({
+            mainMeaning: "[[1:p]]\n번역된 문장입니다.",
+        });
+        controller._domPageTranslateOptions = {
+            engine: "openaiCompatible",
+            model: "local-model",
+            sl: "en",
+            tl: "ko",
+        };
+
+        await controller.translateWithDomPageEngine("[[1:p]]\nOriginal sentence.", "en", "ko");
+
+        expect(controller.channel.request).toHaveBeenCalledWith("translate_text_quiet", {
+            text: "[[1:p]]\nOriginal sentence.",
+            sl: "en",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "openaiCompatible",
+            translationProfile: "page",
+        });
+    });
+
     it("uses smaller DOM-ordered page batches for OpenAI models", () => {
         const controller = new BannerController();
         controller._domPageTranslateOptions = {
@@ -2269,6 +2293,51 @@ describe("DOM page translation banner", () => {
         expect(controller.isMeaningfulDomPageTextNode(node)).toBe(false);
     });
 
+    it("falls back to plain text nodes when an OpenAI-compatible model ignores page markers", async () => {
+        document.body.innerHTML = `
+            <article>
+                <p id="line">Page translation should still replace this sentence.</p>
+            </article>
+        `;
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = {
+            engine: "openaiCompatible",
+            model: "plain-translator",
+            sl: "en",
+            tl: "ko",
+        };
+        controller._domResolvedSourceLanguage = "en";
+        controller._domMaxConcurrentTranslations = 1;
+        controller.channel.request.mockResolvedValueOnce({
+            mainMeaning: "페이지 번역은 이 문장도 바꿔야 합니다.",
+        });
+        const node = document.getElementById("line").firstChild;
+        const entry = controller.createDomPageTranslationEntry({
+            role: "paragraph",
+            sourceText: "Page translation should still replace this sentence.",
+            nodes: [node],
+            texts: ["Page translation should still replace this sentence."],
+        });
+
+        expect(controller.retryDomPageEntryTranslation(entry, 0, { reason: "line-count" })).toBe(
+            true
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(document.getElementById("line").textContent).toBe(
+            "페이지 번역은 이 문장도 바꿔야 합니다."
+        );
+        expect(controller.channel.request).toHaveBeenCalledWith("translate_text_quiet", {
+            text: "Page translation should still replace this sentence.",
+            sl: "en",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "openaiCompatible",
+            translationProfile: "page",
+        });
+    });
+
     it("does not retry generic text groups that fail line-count validation", () => {
         document.body.innerHTML = `
             <div id="widget">
@@ -2746,5 +2815,136 @@ describe("DOM page translation banner", () => {
             "Visible article text",
             "Deferred article text",
         ]);
+    });
+
+    describe("stripPromptEchoFromTranslation", () => {
+        it("removes echoed prompt instruction lines from translated text", () => {
+            const controller = new BannerController();
+            const input = [
+                "Source language: English",
+                "Target language: Korean",
+                "안녕하세요. 이것은 번역된 텍스트입니다.",
+            ].join("\n");
+            expect(controller.stripPromptEchoFromTranslation(input)).toBe(
+                "안녕하세요. 이것은 번역된 텍스트입니다."
+            );
+        });
+
+        it("removes 'Output only the translation' echo lines", () => {
+            const controller = new BannerController();
+            const input = "Output only the translation.\n번역 결과입니다.";
+            expect(controller.stripPromptEchoFromTranslation(input)).toBe("번역 결과입니다.");
+        });
+
+        it("removes bare language label lines like 'Korean:'", () => {
+            const controller = new BannerController();
+            const input = "Korean:\n한국어 번역 텍스트입니다.";
+            expect(controller.stripPromptEchoFromTranslation(input)).toBe(
+                "한국어 번역 텍스트입니다."
+            );
+        });
+
+        it("collapses excessive blank lines from stripping", () => {
+            const controller = new BannerController();
+            const input =
+                "Source language: en\n\n\n\nTarget language: ko\n\n\n\n실제 번역 내용.";
+            expect(controller.stripPromptEchoFromTranslation(input)).toBe("실제 번역 내용.");
+        });
+
+        it("returns clean text unchanged", () => {
+            const controller = new BannerController();
+            const clean = "이것은 정상적인 번역 결과입니다.";
+            expect(controller.stripPromptEchoFromTranslation(clean)).toBe(clean);
+        });
+
+        it("returns empty string for empty or null input", () => {
+            const controller = new BannerController();
+            expect(controller.stripPromptEchoFromTranslation("")).toBe("");
+            expect(controller.stripPromptEchoFromTranslation(null)).toBe("");
+        });
+    });
+
+    describe("isSuspiciousDomPageTranslation", () => {
+        it("accepts a clean translation from a local LLM", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            expect(
+                controller.isSuspiciousDomPageTranslation(
+                    "Hello world",
+                    "안녕하세요 세계"
+                )
+            ).toBe(false);
+        });
+
+        it("accepts translation with prompt echo after stripping", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            const translated =
+                "Source language: English\nTarget language: Korean\n안녕하세요 세계";
+            expect(
+                controller.isSuspiciousDomPageTranslation("Hello world", translated)
+            ).toBe(false);
+        });
+
+        it("rejects translation that is entirely prompt echo with no content", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            const translated =
+                "Source language: English\nTarget language: Korean";
+            expect(
+                controller.isSuspiciousDomPageTranslation("Hello world", translated)
+            ).toBe(true);
+        });
+
+        it("rejects empty translations", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            expect(controller.isSuspiciousDomPageTranslation("Hello", "")).toBe(true);
+            expect(controller.isSuspiciousDomPageTranslation("Hello", null)).toBe(true);
+        });
+
+        it("still rejects <<<EDGE_TRANSLATE_SEGMENT_ markers", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            expect(
+                controller.isSuspiciousDomPageTranslation(
+                    "Hello",
+                    "<<<EDGE_TRANSLATE_SEGMENT_1>>>번역"
+                )
+            ).toBe(true);
+        });
+
+        it("uses relaxed foreign token threshold for openaiCompatible", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            // 6 foreign tokens — below the relaxed threshold of 8
+            const translated =
+                "번역된 텍스트 about something with various words tokens here.";
+            expect(
+                controller.isSuspiciousDomPageTranslation("원문 텍스트", translated)
+            ).toBe(false);
+        });
+
+        it("uses strict foreign token threshold for openai (non-compatible)", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openai" };
+            // 6 foreign tokens — above the strict threshold of 4 for non-local
+            const translated =
+                "번역된 텍스트 about something with various words tokens here.";
+            expect(
+                controller.isSuspiciousDomPageTranslation("원문 텍스트", translated)
+            ).toBe(true);
+        });
+
+        it("does not flag [[n:r]] segment markers as suspicious", () => {
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "openaiCompatible" };
+            expect(
+                controller.isSuspiciousDomPageTranslation(
+                    "Hello",
+                    "[[1:p]]\n안녕하세요"
+                )
+            ).toBe(false);
+        });
     });
 });

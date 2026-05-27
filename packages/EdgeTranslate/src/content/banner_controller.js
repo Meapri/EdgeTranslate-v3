@@ -2541,6 +2541,7 @@ class BannerController {
             tl: to,
             translatorId: "LocalTranslate",
             engine: this._domPageTranslateOptions.engine,
+            translationProfile: "page",
         });
     }
 
@@ -2626,20 +2627,42 @@ class BannerController {
         return parts && parts.length === entryCount ? parts[0] : translated;
     }
 
+    /**
+     * Strip known prompt echo / instruction leakage from a translated string.
+     * Local LLMs (e.g. llama.cpp, Ollama) sometimes echo parts of the system
+     * or user prompt in their output. This helper removes those fragments so
+     * they don't trigger the suspicious-translation filter.
+     */
+    stripPromptEchoFromTranslation(text) {
+        if (!text) return "";
+        return (
+            String(text)
+                // Full instruction lines that may be echoed verbatim.
+                .replace(
+                    /^[ \t]*(Source language|Target language|Translate|Output only the translation|Translate the user'?s text|Translate faithfully|Preserve meaning|Use the target language'?s|Preserve proper nouns)[^\n]*$/gim,
+                    ""
+                )
+                // Bare "Korean:" / "English:" language labels the model may emit.
+                .replace(/^[ \t]*[A-Z][a-z]+:\s*$/gm, "")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim()
+        );
+    }
+
     isSuspiciousDomPageTranslation(sourceText, translatedText) {
         const source = String(sourceText || "").trim();
-        const translated = String(translatedText || "").trim();
+        const translated = this.stripPromptEchoFromTranslation(translatedText);
         if (!translated) return true;
 
-        const sourceHasSubtitleCue = /\d{1,4}\s*\r?\n?\s*\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->/i.test(
+        const sourceHasSubtitleCue = /\d{1,4}\s*\r?\n?\s*\d{2}:\d{2}:\d{2}[,.]?\d{3}\s*-->/i.test(
             source
         );
         const translatedHasSubtitleCue =
-            /\d{1,4}\s*\r?\n?\s*\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->/i.test(translated);
+            /\d{1,4}\s*\r?\n?\s*\d{2}:\d{2}:\d{2}[,.]?\d{3}\s*-->/i.test(translated);
         if (!sourceHasSubtitleCue && translatedHasSubtitleCue) return true;
 
         if (
-            /\[\[\d+:[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_|Source language:|Target language:|Translate naturally|Output only the translation/i.test(
+            /<<<EDGE_TRANSLATE_SEGMENT_/i.test(
                 translated
             )
         ) {
@@ -2664,7 +2687,18 @@ class BannerController {
             t.toLowerCase()
         );
         const foreignTokens = translatedTokens.filter((token) => !sourceTokens.has(token));
-        if (foreignTokens.length >= 4 && foreignTokens.length > sourceTokens.size + 2) {
+
+        // Relax the foreign-token threshold for OpenAI-compatible (local) engines.
+        // Small local models inject more English fragments than cloud APIs.
+        const isLocalEngine =
+            this._domPageTranslateOptions &&
+            this._domPageTranslateOptions.engine === "openaiCompatible";
+        const foreignThreshold = isLocalEngine ? 8 : 4;
+        const foreignMargin = isLocalEngine ? 5 : 2;
+        if (
+            foreignTokens.length >= foreignThreshold &&
+            foreignTokens.length > sourceTokens.size + foreignMargin
+        ) {
             return true;
         }
 
@@ -2788,6 +2822,23 @@ class BannerController {
         return "";
     }
 
+    shouldUsePlainDomPageNodeFallback(entry, reason = "") {
+        if (this._domPageTranslateOptions.engine !== "openaiCompatible") return false;
+        if (!entry?.group?.nodes?.length) return false;
+        return [
+            "line-count",
+            "marker-missing",
+            "suspicious-line",
+            "inline-link-placeholder",
+        ].includes(reason);
+    }
+
+    fallbackDomPageEntryToPlainNodes(entry) {
+        if (!entry?.group?.nodes?.length) return false;
+        this.enqueueDomPageEntryNodeTranslations(entry);
+        return true;
+    }
+
     skipDomPageEntryApply(entry) {
         if (!this.isDomPageEntryCurrentSession(entry)) return;
         this.assignDomPageApplySequence(entry);
@@ -2871,6 +2922,9 @@ class BannerController {
     retryDomPageEntryTranslation(entry, attempt = 0, options = {}) {
         if (!entry || !entry.group) return false;
         const reason = options.reason || "";
+        if (this.shouldUsePlainDomPageNodeFallback(entry, reason)) {
+            return this.fallbackDomPageEntryToPlainNodes(entry);
+        }
         if (!this.shouldRetryDomPageEntryTranslation(entry, attempt, reason)) {
             this.markDomPageEntryFailed(entry);
             this.skipDomPageEntryApply(entry);
@@ -2980,9 +3034,11 @@ class BannerController {
     }
 
     sanitizeDomPageTranslatedText(text) {
-        return String(text || "")
-            .replace(/\[\[EDGE_TRANSLATE_LINK_\d+]]/g, "")
-            .replace(/\[\[\/EDGE_TRANSLATE_LINK_\d+]]/g, "");
+        return this.stripPromptEchoFromTranslation(
+            String(text || "")
+                .replace(/\[\[EDGE_TRANSLATE_LINK_\d+]]/g, "")
+                .replace(/\[\[\/EDGE_TRANSLATE_LINK_\d+]]/g, "")
+        );
     }
 
     sanitizeDomPageOriginalText(text) {
@@ -4612,6 +4668,10 @@ class BannerController {
                         const mid = Math.ceil(entries.length / 2);
                         this.enqueueDomPageBatchTranslation(entries.slice(mid), { front: true });
                         this.enqueueDomPageBatchTranslation(entries.slice(0, mid), { front: true });
+                    } else if (
+                        this.shouldUsePlainDomPageNodeFallback(entries[0], "marker-missing")
+                    ) {
+                        this.fallbackDomPageEntryToPlainNodes(entries[0]);
                     } else {
                         [...entries]
                             .reverse()
@@ -4716,6 +4776,11 @@ class BannerController {
 
                 const translatedParts = splitTranslatedContext(translated, group.nodes.length);
                 if (!translatedParts) {
+                    if (this.shouldUsePlainDomPageNodeFallback(entry, "line-count")) {
+                        this.fallbackDomPageEntryToPlainNodes(entry);
+                        this.markDomPageTranslationEntriesCompleted();
+                        return;
+                    }
                     this.retryDomPageEntryTranslation(entry, attempt, { reason: "line-count" });
                     this.markDomPageTranslationEntriesCompleted();
                     return;
@@ -4725,6 +4790,11 @@ class BannerController {
                         this.isSuspiciousDomPageTranslation(group.texts[index], part)
                     )
                 ) {
+                    if (this.shouldUsePlainDomPageNodeFallback(entry, "suspicious-line")) {
+                        this.fallbackDomPageEntryToPlainNodes(entry);
+                        this.markDomPageTranslationEntriesCompleted();
+                        return;
+                    }
                     this.retryDomPageEntryTranslation(entry, attempt, {
                         reason: "suspicious-line",
                     });

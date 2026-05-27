@@ -365,6 +365,25 @@ function extractLooseJsonStringField(text: string, field: string, nextFields: st
     return unescapeLooseJsonString(raw);
 }
 
+/**
+ * Strip prompt echo / instruction leakage from raw LLM output.
+ * Small local models (e.g. llama.cpp, Ollama) sometimes prefix the
+ * translation with echoed prompt lines like "Source language: English."
+ * or "Target language: Korean." — remove them so they don't pollute the
+ * final translation.
+ */
+function stripPromptEcho(text: string) {
+    if (!text) return "";
+    return text
+        .replace(
+            /^[ \t]*(Source language|Target language|Translate|Output only the translation|Translate the user'?s text|Translate faithfully|Preserve meaning|Use the target language'?s|Preserve proper nouns)[^\n]*$/gim,
+            ""
+        )
+        .replace(/^[ \t]*[A-Z][a-z]+:\s*$/gm, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
 function parsePlainTranslationOutput(output: string) {
     const cleaned = stripCodeFence(output);
     if (!cleaned) return "";
@@ -383,7 +402,7 @@ function parsePlainTranslationOutput(output: string) {
         }
     }
 
-    return (
+    return stripPromptEcho(
         extractLooseJsonStringField(cleaned, "translation", [
             "mainMeaning",
             "translatedText",
@@ -450,6 +469,39 @@ function extractOpenAIMessageContent(message: any) {
             .trim();
     }
     return "";
+}
+
+function extractOpenAIChoiceText(choice: any) {
+    const messageContent = extractOpenAIMessageContent(choice?.message);
+    if (messageContent) return messageContent;
+
+    const deltaContent = extractOpenAIMessageContent(choice?.delta);
+    if (deltaContent) return deltaContent;
+
+    if (typeof choice?.text === "string") return choice.text.trim();
+    if (typeof choice?.content === "string") return choice.content.trim();
+    if (typeof choice?.message === "string") return choice.message.trim();
+    return "";
+}
+
+function extractOpenAIResponseText(payload: any) {
+    const choices = Array.isArray(payload?.choices) ? payload.choices : [];
+    for (const choice of choices) {
+        const text = extractOpenAIChoiceText(choice);
+        if (text) return text;
+    }
+
+    if (typeof payload?.output_text === "string") return payload.output_text.trim();
+    if (typeof payload?.text === "string") return payload.text.trim();
+    if (typeof payload?.response === "string") return payload.response.trim();
+    if (typeof payload?.content === "string") return payload.content.trim();
+
+    const output = Array.isArray(payload?.output) ? payload.output : [];
+    return output
+        .flatMap((item: any) => (Array.isArray(item?.content) ? item.content : []))
+        .map((part: any) => part?.text || part?.content || "")
+        .join("")
+        .trim();
 }
 
 function countPageSegmentMarkers(text: string) {
@@ -775,6 +827,7 @@ class LocalTranslator {
     private getTranslationProfileKey(options: LocalTranslationOptions = {}) {
         if (this.isRealtimeCaptionBatchTranslation(options)) return "realtimeCaptionBatch";
         if (this.isRealtimeCaptionTranslation(options)) return "realtimeCaption";
+        if (options.translationProfile === "page") return "page";
         return "default";
     }
 
@@ -1028,7 +1081,7 @@ class LocalTranslator {
     }
 
     private parseOpenAiResponse(payload: any) {
-        return extractOpenAIMessageContent(payload?.choices?.[0]?.message);
+        return extractOpenAIResponseText(payload);
     }
 
     private getGoogleAiStudioCompatibilityModes(options: LocalTranslationOptions = {}) {
