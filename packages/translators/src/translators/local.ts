@@ -1641,14 +1641,13 @@ class LocalTranslator {
                         content: this.buildOpenAiPrompt(text, from, to, options),
                     },
                 ],
-                ...(!isRealtimeCaption && isDictionaryCandidate(text)
-                    ? { response_format: { type: "json_object" } }
-                    : {}),
+                // Remove response_format JSON block for openaiCompatible to ensure high compatibility with local LLM servers (like llama-server)
+                // Also double the token multiplier to prevent translation truncation issues with smaller local models
                 max_tokens: isRealtimeCaption
-                    ? Math.max(96, Math.ceil(text.length * 2))
+                    ? Math.max(128, Math.ceil(text.length * 3))
                     : Math.max(
-                          512 * Math.max(1, tokenMultiplier / 4),
-                          Math.ceil(text.length * tokenMultiplier)
+                          1024 * Math.max(1, tokenMultiplier / 4),
+                          Math.ceil(text.length * tokenMultiplier * 2)
                       ),
                 temperature: 0,
             });
