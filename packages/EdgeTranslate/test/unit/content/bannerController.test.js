@@ -23,6 +23,9 @@ describe("DOM page translation banner", () => {
     beforeEach(() => {
         document.body.innerHTML = "";
         delete window.ytInitialPlayerResponse;
+        delete window.__edgeTranslateCaptionDebug;
+        delete window.__edgeTranslateCaptionDebugEvents;
+        localStorage.clear();
         global.fetch = undefined;
         document.getElementById("edge-translate-realtime-caption")?.remove();
         document.body.removeAttribute("style");
@@ -48,7 +51,7 @@ describe("DOM page translation banner", () => {
 
         const banner = document.getElementById("edge-translate-dom-page-banner");
         expect(banner).not.toBeNull();
-        expect(banner.shadowRoot.textContent).toContain("Page translation");
+        expect(banner.shadowRoot.querySelector("[data-role='title']").textContent).toContain("Page Translation");
         expect(banner.shadowRoot.querySelector("[data-role='engine-label']").textContent).toBe(
             "OpenAI"
         );
@@ -59,8 +62,8 @@ describe("DOM page translation banner", () => {
             "brand/chatgpt.svg"
         );
         expect(banner.shadowRoot.querySelector("[data-role='bar']").dataset.state).toBe("starting");
-        expect(banner.shadowRoot.textContent).toContain("Preparing page text");
-        expect(document.body.style.getPropertyValue("top")).toBe("56px");
+        expect(banner.shadowRoot.querySelector("[data-role='status']").textContent).toContain("Preparing page text");
+        expect(document.body.style.getPropertyValue("top")).toBe("84px");
 
         controller._domTotalTranslationEntries = 3;
         controller.recordDomPageTokenUsage({
@@ -103,7 +106,7 @@ describe("DOM page translation banner", () => {
 
         banner.shadowRoot.querySelector("[data-action='show']").click();
         expect(banner.dataset.visible).toBe("true");
-        expect(document.body.style.getPropertyValue("top")).toBe("56px");
+        expect(document.body.style.getPropertyValue("top")).toBe("84px");
 
         controller.cancelDomPageTranslate();
         expect(document.getElementById("edge-translate-dom-page-banner")).toBeNull();
@@ -277,6 +280,118 @@ describe("DOM page translation banner", () => {
         expect(overlay.style.boxShadow).toContain("rgba(0, 0, 0");
     });
 
+    it("does not issue duplicate live-batch requests while the same caption is in flight", async () => {
+        jest.useFakeTimers();
+        try {
+            localStorage.setItem("edgeTranslate.captionDebug", "1");
+            document.body.innerHTML = `
+                <div class="ytp-caption-window-container">
+                    <span class="ytp-caption-segment">Repeated visible caption.</span>
+                </div>
+            `;
+            const controller = new BannerController();
+            controller._captionModeEnabled = true;
+            controller.isYouTubePage = () => true;
+            controller._captionOptionsCache = {
+                sl: "en",
+                tl: "ko",
+                translatorId: "LocalTranslate",
+                engine: "googleAiStudio",
+            };
+            controller._captionOptionsCacheAt = Date.now();
+            controller.channel.request.mockResolvedValueOnce({
+                mainMeaning: "[[0]] 반복 자막.",
+            });
+
+            const first = controller.translateCurrentRealtimeCaption();
+            await Promise.resolve();
+            await Promise.resolve();
+            const second = controller.translateCurrentRealtimeCaption();
+
+            jest.advanceTimersByTime(controller._captionBatchDelayMs);
+            await first;
+            await second;
+
+            expect(controller.channel.request).toHaveBeenCalledTimes(1);
+            expect(
+                (window.__edgeTranslateCaptionDebugEvents || []).filter(
+                    (event) => event.event === "display:fallback-request"
+                )
+            ).toHaveLength(1);
+            expect(document.getElementById("edge-translate-realtime-caption").textContent).toBe(
+                "반복 자막."
+            );
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("waits briefly for open-ended caption fragments and translates the stabilized block once", async () => {
+        jest.useFakeTimers();
+        try {
+            localStorage.setItem("edgeTranslate.captionDebug", "1");
+            document.body.innerHTML = `
+                <div class="ytp-caption-window-container">
+                    <span class="ytp-caption-segment">I am honored to be with you today at your commencement</span>
+                </div>
+            `;
+            const controller = new BannerController();
+            controller._captionModeEnabled = true;
+            controller.isYouTubePage = () => true;
+            controller._captionStabilizeDelayMs = 500;
+            controller._captionBatchDelayMs = 1;
+            controller._captionOptionsCache = {
+                sl: "en",
+                tl: "ko",
+                translatorId: "LocalTranslate",
+                engine: "googleAiStudio",
+            };
+            controller._captionOptionsCacheAt = Date.now();
+            controller.channel.request.mockResolvedValueOnce({
+                mainMeaning: "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다.",
+            });
+
+            const first = controller.translateCurrentRealtimeCaption();
+            await Promise.resolve();
+            expect(controller.channel.request).not.toHaveBeenCalled();
+            expect(document.getElementById("edge-translate-realtime-caption")).toBeNull();
+
+            document.querySelector(".ytp-caption-segment").textContent =
+                "from one of the finest universities in the world.";
+            const second = controller.translateCurrentRealtimeCaption();
+            await first;
+            jest.advanceTimersByTime(controller._captionStabilizeDelayMs);
+            await Promise.resolve();
+            jest.advanceTimersByTime(controller._captionBatchDelayMs);
+            await second;
+
+            expect(controller.channel.request).toHaveBeenCalledTimes(1);
+            expect(controller.channel.request).toHaveBeenCalledWith("translate_text_quiet", {
+                text:
+                    "[[0]] I am honored to be with you today at your commencement\n" +
+                    "from one of the finest universities in the world.",
+                sl: "en",
+                tl: "ko",
+                translatorId: "LocalTranslate",
+                engine: "googleAiStudio",
+                textRole: "caption",
+                translationProfile: "realtimeCaptionBatch",
+            });
+            const overlay = document.getElementById("edge-translate-realtime-caption");
+            expect(overlay.hidden).toBe(false);
+            expect(overlay.textContent).toBe(
+                "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다."
+            );
+            expect(
+                (window.__edgeTranslateCaptionDebugEvents || []).filter(
+                    (event) => event.event === "display:stabilize-wait"
+                )
+            ).not.toHaveLength(0);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     it("accepts an explicit realtime caption state from the context menu", () => {
         const controller = new BannerController();
         controller.startRealtimeCaptionTranslation = jest.fn();
@@ -337,13 +452,11 @@ describe("DOM page translation banner", () => {
         await nextTranslation;
         expect(overlay.hidden).toBe(false);
         const lines = overlay.querySelectorAll("[data-role]");
-        expect(lines).toHaveLength(2);
-        expect(lines[0].dataset.role).toBe("previous-caption");
-        expect(lines[0].textContent).toBe("첫 번째 자막.");
-        expect(lines[0].style.animation).toContain("edgeCaptionPreviousLift");
-        expect(lines[1].dataset.role).toBe("current-caption");
-        expect(lines[1].textContent).toBe("두 번째 자막.");
-        expect(lines[1].style.animation).toContain("edgeCaptionCurrentSlide");
+        expect(lines).toHaveLength(1);
+        expect(lines[0].dataset.role).toBe("current-caption");
+        expect(lines[0].textContent).toBe("두 번째 자막.");
+        expect(lines[0].style.animation).toContain("edgeCaptionCurrentSlide");
+        expect(overlay.textContent).not.toContain("첫 번째 자막.");
         expect(document.getElementById("edge-translate-realtime-caption-style")).toBeTruthy();
     });
 
@@ -438,6 +551,269 @@ describe("DOM page translation banner", () => {
         expect(lines[1].dataset.role).toBe("current-caption");
     });
 
+    it("lets the user drag the realtime subtitle overlay within the viewport", () => {
+        Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+        Object.defineProperty(window, "innerHeight", { configurable: true, value: 720 });
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.showRealtimeCaptionOverlay("옮길 수 있는 자막.", "Draggable caption.");
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        overlay.getBoundingClientRect = jest.fn(() => ({
+            left: 340,
+            top: 520,
+            width: 520,
+            height: 88,
+            right: 860,
+            bottom: 608,
+            x: 340,
+            y: 520,
+        }));
+
+        overlay.dispatchEvent(
+            new MouseEvent("pointerdown", {
+                bubbles: true,
+                button: 0,
+                clientX: 360,
+                clientY: 540,
+            })
+        );
+        document.dispatchEvent(
+            new MouseEvent("pointermove", {
+                bubbles: true,
+                clientX: 460,
+                clientY: 400,
+            })
+        );
+        document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+
+        expect(overlay.style.left).toBe("440px");
+        expect(overlay.style.top).toBe("380px");
+        expect(overlay.style.transform).toBe("none");
+    });
+
+    it("keeps YouTube subtitle translator mode simple: AI or Google only", async () => {
+        const controller = new BannerController();
+        getOrSetDefaultSettings.mockResolvedValueOnce({
+            languageSetting: { sl: "en", tl: "ko" },
+            LocalTranslatorConfig: { enabled: true, mode: "googleAiStudio" },
+            DefaultTranslator: "BingTranslate",
+            RealtimeCaptionConfig: { translatorMode: "ai", draggableOverlay: false },
+        });
+
+        await expect(controller.getRealtimeCaptionTranslateOptions()).resolves.toEqual({
+            sl: "en",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "googleAiStudio",
+            fastTranslatorId: "",
+        });
+        expect(controller._captionOverlayDraggable).toBe(false);
+
+        controller._captionOptionsCache = null;
+        getOrSetDefaultSettings.mockResolvedValueOnce({
+            languageSetting: { sl: "en", tl: "ko" },
+            LocalTranslatorConfig: { enabled: true, mode: "googleAiStudio" },
+            DefaultTranslator: "BingTranslate",
+            RealtimeCaptionConfig: { translatorMode: "google", draggableOverlay: true },
+        });
+
+        await expect(controller.getRealtimeCaptionTranslateOptions()).resolves.toEqual({
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+            fastTranslatorId: "",
+        });
+        expect(controller._captionOverlayDraggable).toBe(true);
+    });
+
+    it("replaces fragment captions when a stabilized merged caption arrives", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.showRealtimeCaptionOverlay(
+            "오늘 졸업식에 함께하게 되어 영광입니다.",
+            "I am honored to be with you today at your commencement"
+        );
+        controller.showRealtimeCaptionOverlay(
+            "다음 자막입니다.",
+            "A following caption."
+        );
+        controller.showRealtimeCaptionOverlay(
+            "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다.",
+            "I am honored to be with you today at your commencement\nfrom one of the finest universities in the world.",
+            { allowExpandedReplacement: true }
+        );
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = overlay.querySelectorAll("[data-role]");
+        expect(lines).toHaveLength(2);
+        expect(lines[0].textContent).toBe(
+            "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다."
+        );
+        expect(lines[1].textContent).toBe("다음 자막입니다.");
+        expect(Array.from(lines).map((line) => line.textContent)).not.toContain(
+            "오늘 졸업식에 함께하게 되어 영광입니다."
+        );
+        expect(overlay.dataset.expanded).toBe("true");
+        expect(overlay.style.maxWidth).toBe("min(88vw, 1120px)");
+        expect(overlay.style.maxHeight).toBe("34vh");
+    });
+
+    it("applies late stabilized captions by replacing the earlier fragment in place", async () => {
+        jest.useFakeTimers();
+        try {
+            const controller = new BannerController();
+            controller._captionModeEnabled = true;
+            controller.isYouTubePage = () => true;
+            controller._captionBatchDelayMs = 1;
+            controller._captionOptionsCache = {
+                sl: "en",
+                tl: "ko",
+                translatorId: "LocalTranslate",
+                engine: "googleAiStudio",
+            };
+            controller._captionOptionsCacheAt = Date.now();
+            controller.showRealtimeCaptionOverlay(
+                "오늘 여러분의 졸업식에 함께하게 되어 영광입니다.",
+                "I am honored to be with you today at your commencement"
+            );
+            controller.showRealtimeCaptionOverlay(
+                "사실 저는 대학을 졸업하지 못했습니다.",
+                "Truth be told, I never graduated from college."
+            );
+            let resolveRequest;
+            controller.channel.request.mockImplementationOnce(
+                () =>
+                    new Promise((resolve) => {
+                        resolveRequest = resolve;
+                    })
+            );
+
+            const mergedTranslation = controller.translateRealtimeCaptionSource(
+                "I am honored to be with you today at your commencement\nfrom one of the finest universities in the world."
+            );
+            controller.markRealtimeCaptionMergedReplacementSource(
+                "I am honored to be with you today at your commencement\nfrom one of the finest universities in the world."
+            );
+            await Promise.resolve();
+            jest.advanceTimersByTime(controller._captionBatchDelayMs);
+            await Promise.resolve();
+            controller._captionLastSource =
+                "And this is the closest I have ever gotten to a college graduation.";
+            controller._captionLastRequestId += 1;
+            controller.showRealtimeCaptionOverlay(
+                "그리고 이것이 제가 대학 졸업식에 가장 가까이 다가간 순간입니다.",
+                "And this is the closest I have ever gotten to a college graduation."
+            );
+            resolveRequest({
+                mainMeaning:
+                    "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다.",
+            });
+            await mergedTranslation;
+
+            const overlay = document.getElementById("edge-translate-realtime-caption");
+            const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+                line.textContent.trim()
+            );
+            expect(lines).toEqual([
+                "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다.",
+                "사실 저는 대학을 졸업하지 못했습니다.",
+                "그리고 이것이 제가 대학 졸업식에 가장 가까이 다가간 순간입니다.",
+            ]);
+            expect(overlay.textContent).not.toContain(
+                "오늘 여러분의 졸업식에 함께하게 되어 영광입니다."
+            );
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("keeps normal multi-line captions to two rows unless they replace fragments", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.showRealtimeCaptionOverlay("첫 번째.", "First.");
+        controller.showRealtimeCaptionOverlay("두 번째.", "Second.");
+        controller.showRealtimeCaptionOverlay("세 번째.", "Third.");
+        controller.showRealtimeCaptionOverlay("묶인 네 번째.", "Fourth\nfragment.");
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = overlay.querySelectorAll("[data-role]");
+        expect(lines).toHaveLength(2);
+        expect(lines[0].textContent).toBe("세 번째.");
+        expect(lines[1].textContent).toBe("묶인 네 번째.");
+        expect(overlay.dataset.expanded).toBe("false");
+        expect(overlay.style.maxHeight).toBe("28vh");
+    });
+
+    it("does not enter three-row mode for ordinary multi-line captions that include prior text", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.showRealtimeCaptionOverlay("첫 번째 줄.", "First line");
+        controller.showRealtimeCaptionOverlay("두 줄 현재 자막.", "First line\nsecond line");
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+            line.textContent.trim()
+        );
+        expect(lines).toEqual(["두 줄 현재 자막."]);
+        expect(overlay.dataset.expanded).toBe("true");
+        expect(overlay.style.maxHeight).toBe("34vh");
+    });
+
+    it("returns to two caption rows after a merged replacement scrolls out", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.showRealtimeCaptionOverlay("조각 첫 줄.", "Fragment first line");
+        controller.showRealtimeCaptionOverlay(
+            "합쳐진 자연스러운 첫 문장.",
+            "Fragment first line\ncontinued source",
+            { allowExpandedReplacement: true }
+        );
+        controller.showRealtimeCaptionOverlay("두 번째.", "Second.");
+        controller.showRealtimeCaptionOverlay("세 번째.", "Third.");
+
+        let overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.querySelectorAll("[data-role]")).toHaveLength(3);
+        expect(overlay.dataset.expanded).toBe("true");
+
+        controller.showRealtimeCaptionOverlay("네 번째.", "Fourth.");
+        controller.showRealtimeCaptionOverlay("다섯 번째.", "Fifth.");
+
+        overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = overlay.querySelectorAll("[data-role]");
+        expect(lines).toHaveLength(2);
+        expect(lines[0].textContent).toBe("네 번째.");
+        expect(lines[1].textContent).toBe("다섯 번째.");
+        expect(overlay.dataset.expanded).toBe("false");
+    });
+
+    it("does not append a fragment already covered by a merged caption", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.showRealtimeCaptionOverlay("앞 조각.", "First fragment");
+        controller.showRealtimeCaptionOverlay(
+            "자연스럽게 합쳐진 전체 자막.",
+            "First fragment\nsecond fragment",
+            { allowExpandedReplacement: true }
+        );
+        controller.showRealtimeCaptionOverlay("다음 자막.", "Next caption.");
+        const overlayBeforeDuplicate = document.getElementById("edge-translate-realtime-caption");
+        const firstRenderedLine = overlayBeforeDuplicate.querySelector("[data-role]");
+        controller.showRealtimeCaptionOverlay("중복 조각.", "second fragment");
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+            line.textContent.trim()
+        );
+        expect(lines).toEqual(["자연스럽게 합쳐진 전체 자막.", "다음 자막.", "중복 조각."]);
+    });
+
     it("coalesces live caption updates while a translation request is in flight", async () => {
         document.body.innerHTML = `
             <div class="ytp-caption-window-container">
@@ -488,7 +864,72 @@ describe("DOM page translation banner", () => {
 
         const overlay = document.getElementById("edge-translate-realtime-caption");
         expect(overlay.hidden).toBe(false);
-        expect(overlay.textContent).toBe("최신 자막.");
+        const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+            line.textContent.trim()
+        );
+        expect(lines).toEqual(["최신 자막."]);
+        expect(overlay.textContent).not.toContain("첫 번째 자막.");
+    });
+
+    it("serializes fast non-AI captions without dropping the middle pending caption", async () => {
+        document.body.innerHTML = `
+            <div class="ytp-caption-window-container">
+                <span class="ytp-caption-segment">First direct caption.</span>
+            </div>
+        `;
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        const resolvers = [];
+        controller.channel.request.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    resolvers.push(resolve);
+                })
+        );
+
+        const firstTranslation = controller.translateCurrentRealtimeCaption();
+        await Promise.resolve();
+        document.querySelector(".ytp-caption-segment").textContent = "Second direct caption.";
+        await controller.translateCurrentRealtimeCaption();
+        document.querySelector(".ytp-caption-segment").textContent = "Third direct caption.";
+        await controller.translateCurrentRealtimeCaption();
+
+        expect(controller.channel.request).toHaveBeenCalledTimes(1);
+        expect(controller._captionPendingSources).toEqual([
+            "Second direct caption.",
+            "Third direct caption.",
+        ]);
+
+        resolvers[0]({ mainMeaning: "첫 번째 직접 자막." });
+        await firstTranslation;
+        await Promise.resolve();
+        expect(controller.channel.request).toHaveBeenCalledTimes(2);
+        expect(controller.channel.request.mock.calls[1][1].text).toBe("Second direct caption.");
+
+        resolvers[1]({ mainMeaning: "두 번째 직접 자막." });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(controller.channel.request).toHaveBeenCalledTimes(3);
+        expect(controller.channel.request.mock.calls[2][1].text).toBe("Third direct caption.");
+
+        resolvers[2]({ mainMeaning: "세 번째 직접 자막." });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+            line.textContent.trim()
+        );
+        expect(lines).toEqual(["세 번째 직접 자막."]);
+        expect(overlay.textContent).not.toContain("두 번째 직접 자막.");
     });
 
     it("micro-batches live AI captions to avoid repeating prompts per tiny caption", async () => {
@@ -530,10 +971,85 @@ describe("DOM page translation banner", () => {
                 translationProfile: "realtimeCaptionBatch",
             });
             const overlay = document.getElementById("edge-translate-realtime-caption");
-            expect(overlay.textContent).toBe("두 번째 실시간 자막.");
+            const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+                line.textContent.trim()
+            );
+            expect(lines).toEqual(["첫 번째 실시간 자막.", "두 번째 실시간 자막."]);
         } finally {
             jest.useRealTimers();
         }
+    });
+
+    it("renders recent fast captions from one live batch instead of only the latest", async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = `
+                <div class="ytp-caption-window-container">
+                    <span class="ytp-caption-segment">First fast caption.</span>
+                </div>
+            `;
+            const controller = new BannerController();
+            controller._captionModeEnabled = true;
+            controller._captionBatchDelayMs = 1;
+            controller._captionOptionsCache = {
+                sl: "en",
+                tl: "ko",
+                translatorId: "LocalTranslate",
+                engine: "googleAiStudio",
+            };
+            controller._captionOptionsCacheAt = Date.now();
+            controller.channel.request.mockResolvedValueOnce({
+                mainMeaning:
+                    "[[0]] 첫 번째 빠른 자막.\n[[1]] 두 번째 빠른 자막.\n[[2]] 세 번째 빠른 자막.",
+            });
+
+            const first = controller.translateCurrentRealtimeCaption();
+            await Promise.resolve();
+            document.querySelector(".ytp-caption-segment").textContent = "Second fast caption.";
+            const second = controller.translateCurrentRealtimeCaption();
+            await Promise.resolve();
+            document.querySelector(".ytp-caption-segment").textContent = "Third fast caption.";
+            const third = controller.translateCurrentRealtimeCaption();
+            await Promise.resolve();
+
+            jest.advanceTimersByTime(controller._captionBatchDelayMs);
+            await first;
+            await second;
+            await third;
+
+            expect(controller.channel.request).toHaveBeenCalledTimes(1);
+            expect(controller.channel.request.mock.calls[0][1].text).toBe(
+                "[[0]] First fast caption.\n[[1]] Second fast caption.\n[[2]] Third fast caption."
+            );
+            const overlay = document.getElementById("edge-translate-realtime-caption");
+            const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+                line.textContent.trim()
+            );
+            expect(lines).toEqual(["두 번째 빠른 자막.", "세 번째 빠른 자막."]);
+            expect(overlay.textContent).not.toContain("첫 번째 빠른 자막.");
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("does not let an older fast caption overwrite a newer displayed caption", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.recordRealtimeCaptionVisibleSource("Older fast caption.");
+        controller.recordRealtimeCaptionVisibleSource("Newer fast caption.");
+
+        expect(controller.canDisplayRealtimeCaptionSource("Newer fast caption.")).toBe(true);
+        controller.showRealtimeCaptionOverlay("최신 빠른 자막.", "Newer fast caption.");
+
+        expect(controller.canDisplayRealtimeCaptionSource("Older fast caption.")).toBe(false);
+        if (controller.canDisplayRealtimeCaptionSource("Older fast caption.")) {
+            controller.showRealtimeCaptionOverlay("오래된 빠른 자막.", "Older fast caption.");
+        }
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.textContent).toBe("최신 빠른 자막.");
+        expect(overlay.textContent).not.toContain("오래된 빠른 자막.");
     });
 
     it("keeps live fallback translation scoped to the current visible caption", async () => {
@@ -824,6 +1340,234 @@ describe("DOM page translation banner", () => {
         expect(overlay.textContent).toBe("반복 자막입니다.");
     });
 
+    it("keeps Google realtime captions to the current visible line without repeated history", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <span class="ytp-caption-segment">I like it when nothing happens</span>
+            </div>
+        `;
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        controller.channel.request
+            .mockResolvedValueOnce({ mainMeaning: "아무것도 없을 때가 좋아" })
+            .mockResolvedValueOnce({ mainMeaning: "드라마나 애니메이션에서 듣는 대사처럼" });
+
+        await controller.translateCurrentRealtimeCaption();
+        document.querySelector(".ytp-caption-segment").textContent =
+            "like a line from a drama or animation";
+        await controller.translateCurrentRealtimeCaption();
+
+        const requests = controller.channel.request.mock.calls.map((call) => call[1].text);
+        expect(requests).toEqual([
+            "I like it when nothing happens",
+            "like a line from a drama or animation",
+        ]);
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.textContent).toBe("드라마나 애니메이션에서 듣는 대사처럼");
+        expect(overlay.textContent).not.toContain("아무것도 없을 때가 좋아");
+    });
+
+    it("keeps Google realtime captions from using context-merged prefetch cues", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <span class="ytp-caption-segment">First visible line</span>
+                <span class="ytp-caption-segment">Second visible line</span>
+            </div>
+        `;
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        controller.cacheRealtimeCaptionTranslation(
+            controller.getRealtimeCaptionCacheKey("First visible line", {
+                sl: "en",
+                tl: "ko",
+                translatorId: "GoogleTranslate",
+                engine: "",
+            }),
+            "첫 번째 선번역 자막"
+        );
+        controller.cacheRealtimeCaptionTranslation(
+            controller.getRealtimeCaptionCacheKey("Second visible line", {
+                sl: "en",
+                tl: "ko",
+                translatorId: "GoogleTranslate",
+                engine: "",
+            }),
+            "두 번째 선번역 자막"
+        );
+        controller._captionPrefetchCues = controller.addYouTubeCaptionCueGroups([
+            { startMs: 0, endMs: 5000, text: "First visible line" },
+            { startMs: 0, endMs: 5000, text: "Second visible line" },
+        ]);
+        controller.channel.request.mockResolvedValueOnce({
+            mainMeaning: "첫 번째 보이는 줄\n두 번째 보이는 줄",
+        });
+
+        await controller.translateCurrentRealtimeCaption();
+
+        expect(controller.channel.request).toHaveBeenCalledTimes(1);
+        expect(controller.channel.request.mock.calls[0][1].text).toBe(
+            "First visible line\nSecond visible line"
+        );
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.textContent).toBe("첫 번째 보이는 줄\n두 번째 보이는 줄");
+        expect(overlay.textContent).not.toContain("선번역");
+    });
+
+    it("uses one visible caption window for Google realtime captions", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <div class="caption-window">
+                    <span class="ytp-caption-segment">Primary line one</span>
+                    <span class="ytp-caption-segment">Primary line two</span>
+                </div>
+                <div class="caption-window">
+                    <span class="ytp-caption-segment">Secondary line one</span>
+                    <span class="ytp-caption-segment">Secondary line two</span>
+                </div>
+            </div>
+        `;
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        controller.channel.request.mockResolvedValueOnce({
+            mainMeaning: "첫 번째 대표 줄\n두 번째 대표 줄",
+        });
+
+        await controller.translateCurrentRealtimeCaption();
+
+        expect(controller.channel.request).toHaveBeenCalledTimes(1);
+        expect(controller.channel.request.mock.calls[0][1].text).toBe(
+            "Primary line one\nPrimary line two"
+        );
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.textContent).toBe("첫 번째 대표 줄\n두 번째 대표 줄");
+    });
+
+    it("deduplicates invisible duplicate YouTube caption segments before Google translation", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <span class="ytp-caption-segment">I want to find the proof to my existence</span>
+                <span class="ytp-caption-segment">\u200BI want to find the proof to my existence\uFEFF</span>
+            </div>
+        `;
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        controller.channel.request.mockResolvedValueOnce({
+            mainMeaning: "내 존재의 증거를 찾고 싶다",
+        });
+
+        await controller.translateCurrentRealtimeCaption();
+
+        expect(controller.channel.request).toHaveBeenCalledTimes(1);
+        expect(controller.channel.request.mock.calls[0][1].text).toBe(
+            "I want to find the proof to my existence"
+        );
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.textContent).toBe("내 존재의 증거를 찾고 싶다");
+    });
+
+    it("collapses repeated multiline YouTube caption blocks before Google translation", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <div class="caption-window">
+                    <span class="ytp-caption-segment">
+                        And I'll sing my first
+                        and last experiment
+                        \u200BAnd I'll sing my first
+                        and last experiment\uFEFF
+                    </span>
+                </div>
+            </div>
+        `;
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        controller.channel.request.mockResolvedValueOnce({
+            mainMeaning: "그리고 첫 번째 노래를 부를게요\n그리고 마지막 실험",
+        });
+
+        await controller.translateCurrentRealtimeCaption();
+
+        expect(controller.channel.request).toHaveBeenCalledTimes(1);
+        expect(controller.channel.request.mock.calls[0][1].text).toBe(
+            "And I'll sing my first\nand last experiment"
+        );
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(overlay.textContent).toBe("그리고 첫 번째 노래를 부를게요\n그리고 마지막 실험");
+    });
+
+    it("skips YouTube track prefetch for Google realtime captions", async () => {
+        document.body.innerHTML = `<video src="movie.mp4"></video>`;
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller._captionOptionsCache = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "GoogleTranslate",
+            engine: "",
+        };
+        controller._captionOptionsCacheAt = Date.now();
+        const loadSpy = jest.spyOn(controller, "loadYouTubeCaptionPrefetchCues");
+
+        await controller.prefetchYouTubeCaptionTrackAndWarmCache({ reschedule: false });
+
+        expect(loadSpy).not.toHaveBeenCalled();
+    });
+
     it("reads YouTube captions from caption windows when segment classes change", () => {
         document.body.innerHTML = `
             <div class="ytp-caption-window-container">
@@ -835,6 +1579,167 @@ describe("DOM page translation banner", () => {
         const controller = new BannerController();
 
         expect(controller.getCurrentYouTubeCaptionText()).toBe("First live line\nsecond live line");
+    });
+
+    it("prefers YouTube's active caption track when source language is auto", () => {
+        document.body.innerHTML = `<div id="movie_player"></div>`;
+        document.getElementById("movie_player").getOption = jest.fn(() => ({
+            languageCode: "en",
+            vssId: ".en",
+        }));
+        const controller = new BannerController();
+        const tracks = [
+            { languageCode: "es", vssId: ".es", baseUrl: "https://example.test/es" },
+            { languageCode: "en", vssId: ".en", baseUrl: "https://example.test/en" },
+        ];
+
+        expect(controller.pickYouTubeCaptionTrack(tracks, { sl: "auto", tl: "ko" })).toBe(
+            tracks[1]
+        );
+    });
+
+    it("prefers YouTube's active caption track over a stale source language setting", () => {
+        document.body.innerHTML = `<div id="movie_player"></div>`;
+        document.getElementById("movie_player").getOption = jest.fn(() => ({
+            languageCode: "en",
+            vss_id: ".en.uploaded",
+        }));
+        const controller = new BannerController();
+        const tracks = [
+            { languageCode: "es", vssId: ".es", baseUrl: "https://example.test/es" },
+            {
+                languageCode: "en",
+                vssId: ".en.uploaded",
+                baseUrl: "https://example.test/en-uploaded",
+            },
+            { languageCode: "en", vssId: "a.en", baseUrl: "https://example.test/en-asr" },
+        ];
+
+        expect(controller.pickYouTubeCaptionTrack(tracks, { sl: "es", tl: "ko" })).toBe(
+            tracks[1]
+        );
+    });
+
+    it("backs off empty YouTube caption tracks instead of refetching every poll", async () => {
+        window.ytInitialPlayerResponse = {
+            captions: {
+                playerCaptionsTracklistRenderer: {
+                    captionTracks: [
+                        {
+                            languageCode: "en",
+                            vssId: ".en",
+                            baseUrl: "https://example.test/captions",
+                        },
+                    ],
+                },
+            },
+        };
+        global.fetch = jest.fn(() =>
+            Promise.resolve({
+                ok: true,
+                text: () => Promise.resolve('{"events":[]}'),
+            })
+        );
+        const controller = new BannerController();
+        const options = {
+            sl: "auto",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "googleAiStudio",
+        };
+
+        await controller.loadYouTubeCaptionPrefetchCues(options);
+        await controller.loadYouTubeCaptionPrefetchCues(options);
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls through empty YouTube caption tracks until a usable track is found", async () => {
+        window.ytInitialPlayerResponse = {
+            captions: {
+                playerCaptionsTracklistRenderer: {
+                    captionTracks: [
+                        {
+                            languageCode: "es",
+                            vssId: ".es",
+                            baseUrl: "https://example.test/es",
+                        },
+                        {
+                            languageCode: "en",
+                            vssId: ".en",
+                            baseUrl: "https://example.test/en",
+                        },
+                    ],
+                },
+            },
+        };
+        global.fetch = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                text: () => Promise.resolve('{"events":[]}'),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                text: () =>
+                    Promise.resolve(
+                        '{"events":[{"tStartMs":1000,"dDurationMs":1200,"segs":[{"utf8":"Useful cue."}]}]}'
+                    ),
+            });
+        const controller = new BannerController();
+        const options = {
+            sl: "es",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "googleAiStudio",
+        };
+
+        await expect(controller.loadYouTubeCaptionPrefetchCues(options)).resolves.toBe(true);
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(controller._captionPrefetchCues).toHaveLength(1);
+        expect(controller._captionPrefetchCues[0].text).toBe("Useful cue.");
+        expect(controller._captionPrefetchTrackKey).toContain("https://example.test/en");
+    });
+
+    it("backs off an all-empty YouTube caption track list", async () => {
+        window.ytInitialPlayerResponse = {
+            captions: {
+                playerCaptionsTracklistRenderer: {
+                    captionTracks: [
+                        {
+                            languageCode: "es",
+                            vssId: ".es",
+                            baseUrl: "https://example.test/es",
+                        },
+                        {
+                            languageCode: "en",
+                            vssId: ".en",
+                            baseUrl: "https://example.test/en",
+                        },
+                    ],
+                },
+            },
+        };
+        global.fetch = jest.fn(() =>
+            Promise.resolve({
+                ok: true,
+                text: () => Promise.resolve('{"events":[]}'),
+            })
+        );
+        const controller = new BannerController();
+        const options = {
+            sl: "auto",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "googleAiStudio",
+        };
+
+        await controller.loadYouTubeCaptionPrefetchCues(options);
+        await controller.loadYouTubeCaptionPrefetchCues(options);
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(controller._captionPrefetchAllEmptyKey).toContain("https://example.test/es");
     });
 
     it("warms nearby AI captions in one marker-preserving request", async () => {
@@ -898,6 +1803,221 @@ describe("DOM page translation banner", () => {
         const overlay = document.getElementById("edge-translate-realtime-caption");
         expect(controller.channel.request).not.toHaveBeenCalled();
         expect(overlay.textContent).toBe("번역 13");
+    });
+
+    it("warms Google fast caption cache alongside AI pretranslation when configured", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+        `;
+        Object.defineProperty(document.querySelector("video"), "currentTime", {
+            configurable: true,
+            value: 12.2,
+        });
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        const options = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "openai",
+            fastTranslatorId: "GoogleTranslate",
+        };
+        controller._captionPrefetchBatchSize = 3;
+        controller._captionFastPrefetchBatchSize = 3;
+        controller._captionPrefetchCues = controller.addYouTubeCaptionCueGroups(
+            Array.from({ length: 30 }, (_, index) => ({
+                startMs: index * 1000,
+                endMs: index * 1000 + 700,
+                text: `Cue ${index + 1}.`,
+            }))
+        );
+        controller.channel.request.mockImplementation((_eventName, request) => {
+            if (request.translatorId === "GoogleTranslate") {
+                return Promise.resolve({ mainMeaning: `빠른 ${request.text}` });
+            }
+            return Promise.resolve({
+                mainMeaning: String(request.text)
+                    .split("\n")
+                    .map((line, index) => `[[${index}]] AI ${line.replace(/^\[\[\d+]]\s*/, "")}`)
+                    .join("\n"),
+            });
+        });
+
+        controller.warmRealtimeCaptionPrefetchCache(options);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const requests = controller.channel.request.mock.calls.map((call) => call[1]);
+        expect(requests.filter((request) => request.translatorId === "LocalTranslate")).toHaveLength(1);
+        expect(requests.filter((request) => request.translatorId === "GoogleTranslate")).toHaveLength(3);
+        expect(
+            controller._captionTranslationCache.get(
+                controller.getRealtimeCaptionCacheKey("Cue 13.", {
+                    sl: "en",
+                    tl: "ko",
+                    translatorId: "GoogleTranslate",
+                    engine: "",
+                })
+            )
+        ).toBe("빠른 Cue 13.");
+    });
+
+    it("shows Google fast fallback for a live AI caption without later flicker", async () => {
+        jest.useFakeTimers();
+        try {
+            const controller = new BannerController();
+            controller._captionModeEnabled = true;
+            controller._captionBatchDelayMs = 1;
+            const options = {
+                sl: "en",
+                tl: "ko",
+                translatorId: "LocalTranslate",
+                engine: "googleAiStudio",
+                fastTranslatorId: "GoogleTranslate",
+            };
+            controller.recordRealtimeCaptionVisibleSource("Very fast caption.");
+            controller._captionLastSource = "Very fast caption.";
+            let resolveAi;
+            controller.channel.request.mockImplementation((_eventName, request) => {
+                if (request.translatorId === "GoogleTranslate") {
+                    return Promise.resolve({ mainMeaning: "빠른 구글 자막." });
+                }
+                return new Promise((resolve) => {
+                    resolveAi = resolve;
+                });
+            });
+
+            const translation = controller.translateRealtimeCaptionSource(
+                "Very fast caption.",
+                options
+            );
+            await Promise.resolve();
+            await Promise.resolve();
+
+            let overlay = document.getElementById("edge-translate-realtime-caption");
+            expect(overlay.textContent).toBe("빠른 구글 자막.");
+
+            jest.advanceTimersByTime(controller._captionBatchDelayMs);
+            await Promise.resolve();
+            resolveAi({ mainMeaning: "[[0]] 더 좋은 AI 자막." });
+            await translation;
+
+            overlay = document.getElementById("edge-translate-realtime-caption");
+            expect(overlay.textContent).toBe("빠른 구글 자막.");
+            expect(overlay.textContent).not.toContain("더 좋은 AI 자막.");
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("uses prefetched active cue translations for multi-line visible captions", async () => {
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <span class="ytp-caption-segment">First active cue.</span>
+                <span class="ytp-caption-segment">Second active cue.</span>
+            </div>
+        `;
+        const video = document.querySelector("video");
+        Object.defineProperty(video, "currentTime", {
+            configurable: true,
+            value: 10,
+        });
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        const options = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "googleAiStudio",
+        };
+        controller._captionOptionsCache = options;
+        controller._captionOptionsCacheAt = Date.now();
+        controller._captionPrefetchCues = controller.addYouTubeCaptionCueGroups([
+            {
+                startMs: 9500,
+                endMs: 10500,
+                text: "First active cue.",
+            },
+            {
+                startMs: 9900,
+                endMs: 11000,
+                text: "Second active cue.",
+            },
+        ]);
+        controller.cacheRealtimeCaptionTranslation(
+            controller.getRealtimeCaptionCacheKey("First active cue.", options),
+            "첫 번째 활성 자막."
+        );
+        controller.cacheRealtimeCaptionTranslation(
+            controller.getRealtimeCaptionCacheKey("Second active cue.", options),
+            "두 번째 활성 자막."
+        );
+
+        await controller.translateCurrentRealtimeCaption();
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        expect(controller.channel.request).not.toHaveBeenCalled();
+        expect(overlay.textContent).toBe("첫 번째 활성 자막.\n두 번째 활성 자막.");
+        expect(controller._captionDisplayItems.at(-1).text).toBe(
+            "첫 번째 활성 자막.\n두 번째 활성 자막."
+        );
+    });
+
+    it("records caption prefetch and display debug events when enabled", async () => {
+        localStorage.setItem("edgeTranslate.captionDebug", "1");
+        document.body.innerHTML = `
+            <button class="ytp-subtitles-button" aria-pressed="true"></button>
+            <video src="movie.mp4"></video>
+            <div class="ytp-caption-window-container">
+                <span class="ytp-caption-segment">Debug cue.</span>
+            </div>
+        `;
+        Object.defineProperty(document.querySelector("video"), "currentTime", {
+            configurable: true,
+            value: 4,
+        });
+
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+        controller.isYouTubePage = () => true;
+        const options = {
+            sl: "en",
+            tl: "ko",
+            translatorId: "LocalTranslate",
+            engine: "googleAiStudio",
+        };
+        controller._captionOptionsCache = options;
+        controller._captionOptionsCacheAt = Date.now();
+        controller._captionPrefetchCues = controller.addYouTubeCaptionCueGroups([
+            {
+                startMs: 3500,
+                endMs: 4500,
+                text: "Debug cue.",
+            },
+        ]);
+        controller.cacheRealtimeCaptionTranslation(
+            controller.getRealtimeCaptionCacheKey("Debug cue.", options),
+            "디버그 자막."
+        );
+
+        await controller.translateCurrentRealtimeCaption();
+
+        const events = window.__edgeTranslateCaptionDebugEvents || [];
+        expect(events.map((event) => event.event)).toEqual(
+            expect.arrayContaining(["display:cache-hit", "display:show"])
+        );
+        expect(events.find((event) => event.event === "display:cache-hit")).toMatchObject({
+            mode: "direct",
+        });
+        expect(JSON.parse(document.getElementById("edge-translate-caption-debug-log").textContent))
+            .toEqual(expect.arrayContaining([expect.objectContaining({ event: "display:show" })]));
     });
 
     it("merges tiny final page-translation batches into the previous request", () => {

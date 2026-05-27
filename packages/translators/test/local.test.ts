@@ -160,6 +160,82 @@ describe("LocalTranslator", () => {
         expect(body.contents[0].parts[0].text).toContain("hello there.");
     });
 
+    test("translates with an OpenAI-compatible chat completions endpoint", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [
+                    {
+                        message: { content: "안녕" },
+                        finish_reason: "stop",
+                    },
+                ],
+                usage: {
+                    prompt_tokens: 21,
+                    completion_tokens: 3,
+                    total_tokens: 24,
+                },
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleApiKey: "local-key",
+            openaiCompatibleModel: "local-model",
+        });
+        const result = await translator.translate("hello there.", "en", "ko");
+
+        expect(result).toMatchObject({
+            originalText: "hello there.",
+            mainMeaning: "안녕",
+            sourceLanguage: "en",
+            targetLanguage: "ko",
+            tokenUsage: {
+                inputTokens: 21,
+                outputTokens: 3,
+                totalTokens: 24,
+            },
+        });
+        expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:1234/v1/chat/completions");
+        expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+            Authorization: "Bearer local-key",
+            "Content-Type": "application/json",
+        });
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.model).toBe("local-model");
+        expect(body.temperature).toBe(0);
+        expect(body.max_tokens).toBeGreaterThanOrEqual(512);
+        expect(body.messages[0].content).toContain("high-fidelity translation engine");
+        expect(body.messages[1].content).toContain("Source language: English");
+        expect(body.messages[1].content).toContain("Target language: Korean");
+    });
+
+    test("normalizes OpenAI-compatible base URLs and allows local endpoints without API keys", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "안녕" }, finish_reason: "stop" }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234",
+            openaiCompatibleModel: "local-model",
+        });
+        await translator.translate("hello.", "en", "ko");
+
+        expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:1234/v1/chat/completions");
+        expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    });
+
     test("uses ultra-light Google AI Studio prompts for realtime captions", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
@@ -186,13 +262,21 @@ describe("LocalTranslator", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.systemInstruction.parts[0].text).toBe(
-            "Translate YouTube captions as natural spoken subtitles. Keep order and line breaks. Output only translation."
+            "You are a subtitle translator. Return only translated subtitles."
         );
-        expect(body.contents[0].parts[0].text).toContain("Subtitle English->Korean.");
         expect(body.contents[0].parts[0].text).toContain(
-            "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese."
+            "Task: English -> Korean YouTube subtitle."
         );
-        expect(body.contents[0].parts[0].text).toContain("Keep line breaks, names, numbers, URLs.");
+        expect(body.contents[0].parts[0].text).toContain(
+            "Style: Use natural target-language spoken-subtitle style. Avoid stiff literal translation."
+        );
+        expect(body.contents[0].parts[0].text).toContain(
+            "Reorder clauses for natural target-language timing."
+        );
+        expect(body.contents[0].parts[0].text).toContain(
+            "Rules: translate meaning, not word order; if fragment, keep a natural subtitle fragment; keep line breaks; preserve names, numbers, URLs; no notes."
+        );
+        expect(body.contents[0].parts[0].text).not.toContain("Korean:");
         expect(body.contents[0].parts[0].text).not.toContain(
             "Preserve proper nouns and official names"
         );
@@ -238,13 +322,20 @@ describe("LocalTranslator", () => {
 
         expect(result.mainMeaning).toContain("[[0]] 안녕하세요.");
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.contents[0].parts[0].text).toContain("Subtitle batch English->Korean.");
         expect(body.contents[0].parts[0].text).toContain(
-            "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese."
+            "Task: English -> Korean YouTube subtitle cues."
         );
         expect(body.contents[0].parts[0].text).toContain(
-            "Translate each [[n]] independently; keep every marker once, same order; no merge."
+            "Style: Use natural target-language spoken-subtitle style. Avoid stiff literal translation."
         );
+        expect(body.contents[0].parts[0].text).toContain(
+            "Reorder clauses for natural target-language timing."
+        );
+        expect(body.contents[0].parts[0].text).toContain(
+            "Rules: use all cues as context; keep each [[n]] marker once and in order; each marker gets the natural subtitle for that moment; translate meaning, not word order; avoid repeated or missing meaning; preserve names, numbers, URLs; no notes."
+        );
+        expect(body.contents[0].parts[0].text).not.toContain("preserve cue boundaries");
+        expect(body.contents[0].parts[0].text).not.toContain("Korean:");
         expect(body.contents[0].parts[0].text).toContain("[[1]] Let's get started.");
         expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
     });
@@ -927,13 +1018,19 @@ describe("LocalTranslator", () => {
         expect(result.mainMeaning).toBe("곧 시작합니다.");
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.messages[0].content).toBe(
-            "Translate YouTube captions as natural spoken subtitles. Keep order and line breaks. Output only translation."
+            "You are a subtitle translator. Return only translated subtitles."
         );
-        expect(body.messages[1].content).toContain("Subtitle English->Korean.");
+        expect(body.messages[1].content).toContain("Task: English -> Korean YouTube subtitle.");
         expect(body.messages[1].content).toContain(
-            "Korean: conversational subtitle style; translate idioms naturally, not word-by-word; avoid stiff noun-ending literalese."
+            "Style: Use natural target-language spoken-subtitle style. Avoid stiff literal translation."
         );
-        expect(body.messages[1].content).toContain("Keep line breaks, names, numbers, URLs.");
+        expect(body.messages[1].content).toContain(
+            "Reorder clauses for natural target-language timing."
+        );
+        expect(body.messages[1].content).toContain(
+            "Rules: translate meaning, not word order; if fragment, keep a natural subtitle fragment; keep line breaks; preserve names, numbers, URLs; no notes."
+        );
+        expect(body.messages[1].content).not.toContain("Korean:");
         expect(body.messages[1].content).not.toContain("Preserve proper nouns and official names");
         expect(body.reasoning_effort).toBe("none");
         expect(body.max_completion_tokens).toBe(96);

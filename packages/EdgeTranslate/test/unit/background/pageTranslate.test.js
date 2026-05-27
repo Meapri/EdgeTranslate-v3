@@ -67,6 +67,33 @@ describe("pageTranslate module", () => {
         });
     });
 
+    it("runs OpenAI-compatible AI page translation when selected", async () => {
+        getOrSetDefaultSettings.mockResolvedValue({
+            DefaultPageTranslator: "AIPageTranslate",
+            languageSetting: { sl: "en", tl: "ko" },
+            LocalTranslatorConfig: {
+                enabled: true,
+                mode: "openaiCompatible",
+                openaiCompatibleModel: "local-model",
+            },
+        });
+        const channel = { emitToTabs: jest.fn() };
+        chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
+
+        translatePage(channel);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(channel.emitToTabs).toHaveBeenCalledTimes(1);
+        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
+            engine: "openaiCompatible",
+            model: "local-model",
+            translatorId: "LocalTranslate",
+            sl: "en",
+            tl: "ko",
+        });
+    });
+
     it("routes legacy AI page translation values to the new AI page translator", async () => {
         getOrSetDefaultSettings.mockResolvedValue({
             DefaultPageTranslator: "LocalPageTranslate",

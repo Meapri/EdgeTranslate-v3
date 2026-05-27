@@ -335,6 +335,10 @@
         "message": "Bing Переводчик",
         "description": "Bing Переводчик"
     },
+    "BingTranslateDescription": {
+        "message": "Сбалансированный веб-перевод",
+        "description": "Short menu description for Bing Translate."
+    },
     "BingTranslateShort": {
         "message": "Bing",
         "description": "Сокращение Bing Переводчик"
@@ -1374,6 +1378,30 @@
         "message": "Realtime subtitle translation",
         "description": "Translate visible YouTube captions in realtime."
     },
+    "RealtimeCaptionSettings": {
+        "message": "YouTube subtitle translation",
+        "description": "Settings for realtime YouTube subtitle translation."
+    },
+    "RealtimeCaptionDraggableOverlay": {
+        "message": "Allow dragging the subtitle window",
+        "description": "Enable moving the realtime subtitle overlay with the mouse."
+    },
+    "RealtimeCaptionTranslatorMode": {
+        "message": "Subtitle translator",
+        "description": "Translator mode for realtime YouTube subtitles."
+    },
+    "RealtimeCaptionTranslatorModeAI": {
+        "message": "AI",
+        "description": "Use the configured AI translator for realtime subtitles."
+    },
+    "RealtimeCaptionTranslatorModeGoogle": {
+        "message": "Google",
+        "description": "Use Google Translate for realtime subtitles."
+    },
+    "RealtimeCaptionSettingsHelp": {
+        "message": "AI uses the AI Translate provider and model above. Google is faster and cheaper, while AI can be more natural when the subtitles are not too fast.",
+        "description": "Realtime subtitle translation help text."
+    },
     "PreciseTranslatorConfig": {
         "message": "Precise translation model",
         "description": "Settings for the precise translation profile."
@@ -1393,5 +1421,25 @@
     "PreciseTranslatorHelp": {
         "message": "Precise translation reuses the same API keys as AI Translate, but can use a different provider, model, and reasoning level.",
         "description": "Precise translation help text."
+    },
+    "LocalTranslatorOpenAICompatibleBaseUrl": {
+        "message": "Base URL",
+        "description": "Base URL for an OpenAI-compatible API."
+    },
+    "LocalTranslatorOpenAICompatibleApiKey": {
+        "message": "API key (optional)",
+        "description": "Optional API key for an OpenAI-compatible API."
+    },
+    "LocalTranslatorOpenAICompatibleModel": {
+        "message": "Model",
+        "description": "Model name for an OpenAI-compatible API."
+    },
+    "LocalTranslatorModeOpenAICompatible": {
+        "message": "OpenAI-compatible API",
+        "description": "Use a user-provided OpenAI-compatible chat completions endpoint."
+    },
+    "PreciseTranslatorOpenAICompatibleModel": {
+        "message": "Precise compatible model",
+        "description": "OpenAI-compatible model for precise translation."
     }
 }

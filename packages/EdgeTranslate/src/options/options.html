@@ -16,804 +16,1095 @@
                 Edge Translate
             </header>
             <div class="content">
-                <label
-                    for="content-settings"
-                    class="setting-title i18n"
-                    data-i18n-name="ContentSettings"
-                ></label>
-                <div id="content-settings">
-                    <div class="row">
-                        <div class="column">
-                            <label
-                                for="source-pronunciation-icon"
-                                class="checked-label i18n"
-                                data-i18n-name="SourcePronunciationIcon"
+                <div class="main-layout">
+                    <aside class="sidebar">
+                        <button class="nav-tab active" data-tab="general">
+                            <span class="nav-icon nav-icon-settings" aria-hidden="true"></span>
+                            <span class="nav-label i18n" data-i18n-name="GeneralSettings"
+                                >일반 설정</span
                             >
-                                <input
-                                    type="checkbox"
-                                    setting-type="switch"
-                                    setting-path="TranslateResultFilter sPronunciationIcon"
-                                    class="checkbox"
-                                    id="source-pronunciation-icon"
-                                />
-                            </label>
+                        </button>
+                        <button class="nav-tab" data-tab="engines">
+                            <span class="nav-icon nav-icon-engines" aria-hidden="true"></span>
+                            <span class="nav-label i18n" data-i18n-name="TranslatorSettings"
+                                >번역 엔진 설정</span
+                            >
+                        </button>
+                        <button class="nav-tab" data-tab="captions">
+                            <span class="nav-icon nav-icon-captions" aria-hidden="true"></span>
+                            <span class="nav-label i18n" data-i18n-name="RealtimeCaptionSettings"
+                                >YouTube 자막 번역</span
+                            >
+                        </button>
+                    </aside>
+                    <div class="tab-content">
+                        <div class="tab-pane active" id="tab-general">
+                            <div class="card-container">
+                                <label
+                                    for="content-settings"
+                                    class="setting-title i18n"
+                                    data-i18n-name="ContentSettings"
+                                ></label>
+                                <div id="content-settings">
+                                    <div class="row">
+                                        <div class="column">
+                                            <label
+                                                for="source-pronunciation-icon"
+                                                class="checked-label i18n"
+                                                data-i18n-name="SourcePronunciationIcon"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    setting-type="switch"
+                                                    setting-path="TranslateResultFilter sPronunciationIcon"
+                                                    class="checkbox"
+                                                    id="source-pronunciation-icon"
+                                                />
+                                            </label>
+                                        </div>
+                                        <div class="column">
+                                            <label
+                                                for="target-pronunciation-icon"
+                                                class="checked-label i18n"
+                                                data-i18n-name="TargetPronunciationIcon"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    setting-type="switch"
+                                                    setting-path="TranslateResultFilter tPronunciationIcon"
+                                                    class="checkbox"
+                                                    id="target-pronunciation-icon"
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <label
+                                                for="original-text"
+                                                class="checked-label i18n"
+                                                data-i18n-name="OriginalText"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    setting-type="switch"
+                                                    setting-path="TranslateResultFilter originalText"
+                                                    class="checkbox"
+                                                    id="original-text"
+                                                />
+                                            </label>
+                                        </div>
+                                        <div class="column">
+                                            <label
+                                                for="detailed-meanings"
+                                                class="checked-label i18n"
+                                                data-i18n-name="DetailedMeanings"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    setting-type="switch"
+                                                    setting-path="TranslateResultFilter detailedMeanings"
+                                                    class="checkbox"
+                                                    id="detailed-meanings"
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <label
+                                                for="definitions"
+                                                class="checked-label i18n"
+                                                data-i18n-name="Definitions"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    setting-type="switch"
+                                                    setting-path="TranslateResultFilter definitions"
+                                                    class="checkbox"
+                                                    id="definitions"
+                                                />
+                                            </label>
+                                        </div>
+                                        <div class="column">
+                                            <label
+                                                for="examples"
+                                                class="checked-label i18n"
+                                                data-i18n-name="Examples"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    setting-type="switch"
+                                                    setting-path="TranslateResultFilter examples"
+                                                    class="checkbox"
+                                                    id="examples"
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-container">
+                                <label
+                                    for="layout-settings"
+                                    class="setting-title i18n"
+                                    data-i18n-name="LayoutSettings"
+                                ></label>
+                                <div id="layout-settings">
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                value="resize"
+                                                setting-type="switch"
+                                                setting-path="LayoutSettings Resize"
+                                                class="switch"
+                                                id="Resize"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="Resize"
+                                                class="checked-label i18n"
+                                                data-i18n-name="ResizeSetting"
+                                            ></label>
+                                        </div>
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                value="rtl"
+                                                setting-type="switch"
+                                                setting-path="LayoutSettings RTL"
+                                                class="switch"
+                                                id="RTL"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="RTL"
+                                                class="checked-label i18n"
+                                                data-i18n-name="RTLSetting"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                value="FoldLongContent"
+                                                setting-type="switch"
+                                                setting-path="LayoutSettings FoldLongContent"
+                                                class="switch"
+                                                id="FoldLongContent"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="FoldLongContent"
+                                                class="checked-label i18n"
+                                                data-i18n-name="FoldLongContentSetting"
+                                            ></label>
+                                        </div>
+                                        <div class="column">
+                                            <label
+                                                for="select-translate-position"
+                                                class="checked-label i18n"
+                                                data-i18n-name="SelectTranslatePosition"
+                                                data-insert-pos="afterBegin"
+                                            >
+                                                <select
+                                                    setting-type="select"
+                                                    id="select-translate-position"
+                                                    value="SelectTranslatePosition"
+                                                    setting-path="LayoutSettings SelectTranslatePosition"
+                                                >
+                                                    <option
+                                                        value="TopRight"
+                                                        data-i18n-name="TopRight"
+                                                        class="i18n"
+                                                    ></option>
+                                                    <option
+                                                        value="TopLeft"
+                                                        data-i18n-name="TopLeft"
+                                                        class="i18n"
+                                                    ></option>
+                                                    <option
+                                                        value="BottomRight"
+                                                        data-i18n-name="BottomRight"
+                                                        class="i18n"
+                                                    ></option>
+                                                    <option
+                                                        value="BottomLeft"
+                                                        data-i18n-name="BottomLeft"
+                                                        class="i18n"
+                                                    ></option>
+                                                </select>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-container">
+                                <label
+                                    for="other-settings"
+                                    class="setting-title i18n"
+                                    data-i18n-name="OtherSettings"
+                                ></label>
+                                <div id="other-settings">
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="OtherSettings SelectTranslate"
+                                                class="switch"
+                                                id="select-translate"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="select-translate"
+                                                class="checked-label i18n"
+                                                data-i18n-name="SelectTranslate"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="OtherSettings TranslateAfterSelect"
+                                                class="switch"
+                                                id="translate-after-select"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="translate-after-select"
+                                                class="checked-label i18n"
+                                                data-i18n-name="TranslateAfterSelect"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="OtherSettings TranslateAfterDblClick"
+                                                class="switch"
+                                                id="translate-after-dbl-click"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="translate-after-dbl-click"
+                                                class="checked-label i18n"
+                                                data-i18n-name="TranslateAfterDblClick"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="OtherSettings CancelTextSelection"
+                                                class="switch"
+                                                id="cancel-text-selection"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="cancel-text-selection"
+                                                class="checked-label i18n"
+                                                data-i18n-name="CancelTextSelection"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="column">
-                            <label
-                                for="target-pronunciation-icon"
-                                class="checked-label i18n"
-                                data-i18n-name="TargetPronunciationIcon"
-                            >
-                                <input
-                                    type="checkbox"
-                                    setting-type="switch"
-                                    setting-path="TranslateResultFilter tPronunciationIcon"
-                                    class="checkbox"
-                                    id="target-pronunciation-icon"
-                                />
-                            </label>
+                        <div class="tab-pane" id="tab-captions">
+                            <div class="card-container">
+                                <label
+                                    for="caption-settings"
+                                    class="setting-title i18n"
+                                    data-i18n-name="RealtimeCaptionSettings"
+                                ></label>
+                                <div id="caption-settings">
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="OtherSettings RealtimeCaptionTranslate"
+                                                class="switch"
+                                                id="realtime-caption-translate"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="realtime-caption-translate"
+                                                class="checked-label i18n"
+                                                data-i18n-name="RealtimeCaptionTranslate"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <label
+                                                for="realtime-caption-translator-mode"
+                                                class="checked-label i18n"
+                                                data-i18n-name="RealtimeCaptionTranslatorMode"
+                                                data-insert-pos="afterBegin"
+                                            >
+                                                <select
+                                                    setting-type="select"
+                                                    setting-path="RealtimeCaptionConfig translatorMode"
+                                                    id="realtime-caption-translator-mode"
+                                                >
+                                                    <option
+                                                        value="ai"
+                                                        class="i18n"
+                                                        data-i18n-name="RealtimeCaptionTranslatorModeAI"
+                                                    ></option>
+                                                    <option
+                                                        value="google"
+                                                        class="i18n"
+                                                        data-i18n-name="RealtimeCaptionTranslatorModeGoogle"
+                                                    ></option>
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="RealtimeCaptionConfig draggableOverlay"
+                                                class="switch"
+                                                id="realtime-caption-draggable-overlay"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="realtime-caption-draggable-overlay"
+                                                class="checked-label i18n"
+                                                data-i18n-name="RealtimeCaptionDraggableOverlay"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <p
+                                        class="i18n"
+                                        data-i18n-name="RealtimeCaptionSettingsHelp"
+                                    ></p>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <label
-                                for="original-text"
-                                class="checked-label i18n"
-                                data-i18n-name="OriginalText"
-                            >
-                                <input
-                                    type="checkbox"
-                                    setting-type="switch"
-                                    setting-path="TranslateResultFilter originalText"
-                                    class="checkbox"
-                                    id="original-text"
-                                />
-                            </label>
-                        </div>
-                        <div class="column">
-                            <label
-                                for="detailed-meanings"
-                                class="checked-label i18n"
-                                data-i18n-name="DetailedMeanings"
-                            >
-                                <input
-                                    type="checkbox"
-                                    setting-type="switch"
-                                    setting-path="TranslateResultFilter detailedMeanings"
-                                    class="checkbox"
-                                    id="detailed-meanings"
-                                />
-                            </label>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <label
-                                for="definitions"
-                                class="checked-label i18n"
-                                data-i18n-name="Definitions"
-                            >
-                                <input
-                                    type="checkbox"
-                                    setting-type="switch"
-                                    setting-path="TranslateResultFilter definitions"
-                                    class="checkbox"
-                                    id="definitions"
-                                />
-                            </label>
-                        </div>
-                        <div class="column">
-                            <label
-                                for="examples"
-                                class="checked-label i18n"
-                                data-i18n-name="Examples"
-                            >
-                                <input
-                                    type="checkbox"
-                                    setting-type="switch"
-                                    setting-path="TranslateResultFilter examples"
-                                    class="checkbox"
-                                    id="examples"
-                                />
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <label class="setting-title i18n" data-i18n-name="LocalTranslatorConfig"></label>
-                <div class="row">
-                    <div class="column">
-                        <input
-                            type="checkbox"
-                            setting-type="switch"
-                            setting-path="LocalTranslatorConfig enabled"
-                            class="switch"
-                            id="local-translator-enabled"
-                        />
-                        <span class="space"></span>
-                        <label
-                            for="local-translator-enabled"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorEnabled"
-                        ></label>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="column">
-                        <label
-                            for="local-translator-mode"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorMode"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig mode"
-                                id="local-translator-mode"
-                            >
-                                <option
-                                    value="chromeBuiltin"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeChromeBuiltin"
-                                ></option>
-                                <option
-                                    value="googleAiStudio"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeGoogleAiStudio"
-                                ></option>
-                                <option
-                                    value="openai"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeOpenAI"
-                                ></option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-                <div class="row" id="local-translator-google-settings">
-                    <div class="column provider-heading" data-local-mode="googleAiStudio">
-                        <span class="provider-badge provider-badge-gemini" aria-hidden="true">
-                            <img src="../brand/gemini.svg" alt="" />
-                        </span>
-                        <span>Google AI Studio</span>
-                    </div>
-                    <div class="column" data-local-mode="googleAiStudio">
-                        <label
-                            for="local-translator-api-key"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorApiKey"
-                            data-insert-pos="afterBegin"
-                        >
-                            <input
-                                type="password"
-                                setting-type="text"
-                                setting-path="LocalTranslatorConfig apiKey"
-                                id="local-translator-api-key"
-                                autocomplete="off"
-                            />
-                        </label>
-                    </div>
-                    <div class="column" data-local-mode="googleAiStudio">
-                        <label
-                            for="local-translator-model"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorModel"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig model"
-                                id="local-translator-model"
-                            >
-                                <option value="gemini-3.5-flash">gemini-3.5-flash</option>
-                                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-                                <option value="gemini-3.1-flash-lite-preview">
-                                    gemini-3.1-flash-lite-preview
-                                </option>
-                                <option value="gemini-3.1-pro-preview">
-                                    gemini-3.1-pro-preview
-                                </option>
-                                <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
-                                <option value="gemini-3-flash-preview">
-                                    gemini-3-flash-preview
-                                </option>
-                                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                                <option value="gemini-flash-latest">gemini-flash-latest</option>
-                                <option value="gemini-flash-lite-latest">
-                                    gemini-flash-lite-latest
-                                </option>
-                                <option value="gemini-pro-latest">gemini-pro-latest</option>
-                                <option value="gemma-4-31b-it">gemma-4-31b-it</option>
-                                <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="column" data-local-mode="googleAiStudio">
-                        <label
-                            for="local-translator-reasoning-level"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorReasoningLevel"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig reasoningLevel"
-                                id="local-translator-reasoning-level"
-                            >
-                                <option value="auto">Auto</option>
-                                <option value="none">None</option>
-                                <option value="minimal">Minimal</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="column" data-local-mode="googleAiStudio">
-                        <label
-                            for="local-translator-timeout"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorTimeoutMs"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig timeoutMs"
-                                id="local-translator-timeout"
-                            >
-                                <option value="30000">30s</option>
-                                <option value="60000">60s</option>
-                                <option value="120000">120s</option>
-                                <option value="180000">180s</option>
-                                <option value="300000">300s</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-                <div class="row" id="local-translator-openai-settings">
-                    <div class="column provider-heading" data-local-mode="openai">
-                        <span class="provider-badge provider-badge-chatgpt" aria-hidden="true">
-                            <img src="../brand/chatgpt.svg" alt="" />
-                        </span>
-                        <span>OpenAI</span>
-                    </div>
-                    <div class="column" data-local-mode="openai">
-                        <label
-                            for="local-translator-openai-api-key"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorOpenAIApiKey"
-                            data-insert-pos="afterBegin"
-                        >
-                            <input
-                                type="password"
-                                setting-type="text"
-                                setting-path="LocalTranslatorConfig openaiApiKey"
-                                id="local-translator-openai-api-key"
-                                autocomplete="off"
-                            />
-                        </label>
-                    </div>
-                    <div class="column" data-local-mode="openai">
-                        <label
-                            for="local-translator-openai-model"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorOpenAIModel"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig openaiModel"
-                                id="local-translator-openai-model"
-                            >
-                                <option value="gpt-5.5">gpt-5.5</option>
-                                <option value="gpt-5.5-2026-04-23">gpt-5.5-2026-04-23</option>
-                                <option value="gpt-5.4">gpt-5.4</option>
-                                <option value="gpt-5.4-2026-03-05">gpt-5.4-2026-03-05</option>
-                                <option value="gpt-5.4-mini">gpt-5.4-mini</option>
-                                <option value="gpt-5.4-mini-2026-03-17">
-                                    gpt-5.4-mini-2026-03-17
-                                </option>
-                                <option value="gpt-5.4-nano">gpt-5.4-nano</option>
-                                <option value="gpt-5.4-nano-2026-03-17">
-                                    gpt-5.4-nano-2026-03-17
-                                </option>
-                                <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
-                                <option value="gpt-5.2">gpt-5.2</option>
-                                <option value="gpt-5.2-2025-12-11">gpt-5.2-2025-12-11</option>
-                                <option value="gpt-5.2-chat-latest">gpt-5.2-chat-latest</option>
-                                <option value="gpt-5.1">gpt-5.1</option>
-                                <option value="gpt-5.1-2025-11-13">gpt-5.1-2025-11-13</option>
-                                <option value="gpt-5.1-chat-latest">gpt-5.1-chat-latest</option>
-                                <option value="gpt-5">gpt-5</option>
-                                <option value="gpt-5-2025-08-07">gpt-5-2025-08-07</option>
-                                <option value="gpt-5-mini">gpt-5-mini</option>
-                                <option value="gpt-5-mini-2025-08-07">gpt-5-mini-2025-08-07</option>
-                                <option value="gpt-5-nano">gpt-5-nano</option>
-                                <option value="gpt-5-nano-2025-08-07">gpt-5-nano-2025-08-07</option>
-                                <option value="gpt-5-chat-latest">gpt-5-chat-latest</option>
-                                <option value="gpt-4.1">gpt-4.1</option>
-                                <option value="gpt-4.1-2025-04-14">gpt-4.1-2025-04-14</option>
-                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                                <option value="gpt-4.1-mini-2025-04-14">
-                                    gpt-4.1-mini-2025-04-14
-                                </option>
-                                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-                                <option value="gpt-4.1-nano-2025-04-14">
-                                    gpt-4.1-nano-2025-04-14
-                                </option>
-                                <option value="gpt-4o">gpt-4o</option>
-                                <option value="gpt-4o-2024-11-20">gpt-4o-2024-11-20</option>
-                                <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06</option>
-                                <option value="gpt-4o-2024-05-13">gpt-4o-2024-05-13</option>
-                                <option value="gpt-4o-mini">gpt-4o-mini</option>
-                                <option value="gpt-4o-mini-2024-07-18">
-                                    gpt-4o-mini-2024-07-18
-                                </option>
-                                <option value="gpt-4-turbo">gpt-4-turbo</option>
-                                <option value="gpt-4-turbo-2024-04-09">
-                                    gpt-4-turbo-2024-04-09
-                                </option>
-                                <option value="gpt-4">gpt-4</option>
-                                <option value="gpt-4-0613">gpt-4-0613</option>
-                                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                                <option value="gpt-3.5-turbo-0125">gpt-3.5-turbo-0125</option>
-                                <option value="gpt-3.5-turbo-1106">gpt-3.5-turbo-1106</option>
-                                <option value="gpt-3.5-turbo-16k">gpt-3.5-turbo-16k</option>
-                                <option value="o1">o1</option>
-                                <option value="o1-2024-12-17">o1-2024-12-17</option>
-                                <option value="o3">o3</option>
-                                <option value="o3-2025-04-16">o3-2025-04-16</option>
-                                <option value="o3-mini">o3-mini</option>
-                                <option value="o3-mini-2025-01-31">o3-mini-2025-01-31</option>
-                                <option value="o4-mini">o4-mini</option>
-                                <option value="o4-mini-2025-04-16">o4-mini-2025-04-16</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="column" data-local-mode="openai">
-                        <label
-                            for="local-translator-openai-reasoning-effort"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig openaiReasoningEffort"
-                                id="local-translator-openai-reasoning-effort"
-                            >
-                                <option value="auto">Auto</option>
-                                <option value="none">None</option>
-                                <option value="minimal">Minimal</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="xhigh">XHigh</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="column" data-local-mode="openai">
-                        <label
-                            for="local-translator-openai-timeout"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorTimeoutMs"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="LocalTranslatorConfig timeoutMs"
-                                id="local-translator-openai-timeout"
-                            >
-                                <option value="30000">30s</option>
-                                <option value="60000">60s</option>
-                                <option value="120000">120s</option>
-                                <option value="180000">180s</option>
-                                <option value="300000">300s</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-                <p class="i18n" data-i18n-name="LocalTranslatorHelp"></p>
-
-                <label class="setting-title i18n" data-i18n-name="PreciseTranslatorConfig"></label>
-                <div class="row">
-                    <div class="column">
-                        <label
-                            for="precise-translator-mode"
-                            class="checked-label i18n"
-                            data-i18n-name="PreciseTranslatorMode"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="PreciseTranslatorConfig mode"
-                                id="precise-translator-mode"
-                            >
-                                <option
-                                    value="chromeBuiltin"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeChromeBuiltin"
-                                ></option>
-                                <option
-                                    value="googleAiStudio"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeGoogleAiStudio"
-                                ></option>
-                                <option
-                                    value="openai"
-                                    class="i18n"
-                                    data-i18n-name="LocalTranslatorModeOpenAI"
-                                ></option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-                <div class="row" id="precise-translator-google-settings">
-                    <div class="column" data-precise-mode="googleAiStudio">
-                        <label
-                            for="precise-translator-model"
-                            class="checked-label i18n"
-                            data-i18n-name="PreciseTranslatorModel"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="PreciseTranslatorConfig model"
-                                id="precise-translator-model"
-                                data-model-options="googleAiStudio"
-                            ></select>
-                        </label>
-                    </div>
-                    <div class="column" data-precise-mode="googleAiStudio">
-                        <label
-                            for="precise-translator-reasoning-level"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorReasoningLevel"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="PreciseTranslatorConfig reasoningLevel"
-                                id="precise-translator-reasoning-level"
-                            >
-                                <option value="auto">Auto</option>
-                                <option value="none">None</option>
-                                <option value="minimal">Minimal</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-                <div class="row" id="precise-translator-openai-settings">
-                    <div class="column" data-precise-mode="openai">
-                        <label
-                            for="precise-translator-openai-model"
-                            class="checked-label i18n"
-                            data-i18n-name="PreciseTranslatorOpenAIModel"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="PreciseTranslatorConfig openaiModel"
-                                id="precise-translator-openai-model"
-                                data-model-options="openai"
-                            ></select>
-                        </label>
-                    </div>
-                    <div class="column" data-precise-mode="openai">
-                        <label
-                            for="precise-translator-openai-reasoning-effort"
-                            class="checked-label i18n"
-                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                setting-type="select"
-                                setting-path="PreciseTranslatorConfig openaiReasoningEffort"
-                                id="precise-translator-openai-reasoning-effort"
-                            >
-                                <option value="auto">Auto</option>
-                                <option value="none">None</option>
-                                <option value="minimal">Minimal</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="xhigh">XHigh</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
-                <p class="i18n" data-i18n-name="PreciseTranslatorHelp"></p>
-
-                <label class="setting-title i18n" data-i18n-name="HybridTranslatorConfig"></label>
-                <div class="row">
-                    <div class="column">
-                        <label
-                            for="main-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="MainTranslator"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                id="main-translator"
-                                class="translator-config"
-                                data-affected="originalText mainMeaning"
-                            ></select>
-                        </label>
-                    </div>
-                    <div class="column">
-                        <label
-                            for="detailed-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="DetailedTranslator"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                id="detailed-translator"
-                                class="translator-config"
-                                data-affected="detailedMeanings"
-                            ></select>
-                        </label>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="column">
-                        <label
-                            for="definition-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="DefinitionTranslator"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                id="definition-translator"
-                                class="translator-config"
-                                data-affected="definitions"
-                            ></select>
-                        </label>
-                    </div>
-                    <div class="column">
-                        <label
-                            for="example-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="ExampleTranslator"
-                            data-insert-pos="afterBegin"
-                        >
-                            <select
-                                id="example-translator"
-                                class="translator-config"
-                                data-affected="examples"
-                            ></select>
-                        </label>
-                    </div>
-                </div>
-
-                <label class="setting-title i18n" data-i18n-name="DefaultPageTranslator"></label>
-                <div class="row">
-                    <div class="column">
-                        <label
-                            for="google-page-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="GooglePageTranslate"
-                        >
-                            <input
-                                type="radio"
-                                value="GooglePageTranslate"
-                                setting-type="radio"
-                                setting-path="DefaultPageTranslator"
-                                class="radio"
-                                name="default-page-translator"
-                                id="google-page-translator"
-                            />
-                        </label>
-                    </div>
-                    <div class="column" id="ai-page-translator-row" hidden>
-                        <label
-                            for="ai-page-translator"
-                            class="checked-label i18n"
-                            data-i18n-name="AIPageTranslate"
-                        >
-                            <input
-                                type="radio"
-                                value="AIPageTranslate"
-                                setting-type="radio"
-                                setting-path="DefaultPageTranslator"
-                                class="radio"
-                                name="default-page-translator"
-                                id="ai-page-translator"
-                            />
-                        </label>
-                    </div>
-                </div>
-
-                <label
-                    for="layout-settings"
-                    class="setting-title i18n"
-                    data-i18n-name="LayoutSettings"
-                ></label>
-                <div id="layout-settings">
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                value="resize"
-                                setting-type="switch"
-                                setting-path="LayoutSettings Resize"
-                                class="switch"
-                                id="Resize"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="Resize"
-                                class="checked-label i18n"
-                                data-i18n-name="ResizeSetting"
-                            ></label>
-                        </div>
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                value="rtl"
-                                setting-type="switch"
-                                setting-path="LayoutSettings RTL"
-                                class="switch"
-                                id="RTL"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="RTL"
-                                class="checked-label i18n"
-                                data-i18n-name="RTLSetting"
-                            ></label>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                value="FoldLongContent"
-                                setting-type="switch"
-                                setting-path="LayoutSettings FoldLongContent"
-                                class="switch"
-                                id="FoldLongContent"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="FoldLongContent"
-                                class="checked-label i18n"
-                                data-i18n-name="FoldLongContentSetting"
-                            ></label>
-                        </div>
-                        <div class="column">
-                            <label
-                                for="select-translate-position"
-                                class="checked-label i18n"
-                                data-i18n-name="SelectTranslatePosition"
-                                data-insert-pos="afterBegin"
-                            >
-                                <select
-                                    setting-type="select"
-                                    id="select-translate-position"
-                                    value="SelectTranslatePosition"
-                                    setting-path="LayoutSettings SelectTranslatePosition"
+                        <div class="tab-pane" id="tab-engines">
+                            <div class="card-container">
+                                <label
+                                    class="setting-title i18n"
+                                    data-i18n-name="LocalTranslatorConfig"
+                                ></label>
+                                <div class="row">
+                                    <div class="column">
+                                        <input
+                                            type="checkbox"
+                                            setting-type="switch"
+                                            setting-path="LocalTranslatorConfig enabled"
+                                            class="switch"
+                                            id="local-translator-enabled"
+                                        />
+                                        <span class="space"></span>
+                                        <label
+                                            for="local-translator-enabled"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorEnabled"
+                                        ></label>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="column">
+                                        <label
+                                            for="local-translator-mode"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorMode"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig mode"
+                                                id="local-translator-mode"
+                                            >
+                                                <option
+                                                    value="chromeBuiltin"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeChromeBuiltin"
+                                                ></option>
+                                                <option
+                                                    value="googleAiStudio"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeGoogleAiStudio"
+                                                ></option>
+                                                <option
+                                                    value="openai"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeOpenAI"
+                                                ></option>
+                                                <option
+                                                    value="openaiCompatible"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeOpenAICompatible"
+                                                ></option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row" id="local-translator-google-settings">
+                                    <div
+                                        class="column provider-heading"
+                                        data-local-mode="googleAiStudio"
+                                    >
+                                        <span
+                                            class="provider-badge provider-badge-gemini"
+                                            aria-hidden="true"
+                                        >
+                                            <img src="../brand/gemini.svg" alt="" />
+                                        </span>
+                                        <span>Google AI Studio</span>
+                                    </div>
+                                    <div class="column" data-local-mode="googleAiStudio">
+                                        <label
+                                            for="local-translator-api-key"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorApiKey"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <input
+                                                type="password"
+                                                setting-type="text"
+                                                setting-path="LocalTranslatorConfig apiKey"
+                                                id="local-translator-api-key"
+                                                autocomplete="off"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="googleAiStudio">
+                                        <label
+                                            for="local-translator-model"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorModel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig model"
+                                                id="local-translator-model"
+                                            >
+                                                <option value="gemini-3.5-flash">
+                                                    gemini-3.5-flash
+                                                </option>
+                                                <option value="gemini-3.1-flash-lite">
+                                                    gemini-3.1-flash-lite
+                                                </option>
+                                                <option value="gemini-3.1-flash-lite-preview">
+                                                    gemini-3.1-flash-lite-preview
+                                                </option>
+                                                <option value="gemini-3.1-pro-preview">
+                                                    gemini-3.1-pro-preview
+                                                </option>
+                                                <option value="gemini-3-pro-preview">
+                                                    gemini-3-pro-preview
+                                                </option>
+                                                <option value="gemini-3-flash-preview">
+                                                    gemini-3-flash-preview
+                                                </option>
+                                                <option value="gemini-2.5-flash-lite">
+                                                    gemini-2.5-flash-lite
+                                                </option>
+                                                <option value="gemini-2.5-flash">
+                                                    gemini-2.5-flash
+                                                </option>
+                                                <option value="gemini-2.5-pro">
+                                                    gemini-2.5-pro
+                                                </option>
+                                                <option value="gemini-flash-latest">
+                                                    gemini-flash-latest
+                                                </option>
+                                                <option value="gemini-flash-lite-latest">
+                                                    gemini-flash-lite-latest
+                                                </option>
+                                                <option value="gemini-pro-latest">
+                                                    gemini-pro-latest
+                                                </option>
+                                                <option value="gemma-4-31b-it">
+                                                    gemma-4-31b-it
+                                                </option>
+                                                <option value="gemma-4-26b-a4b-it">
+                                                    gemma-4-26b-a4b-it
+                                                </option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="googleAiStudio">
+                                        <label
+                                            for="local-translator-reasoning-level"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorReasoningLevel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig reasoningLevel"
+                                                id="local-translator-reasoning-level"
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="none">None</option>
+                                                <option value="minimal">Minimal</option>
+                                                <option value="low">Low</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="high">High</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="googleAiStudio">
+                                        <label
+                                            for="local-translator-timeout"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorTimeoutMs"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig timeoutMs"
+                                                id="local-translator-timeout"
+                                            >
+                                                <option value="30000">30s</option>
+                                                <option value="60000">60s</option>
+                                                <option value="120000">120s</option>
+                                                <option value="180000">180s</option>
+                                                <option value="300000">300s</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row" id="local-translator-openai-settings">
+                                    <div class="column provider-heading" data-local-mode="openai">
+                                        <span
+                                            class="provider-badge provider-badge-chatgpt"
+                                            aria-hidden="true"
+                                        >
+                                            <img src="../brand/chatgpt.svg" alt="" />
+                                        </span>
+                                        <span>OpenAI</span>
+                                    </div>
+                                    <div class="column" data-local-mode="openai">
+                                        <label
+                                            for="local-translator-openai-api-key"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAIApiKey"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <input
+                                                type="password"
+                                                setting-type="text"
+                                                setting-path="LocalTranslatorConfig openaiApiKey"
+                                                id="local-translator-openai-api-key"
+                                                autocomplete="off"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="openai">
+                                        <label
+                                            for="local-translator-openai-model"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAIModel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig openaiModel"
+                                                id="local-translator-openai-model"
+                                            >
+                                                <option value="gpt-5.5">gpt-5.5</option>
+                                                <option value="gpt-5.5-2026-04-23">
+                                                    gpt-5.5-2026-04-23
+                                                </option>
+                                                <option value="gpt-5.4">gpt-5.4</option>
+                                                <option value="gpt-5.4-2026-03-05">
+                                                    gpt-5.4-2026-03-05
+                                                </option>
+                                                <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+                                                <option value="gpt-5.4-mini-2026-03-17">
+                                                    gpt-5.4-mini-2026-03-17
+                                                </option>
+                                                <option value="gpt-5.4-nano">gpt-5.4-nano</option>
+                                                <option value="gpt-5.4-nano-2026-03-17">
+                                                    gpt-5.4-nano-2026-03-17
+                                                </option>
+                                                <option value="gpt-5.3-chat-latest">
+                                                    gpt-5.3-chat-latest
+                                                </option>
+                                                <option value="gpt-5.2">gpt-5.2</option>
+                                                <option value="gpt-5.2-2025-12-11">
+                                                    gpt-5.2-2025-12-11
+                                                </option>
+                                                <option value="gpt-5.2-chat-latest">
+                                                    gpt-5.2-chat-latest
+                                                </option>
+                                                <option value="gpt-5.1">gpt-5.1</option>
+                                                <option value="gpt-5.1-2025-11-13">
+                                                    gpt-5.1-2025-11-13
+                                                </option>
+                                                <option value="gpt-5.1-chat-latest">
+                                                    gpt-5.1-chat-latest
+                                                </option>
+                                                <option value="gpt-5">gpt-5</option>
+                                                <option value="gpt-5-2025-08-07">
+                                                    gpt-5-2025-08-07
+                                                </option>
+                                                <option value="gpt-5-mini">gpt-5-mini</option>
+                                                <option value="gpt-5-mini-2025-08-07">
+                                                    gpt-5-mini-2025-08-07
+                                                </option>
+                                                <option value="gpt-5-nano">gpt-5-nano</option>
+                                                <option value="gpt-5-nano-2025-08-07">
+                                                    gpt-5-nano-2025-08-07
+                                                </option>
+                                                <option value="gpt-5-chat-latest">
+                                                    gpt-5-chat-latest
+                                                </option>
+                                                <option value="gpt-4.1">gpt-4.1</option>
+                                                <option value="gpt-4.1-2025-04-14">
+                                                    gpt-4.1-2025-04-14
+                                                </option>
+                                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                                                <option value="gpt-4.1-mini-2025-04-14">
+                                                    gpt-4.1-mini-2025-04-14
+                                                </option>
+                                                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                                                <option value="gpt-4.1-nano-2025-04-14">
+                                                    gpt-4.1-nano-2025-04-14
+                                                </option>
+                                                <option value="gpt-4o">gpt-4o</option>
+                                                <option value="gpt-4o-2024-11-20">
+                                                    gpt-4o-2024-11-20
+                                                </option>
+                                                <option value="gpt-4o-2024-08-06">
+                                                    gpt-4o-2024-08-06
+                                                </option>
+                                                <option value="gpt-4o-2024-05-13">
+                                                    gpt-4o-2024-05-13
+                                                </option>
+                                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                                <option value="gpt-4o-mini-2024-07-18">
+                                                    gpt-4o-mini-2024-07-18
+                                                </option>
+                                                <option value="gpt-4-turbo">gpt-4-turbo</option>
+                                                <option value="gpt-4-turbo-2024-04-09">
+                                                    gpt-4-turbo-2024-04-09
+                                                </option>
+                                                <option value="gpt-4">gpt-4</option>
+                                                <option value="gpt-4-0613">gpt-4-0613</option>
+                                                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                                                <option value="gpt-3.5-turbo-0125">
+                                                    gpt-3.5-turbo-0125
+                                                </option>
+                                                <option value="gpt-3.5-turbo-1106">
+                                                    gpt-3.5-turbo-1106
+                                                </option>
+                                                <option value="gpt-3.5-turbo-16k">
+                                                    gpt-3.5-turbo-16k
+                                                </option>
+                                                <option value="o1">o1</option>
+                                                <option value="o1-2024-12-17">o1-2024-12-17</option>
+                                                <option value="o3">o3</option>
+                                                <option value="o3-2025-04-16">o3-2025-04-16</option>
+                                                <option value="o3-mini">o3-mini</option>
+                                                <option value="o3-mini-2025-01-31">
+                                                    o3-mini-2025-01-31
+                                                </option>
+                                                <option value="o4-mini">o4-mini</option>
+                                                <option value="o4-mini-2025-04-16">
+                                                    o4-mini-2025-04-16
+                                                </option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="openai">
+                                        <label
+                                            for="local-translator-openai-reasoning-effort"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig openaiReasoningEffort"
+                                                id="local-translator-openai-reasoning-effort"
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="none">None</option>
+                                                <option value="minimal">Minimal</option>
+                                                <option value="low">Low</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="high">High</option>
+                                                <option value="xhigh">XHigh</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="openai">
+                                        <label
+                                            for="local-translator-openai-timeout"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorTimeoutMs"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig timeoutMs"
+                                                id="local-translator-openai-timeout"
+                                            >
+                                                <option value="30000">30s</option>
+                                                <option value="60000">60s</option>
+                                                <option value="120000">120s</option>
+                                                <option value="180000">180s</option>
+                                                <option value="300000">300s</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div
+                                    class="row"
+                                    id="local-translator-openai-compatible-settings"
                                 >
-                                    <option
-                                        value="TopRight"
-                                        data-i18n-name="TopRight"
-                                        class="i18n"
-                                    ></option>
-                                    <option
-                                        value="TopLeft"
-                                        data-i18n-name="TopLeft"
-                                        class="i18n"
-                                    ></option>
-                                    <option
-                                        value="BottomRight"
-                                        data-i18n-name="BottomRight"
-                                        class="i18n"
-                                    ></option>
-                                    <option
-                                        value="BottomLeft"
-                                        data-i18n-name="BottomLeft"
-                                        class="i18n"
-                                    ></option>
-                                </select>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <label
-                    for="other-settings"
-                    class="setting-title i18n"
-                    data-i18n-name="OtherSettings"
-                ></label>
-                <div id="other-settings">
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                setting-type="switch"
-                                setting-path="OtherSettings SelectTranslate"
-                                class="switch"
-                                id="select-translate"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="select-translate"
-                                class="checked-label i18n"
-                                data-i18n-name="SelectTranslate"
-                            ></label>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                setting-type="switch"
-                                setting-path="OtherSettings TranslateAfterSelect"
-                                class="switch"
-                                id="translate-after-select"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="translate-after-select"
-                                class="checked-label i18n"
-                                data-i18n-name="TranslateAfterSelect"
-                            ></label>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                setting-type="switch"
-                                setting-path="OtherSettings TranslateAfterDblClick"
-                                class="switch"
-                                id="translate-after-dbl-click"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="translate-after-dbl-click"
-                                class="checked-label i18n"
-                                data-i18n-name="TranslateAfterDblClick"
-                            ></label>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                setting-type="switch"
-                                setting-path="OtherSettings RealtimeCaptionTranslate"
-                                class="switch"
-                                id="realtime-caption-translate"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="realtime-caption-translate"
-                                class="checked-label i18n"
-                                data-i18n-name="RealtimeCaptionTranslate"
-                            ></label>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <input
-                                type="checkbox"
-                                setting-type="switch"
-                                setting-path="OtherSettings CancelTextSelection"
-                                class="switch"
-                                id="cancel-text-selection"
-                            />
-                            <span class="space"></span>
-                            <label
-                                for="cancel-text-selection"
-                                class="checked-label i18n"
-                                data-i18n-name="CancelTextSelection"
-                            ></label>
+                                    <div
+                                        class="column provider-heading"
+                                        data-local-mode="openaiCompatible"
+                                    >
+                                        <span
+                                            class="provider-badge provider-badge-chatgpt"
+                                            aria-hidden="true"
+                                        >
+                                            <img src="../brand/chatgpt.svg" alt="" />
+                                        </span>
+                                        <span>OpenAI-compatible</span>
+                                    </div>
+                                    <div class="column" data-local-mode="openaiCompatible">
+                                        <label
+                                            for="local-translator-openai-compatible-base-url"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAICompatibleBaseUrl"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <input
+                                                type="url"
+                                                setting-type="text"
+                                                setting-path="LocalTranslatorConfig openaiCompatibleBaseUrl"
+                                                id="local-translator-openai-compatible-base-url"
+                                                autocomplete="off"
+                                                placeholder="http://localhost:1234/v1"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="openaiCompatible">
+                                        <label
+                                            for="local-translator-openai-compatible-api-key"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAICompatibleApiKey"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <input
+                                                type="password"
+                                                setting-type="text"
+                                                setting-path="LocalTranslatorConfig openaiCompatibleApiKey"
+                                                id="local-translator-openai-compatible-api-key"
+                                                autocomplete="off"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="openaiCompatible">
+                                        <label
+                                            for="local-translator-openai-compatible-model"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAICompatibleModel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <input
+                                                type="text"
+                                                setting-type="text"
+                                                setting-path="LocalTranslatorConfig openaiCompatibleModel"
+                                                id="local-translator-openai-compatible-model"
+                                                autocomplete="off"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" data-local-mode="openaiCompatible">
+                                        <label
+                                            for="local-translator-openai-compatible-timeout"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorTimeoutMs"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="LocalTranslatorConfig timeoutMs"
+                                                id="local-translator-openai-compatible-timeout"
+                                            >
+                                                <option value="30000">30s</option>
+                                                <option value="60000">60s</option>
+                                                <option value="120000">120s</option>
+                                                <option value="180000">180s</option>
+                                                <option value="300000">300s</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <p class="i18n" data-i18n-name="LocalTranslatorHelp"></p>
+                            </div>
+                            <div class="card-container">
+                                <label
+                                    class="setting-title i18n"
+                                    data-i18n-name="PreciseTranslatorConfig"
+                                ></label>
+                                <div class="row">
+                                    <div class="column">
+                                        <label
+                                            for="precise-translator-mode"
+                                            class="checked-label i18n"
+                                            data-i18n-name="PreciseTranslatorMode"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="PreciseTranslatorConfig mode"
+                                                id="precise-translator-mode"
+                                            >
+                                                <option
+                                                    value="chromeBuiltin"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeChromeBuiltin"
+                                                ></option>
+                                                <option
+                                                    value="googleAiStudio"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeGoogleAiStudio"
+                                                ></option>
+                                                <option
+                                                    value="openai"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeOpenAI"
+                                                ></option>
+                                                <option
+                                                    value="openaiCompatible"
+                                                    class="i18n"
+                                                    data-i18n-name="LocalTranslatorModeOpenAICompatible"
+                                                ></option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row" id="precise-translator-google-settings">
+                                    <div class="column" data-precise-mode="googleAiStudio">
+                                        <label
+                                            for="precise-translator-model"
+                                            class="checked-label i18n"
+                                            data-i18n-name="PreciseTranslatorModel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="PreciseTranslatorConfig model"
+                                                id="precise-translator-model"
+                                                data-model-options="googleAiStudio"
+                                            ></select>
+                                        </label>
+                                    </div>
+                                    <div class="column" data-precise-mode="googleAiStudio">
+                                        <label
+                                            for="precise-translator-reasoning-level"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorReasoningLevel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="PreciseTranslatorConfig reasoningLevel"
+                                                id="precise-translator-reasoning-level"
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="none">None</option>
+                                                <option value="minimal">Minimal</option>
+                                                <option value="low">Low</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="high">High</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row" id="precise-translator-openai-settings">
+                                    <div class="column" data-precise-mode="openai">
+                                        <label
+                                            for="precise-translator-openai-model"
+                                            class="checked-label i18n"
+                                            data-i18n-name="PreciseTranslatorOpenAIModel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="PreciseTranslatorConfig openaiModel"
+                                                id="precise-translator-openai-model"
+                                                data-model-options="openai"
+                                            ></select>
+                                        </label>
+                                    </div>
+                                    <div class="column" data-precise-mode="openai">
+                                        <label
+                                            for="precise-translator-openai-reasoning-effort"
+                                            class="checked-label i18n"
+                                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                setting-type="select"
+                                                setting-path="PreciseTranslatorConfig openaiReasoningEffort"
+                                                id="precise-translator-openai-reasoning-effort"
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="none">None</option>
+                                                <option value="minimal">Minimal</option>
+                                                <option value="low">Low</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="high">High</option>
+                                                <option value="xhigh">XHigh</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div
+                                    class="row"
+                                    id="precise-translator-openai-compatible-settings"
+                                >
+                                    <div class="column" data-precise-mode="openaiCompatible">
+                                        <label
+                                            for="precise-translator-openai-compatible-model"
+                                            class="checked-label i18n"
+                                            data-i18n-name="PreciseTranslatorOpenAICompatibleModel"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <input
+                                                type="text"
+                                                setting-type="text"
+                                                setting-path="PreciseTranslatorConfig openaiCompatibleModel"
+                                                id="precise-translator-openai-compatible-model"
+                                                autocomplete="off"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                                <p class="i18n" data-i18n-name="PreciseTranslatorHelp"></p>
+                            </div>
+                            <div class="card-container">
+                                <label
+                                    class="setting-title i18n"
+                                    data-i18n-name="HybridTranslatorConfig"
+                                ></label>
+                                <div class="row">
+                                    <div class="column">
+                                        <label
+                                            for="main-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="MainTranslator"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                id="main-translator"
+                                                class="translator-config"
+                                                data-affected="originalText mainMeaning"
+                                            ></select>
+                                        </label>
+                                    </div>
+                                    <div class="column">
+                                        <label
+                                            for="detailed-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="DetailedTranslator"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                id="detailed-translator"
+                                                class="translator-config"
+                                                data-affected="detailedMeanings"
+                                            ></select>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="column">
+                                        <label
+                                            for="definition-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="DefinitionTranslator"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                id="definition-translator"
+                                                class="translator-config"
+                                                data-affected="definitions"
+                                            ></select>
+                                        </label>
+                                    </div>
+                                    <div class="column">
+                                        <label
+                                            for="example-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="ExampleTranslator"
+                                            data-insert-pos="afterBegin"
+                                        >
+                                            <select
+                                                id="example-translator"
+                                                class="translator-config"
+                                                data-affected="examples"
+                                            ></select>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-container">
+                                <label
+                                    class="setting-title i18n"
+                                    data-i18n-name="DefaultPageTranslator"
+                                ></label>
+                                <div class="row">
+                                    <div class="column">
+                                        <label
+                                            for="google-page-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="GooglePageTranslate"
+                                        >
+                                            <input
+                                                type="radio"
+                                                value="GooglePageTranslate"
+                                                setting-type="radio"
+                                                setting-path="DefaultPageTranslator"
+                                                class="radio"
+                                                name="default-page-translator"
+                                                id="google-page-translator"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" id="ai-page-translator-row" hidden>
+                                        <label
+                                            for="ai-page-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="AIPageTranslate"
+                                        >
+                                            <input
+                                                type="radio"
+                                                value="AIPageTranslate"
+                                                setting-type="radio"
+                                                setting-path="DefaultPageTranslator"
+                                                class="radio"
+                                                name="default-page-translator"
+                                                id="ai-page-translator"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

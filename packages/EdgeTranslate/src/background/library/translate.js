@@ -142,7 +142,11 @@ class TranslatorManager {
             getMode() {
                 if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
                     return "geminiNano";
-                if (config.mode === "googleAiStudio" || config.mode === "openai")
+                if (
+                    config.mode === "googleAiStudio" ||
+                    config.mode === "openai" ||
+                    config.mode === "openaiCompatible"
+                )
                     return config.mode;
                 return "geminiNano";
             },
@@ -181,6 +185,10 @@ class TranslatorManager {
             openaiModel: preciseConfig.openaiModel || localConfig.openaiModel,
             openaiReasoningEffort:
                 preciseConfig.openaiReasoningEffort || localConfig.openaiReasoningEffort,
+            openaiCompatibleBaseUrl: localConfig.openaiCompatibleBaseUrl,
+            openaiCompatibleApiKey: localConfig.openaiCompatibleApiKey,
+            openaiCompatibleModel:
+                preciseConfig.openaiCompatibleModel || localConfig.openaiCompatibleModel,
             timeoutMs: preciseConfig.timeoutMs || localConfig.timeoutMs,
         };
     }
@@ -199,7 +207,11 @@ class TranslatorManager {
             getMode() {
                 if (config.mode === "chromeBuiltin" || config.mode === "geminiNano")
                     return "geminiNano";
-                if (config.mode === "googleAiStudio" || config.mode === "openai")
+                if (
+                    config.mode === "googleAiStudio" ||
+                    config.mode === "openai" ||
+                    config.mode === "openaiCompatible"
+                )
                     return config.mode;
                 return "openai";
             },
@@ -638,6 +650,9 @@ class TranslatorManager {
             );
             normalizedPartialText = unwrapped.mainMeaning || unwrapped.translatedText || "";
         }
+        if (context.shouldWrapRole) {
+            normalizedPartialText = this.stripVisibleRoleSegmentMarkers(normalizedPartialText);
+        }
         normalizedPartialText = normalizedPartialText.trim();
 
         const isCommitted = result?.streamState === "committed";
@@ -797,7 +812,7 @@ class TranslatorManager {
             return true;
         }
 
-        return true;
+        return false;
     }
 
     /**
@@ -926,12 +941,10 @@ class TranslatorManager {
     }
 
     shouldWrapSelectionForRole(translatorId, textRole, textSegments) {
-        if (!this.usesLocalMainTranslator(translatorId)) return false;
-        const segments = this.normalizeSelectionSegments(textSegments);
-        if (segments.length > 1) return true;
-        const role = this.normalizeTextRole(textRole);
-        if (!role || role === "text") return false;
-        return true;
+        void translatorId;
+        void textRole;
+        void textSegments;
+        return false;
     }
 
     usesLocalMainTranslator(translatorId) {
@@ -984,6 +997,17 @@ class TranslatorManager {
             .filter((segment) => segment.text);
     }
 
+    stripVisibleRoleSegmentMarkers(text) {
+        return String(text || "")
+            .replace(/(?:^|\n)\s*\[\[\d+:[a-z][a-z0-9-]*]]\s*/gi, (match) =>
+                match.startsWith("\n") ? "\n" : ""
+            )
+            .replace(/\s*\[\[\d+:[a-z][a-z0-9-]*]]\s*/gi, " ")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    }
+
     unwrapRoleSegmentResult(result, fallbackText, expectedCount = 1) {
         const translated = String(result?.mainMeaning || result?.translatedText || "").trim();
         const segments = this.splitRoleSegmentResult(translated);
@@ -991,10 +1015,11 @@ class TranslatorManager {
         const unwrapped =
             expectedCount > 1 && orderedSegments.length
                 ? orderedSegments
-                      .map((segment) => segment.text)
+                      .map((segment) => this.stripVisibleRoleSegmentMarkers(segment.text))
+                      .filter(Boolean)
                       .join("\n\n")
                       .trim()
-                : orderedSegments[0]?.text || translated;
+                : this.stripVisibleRoleSegmentMarkers(orderedSegments[0]?.text || translated);
         return {
             ...(result || {}),
             originalText: fallbackText,
@@ -1483,17 +1508,11 @@ class TranslatorManager {
                 translationProfile === "precise"
                     ? "PreciseLocalTranslate"
                     : this.DEFAULT_TRANSLATOR;
-            const normalizedSegments = this.getTrustedSelectionSegments(text, textSegments);
-            const shouldWrapRole = this.shouldWrapSelectionForRole(
-                translatorId,
-                textRole,
-                normalizedSegments
-            );
-            const requestText = shouldWrapRole
-                ? this.buildSelectionRoleSegmentText(text, textRole, normalizedSegments)
-                : text;
-            const expectedSegmentCount =
-                shouldWrapRole && normalizedSegments.length > 1 ? normalizedSegments.length : 1;
+            void textRole;
+            void textSegments;
+            const shouldWrapRole = false;
+            const requestText = text;
+            const expectedSegmentCount = 1;
             const key = this.makeTranslateKey(requestText, sl, tl, translatorId);
             const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
             const previousTranslationStreamContext = this.currentTranslationStreamContext;

@@ -41,6 +41,7 @@ const OPENAI_REASONING_EFFORTS = new Set([
     "xhigh",
 ]);
 const DEFAULT_OPENAI_TRANSLATION_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_COMPATIBLE_TRANSLATION_MODEL = "gpt-oss-20b";
 const OPENAI_TRANSLATION_MODELS = new Set([
     "gpt-5.5",
     "gpt-5.5-2026-04-23",
@@ -225,6 +226,13 @@ window.onload = () => {
                 saveOption(result, settingItemPath, settingItemValue);
             }
             if (
+                settingItemPath.join(" ") === "LocalTranslatorConfig openaiCompatibleModel" &&
+                !String(settingItemValue || "").trim()
+            ) {
+                settingItemValue = DEFAULT_OPENAI_COMPATIBLE_TRANSLATION_MODEL;
+                saveOption(result, settingItemPath, settingItemValue);
+            }
+            if (
                 settingItemPath.join(" ") === "PreciseTranslatorConfig model" &&
                 !GOOGLE_AI_STUDIO_TRANSLATION_MODELS.has(settingItemValue)
             ) {
@@ -261,10 +269,26 @@ window.onload = () => {
                 saveOption(result, settingItemPath, settingItemValue);
             }
             if (
+                settingItemPath.join(" ") === "PreciseTranslatorConfig openaiCompatibleModel" &&
+                !String(settingItemValue || "").trim()
+            ) {
+                settingItemValue =
+                    DEFAULT_SETTINGS.PreciseTranslatorConfig?.openaiCompatibleModel ||
+                    DEFAULT_OPENAI_COMPATIBLE_TRANSLATION_MODEL;
+                saveOption(result, settingItemPath, settingItemValue);
+            }
+            if (
                 settingItemPath.join(" ") === "LocalTranslatorConfig timeoutMs" &&
                 !LOCAL_TRANSLATOR_TIMEOUT_MS_OPTIONS.has(String(settingItemValue))
             ) {
                 settingItemValue = DEFAULT_LOCAL_TRANSLATOR_TIMEOUT_MS;
+                saveOption(result, settingItemPath, settingItemValue);
+            }
+            if (
+                settingItemPath.join(" ") === "RealtimeCaptionConfig translatorMode" &&
+                !["ai", "google"].includes(settingItemValue)
+            ) {
+                settingItemValue = DEFAULT_SETTINGS.RealtimeCaptionConfig.translatorMode;
                 saveOption(result, settingItemPath, settingItemValue);
             }
             if (
@@ -276,7 +300,9 @@ window.onload = () => {
             ) {
                 const localConfig = result.LocalTranslatorConfig || {};
                 const isAiMode =
-                    localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+                    localConfig.mode === "googleAiStudio" ||
+                    localConfig.mode === "openai" ||
+                    localConfig.mode === "openaiCompatible";
                 settingItemValue =
                     localConfig.enabled && isAiMode ? "AIPageTranslate" : "GooglePageTranslate";
                 saveOption(result, settingItemPath, settingItemValue);
@@ -288,7 +314,9 @@ window.onload = () => {
             ) {
                 const localConfig = result.LocalTranslatorConfig || {};
                 const isAiMode =
-                    localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+                    localConfig.mode === "googleAiStudio" ||
+                    localConfig.mode === "openai" ||
+                    localConfig.mode === "openaiCompatible";
                 if (!localConfig.enabled || !isAiMode) {
                     settingItemValue = "GooglePageTranslate";
                     saveOption(result, settingItemPath, settingItemValue);
@@ -396,6 +424,34 @@ window.onload = () => {
                 setTimeout(() => syncAiPageTranslatorVisibility(result), 0);
             };
         }
+
+        // Tab switching logic
+        const navTabs = document.querySelectorAll(".nav-tab");
+        const tabPanes = document.querySelectorAll(".tab-pane");
+        const activateTab = (targetTab, { updateHash = true } = {}) => {
+            const activePane = document.getElementById(`tab-${targetTab}`);
+            const activeTab = document.querySelector(`.nav-tab[data-tab='${targetTab}']`);
+            if (!activePane || !activeTab) return false;
+
+            navTabs.forEach((t) => t.classList.remove("active"));
+            tabPanes.forEach((p) => p.classList.remove("active"));
+
+            activeTab.classList.add("active");
+            activePane.classList.add("active");
+            if (updateHash && window.location.hash !== `#${targetTab}`) {
+                window.history.replaceState(null, "", `#${targetTab}`);
+            }
+            return true;
+        };
+
+        navTabs.forEach((tab) => {
+            tab.addEventListener("click", () => {
+                const targetTab = tab.getAttribute("data-tab");
+                activateTab(targetTab);
+            });
+        });
+        const initialTab = window.location.hash.replace(/^#/, "");
+        if (initialTab) activateTab(initialTab, { updateHash: false });
     });
 };
 
@@ -411,13 +467,15 @@ function populatePreciseTranslatorModelSelects() {
 }
 
 function syncLocalTranslatorFields(mode) {
-    ["googleAiStudio", "openai"].forEach((localMode) => {
+    ["googleAiStudio", "openai", "openaiCompatible"].forEach((localMode) => {
         const fields = document.querySelectorAll(`[data-local-mode='${localMode}']`);
-        const row = document.getElementById(
+        const rowId =
             localMode === "googleAiStudio"
                 ? "local-translator-google-settings"
-                : "local-translator-openai-settings"
-        );
+                : localMode === "openai"
+                ? "local-translator-openai-settings"
+                : "local-translator-openai-compatible-settings";
+        const row = document.getElementById(rowId);
         const hidden = mode !== localMode;
         if (row) row.hidden = hidden;
         fields.forEach((element) => {
@@ -427,13 +485,15 @@ function syncLocalTranslatorFields(mode) {
 }
 
 function syncPreciseTranslatorFields(mode) {
-    ["googleAiStudio", "openai"].forEach((localMode) => {
+    ["googleAiStudio", "openai", "openaiCompatible"].forEach((localMode) => {
         const fields = document.querySelectorAll(`[data-precise-mode='${localMode}']`);
-        const row = document.getElementById(
+        const rowId =
             localMode === "googleAiStudio"
                 ? "precise-translator-google-settings"
-                : "precise-translator-openai-settings"
-        );
+                : localMode === "openai"
+                ? "precise-translator-openai-settings"
+                : "precise-translator-openai-compatible-settings";
+        const row = document.getElementById(rowId);
         const hidden = mode !== localMode;
         if (row) row.hidden = hidden;
         fields.forEach((element) => {
@@ -652,7 +712,10 @@ function syncPreciseOpenAiReasoningEffortOptions(localSettings) {
 
 function syncAiPageTranslatorVisibility(localSettings) {
     const localConfig = localSettings.LocalTranslatorConfig || {};
-    const isAiMode = localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+    const isAiMode =
+        localConfig.mode === "googleAiStudio" ||
+        localConfig.mode === "openai" ||
+        localConfig.mode === "openaiCompatible";
     const showAi = Boolean(localConfig.enabled && isAiMode);
     const aiRow = document.getElementById("ai-page-translator-row");
     if (aiRow) aiRow.hidden = !showAi;

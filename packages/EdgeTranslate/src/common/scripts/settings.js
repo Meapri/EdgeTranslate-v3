@@ -40,6 +40,9 @@ const DEFAULT_SETTINGS = {
         openaiApiKey: "",
         openaiModel: "gpt-5.4-mini",
         openaiReasoningEffort: "auto",
+        openaiCompatibleBaseUrl: "",
+        openaiCompatibleApiKey: "",
+        openaiCompatibleModel: "gpt-oss-20b",
         timeoutMs: 120000,
     },
     PreciseTranslatorConfig: {
@@ -48,7 +51,12 @@ const DEFAULT_SETTINGS = {
         reasoningLevel: "high",
         openaiModel: "gpt-5.5",
         openaiReasoningEffort: "high",
+        openaiCompatibleModel: "gpt-oss-20b",
         timeoutMs: 120000,
+    },
+    RealtimeCaptionConfig: {
+        translatorMode: "ai",
+        draggableOverlay: true,
     },
     HybridTranslatorConfig: {
         // The translators used in current hybrid translate.

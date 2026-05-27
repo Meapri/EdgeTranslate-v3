@@ -30,9 +30,16 @@ function translatePage(channel) {
             translator === "LocalPageTranslate" ||
             translator === "ChromeBuiltinPageTranslate"
         ) {
-            const engine = localConfig.mode === "openai" ? "openai" : "googleAiStudio";
+            const engine =
+                localConfig.mode === "openai" || localConfig.mode === "openaiCompatible"
+                    ? localConfig.mode
+                    : "googleAiStudio";
             const model =
-                engine === "openai" ? localConfig.openaiModel || "" : localConfig.model || "";
+                engine === "openai"
+                    ? localConfig.openaiModel || ""
+                    : engine === "openaiCompatible"
+                    ? localConfig.openaiCompatibleModel || ""
+                    : localConfig.model || "";
             executeDomPageTranslate(channel, {
                 engine,
                 model,

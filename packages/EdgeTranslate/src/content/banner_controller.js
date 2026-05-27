@@ -38,7 +38,7 @@ class BannerController {
         // Avoid redundant layout work
         this.lastDistance = null;
         this._moveRaf = null;
-        this._domPageBannerHeight = 56;
+        this._domPageBannerHeight = 84;
 
         // DOM fallback observer state
         this._mo = null;
@@ -92,15 +92,34 @@ class BannerController {
         this._captionModeEnabled = false;
         this._captionObserver = null;
         this._captionOverlay = null;
+        this._captionOverlayPosition = null;
+        this._captionOverlayDragState = null;
+        this._captionOverlayDraggable = true;
         this._captionLastSource = "";
         this._captionRenderedSource = "";
         this._captionPendingSource = "";
+        this._captionPendingSources = [];
+        this._captionPendingMax = 6;
         this._captionInFlight = false;
         this._captionInFlightSource = "";
         this._captionLastRequestId = 0;
         this._captionTranslationCache = new Map();
         this._captionTranslationCacheMax = 200;
         this._captionDebounceTimer = null;
+        this._captionDebounceMs = 48;
+        this._captionStabilizeTimer = null;
+        this._captionStabilizePromise = null;
+        this._captionStabilizeResolve = null;
+        this._captionStabilizeTargetSource = "";
+        this._captionStabilizeTargetVisibleSource = "";
+        this._captionStabilizeDelayMs = 520;
+        this._captionStabilizeWindowMs = 2600;
+        this._captionStabilizeMaxSources = 3;
+        this._captionVisibleHistoryMax = 8;
+        this._captionVisibleSources = [];
+        this._captionVisibleSourceSeq = 0;
+        this._captionLastDisplayedVisibleSeq = 0;
+        this._captionMergedReplacementSources = new Set();
         this._captionPollTimer = null;
         this._captionOptionsCache = null;
         this._captionOptionsCacheAt = 0;
@@ -113,17 +132,27 @@ class BannerController {
         this._captionPrefetchTimer = null;
         this._captionPrefetchVideoId = "";
         this._captionPrefetchTrackKey = "";
+        this._captionPrefetchEmptyTrackKeys = new Map();
+        this._captionPrefetchAllEmptyKey = "";
+        this._captionPrefetchAllEmptyAt = 0;
         this._captionPrefetchCues = [];
         this._captionPrefetchLoadPromise = null;
         this._captionPrefetchInFlight = new Set();
-        this._captionPrefetchMaxInFlight = 12;
-        this._captionPrefetchWindowMs = 90000;
-        this._captionPrefetchBatchSize = 8;
-        this._captionPrefetchBatchMaxChars = 900;
+        this._captionPrefetchMaxInFlight = 48;
+        this._captionPrefetchWindowMs = 180000;
+        this._captionPrefetchBatchSize = 24;
+        this._captionPrefetchBatchMaxChars = 2400;
+        this._captionFastPrefetchBatchSize = 8;
         this._captionBatchQueue = new Map();
+        this._captionBatchInFlight = new Map();
         this._captionBatchTimer = null;
-        this._captionBatchDelayMs = 220;
-        this._captionBatchMaxSize = 4;
+        this._captionBatchDelayMs = 120;
+        this._captionBatchMaxSize = 6;
+        this._captionDebugEventId = 0;
+        this.handleRealtimeCaptionOverlayPointerMove =
+            this.handleRealtimeCaptionOverlayPointerMove.bind(this);
+        this.handleRealtimeCaptionOverlayPointerUp =
+            this.handleRealtimeCaptionOverlayPointerUp.bind(this);
 
         this.addListeners();
     }
@@ -254,9 +283,16 @@ class BannerController {
             DEFAULT_SETTINGS
         ).then((result) => {
             const localConfig = result.LocalTranslatorConfig || {};
-            const engine = localConfig.mode === "openai" ? "openai" : "googleAiStudio";
+            const engine =
+                localConfig.mode === "openai" || localConfig.mode === "openaiCompatible"
+                    ? localConfig.mode
+                    : "googleAiStudio";
             const model =
-                engine === "openai" ? localConfig.openaiModel || "" : localConfig.model || "";
+                engine === "openai"
+                    ? localConfig.openaiModel || ""
+                    : engine === "openaiCompatible"
+                    ? localConfig.openaiCompatibleModel || ""
+                    : localConfig.model || "";
             this.startDomPageTranslate({
                 engine,
                 model,
@@ -269,6 +305,7 @@ class BannerController {
 
     normalizeDomPageTranslateEngine(engine) {
         if (engine === "openai") return "openai";
+        if (engine === "openaiCompatible") return "openaiCompatible";
         return "googleAiStudio";
     }
 
@@ -322,6 +359,7 @@ class BannerController {
         if (!this.isYouTubePage()) return;
         if (this._captionModeEnabled) return;
         this._captionModeEnabled = true;
+        this.logRealtimeCaptionDebug("mode:start");
         this.ensureRealtimeCaptionOverlay();
         const schedule = () => this.scheduleRealtimeCaptionTranslation();
         this._captionObserver = new MutationObserver(schedule);
@@ -337,6 +375,7 @@ class BannerController {
 
     stopRealtimeCaptionTranslation() {
         this._captionModeEnabled = false;
+        this.logRealtimeCaptionDebug("mode:stop");
         if (this._captionObserver) {
             this._captionObserver.disconnect();
             this._captionObserver = null;
@@ -345,6 +384,7 @@ class BannerController {
             clearTimeout(this._captionDebounceTimer);
             this._captionDebounceTimer = null;
         }
+        this.clearRealtimeCaptionStabilizeTimer();
         if (this._captionPollTimer) {
             clearInterval(this._captionPollTimer);
             this._captionPollTimer = null;
@@ -361,19 +401,87 @@ class BannerController {
         this._captionLastSource = "";
         this._captionRenderedSource = "";
         this._captionPendingSource = "";
+        this._captionPendingSources = [];
+        this._captionVisibleSources = [];
+        this._captionVisibleSourceSeq = 0;
+        this._captionLastDisplayedVisibleSeq = 0;
+        this._captionMergedReplacementSources.clear();
         this._captionDisplayItems = [];
         this._captionPrefetchVideoId = "";
         this._captionPrefetchTrackKey = "";
+        this._captionPrefetchEmptyTrackKeys.clear();
+        this._captionPrefetchAllEmptyKey = "";
+        this._captionPrefetchAllEmptyAt = 0;
         this._captionPrefetchCues = [];
         this._captionPrefetchLoadPromise = null;
         this._captionPrefetchInFlight.clear();
         this._captionBatchQueue.clear();
+        this._captionBatchInFlight.clear();
         this._captionInFlight = false;
         this._captionInFlightSource = "";
         this._captionLastRequestId += 1;
         if (this._captionOverlay) {
             this._captionOverlay.style.opacity = "0";
             this._captionOverlay.hidden = true;
+        }
+    }
+
+    isRealtimeCaptionDebugEnabled() {
+        try {
+            return (
+                localStorage.getItem("edgeTranslate.captionDebug") === "1" ||
+                window.__edgeTranslateCaptionDebug === true
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    logRealtimeCaptionDebug(event, detail = {}) {
+        if (!this.isRealtimeCaptionDebugEnabled()) return;
+        const payload = {
+            id: ++this._captionDebugEventId,
+            event,
+            at: Date.now(),
+            videoTimeMs: Math.round(this.getCurrentVideoTimeMs()),
+            ...detail,
+        };
+        try {
+            window.__edgeTranslateCaptionDebugEvents =
+                window.__edgeTranslateCaptionDebugEvents || [];
+            window.__edgeTranslateCaptionDebugEvents.push(payload);
+            if (window.__edgeTranslateCaptionDebugEvents.length > 500) {
+                window.__edgeTranslateCaptionDebugEvents.splice(
+                    0,
+                    window.__edgeTranslateCaptionDebugEvents.length - 500
+                );
+            }
+            this.mirrorRealtimeCaptionDebugEvents(window.__edgeTranslateCaptionDebugEvents);
+        } catch {
+            // Debug storage is best-effort.
+        }
+        try {
+            console.log("[ET][Caption]", event, payload);
+        } catch {
+            // Console may be unavailable in test-like contexts.
+        }
+    }
+
+    mirrorRealtimeCaptionDebugEvents(events) {
+        try {
+            const documentElement = document?.documentElement;
+            if (!documentElement) return;
+            let node = document.getElementById("edge-translate-caption-debug-log");
+            if (!node) {
+                node = document.createElement("script");
+                node.id = "edge-translate-caption-debug-log";
+                node.type = "application/json";
+                node.dataset.edgeTranslateDebug = "caption";
+                documentElement.appendChild(node);
+            }
+            node.textContent = JSON.stringify(events.slice(-120));
+        } catch {
+            // DOM mirroring is diagnostic-only.
         }
     }
 
@@ -387,7 +495,7 @@ class BannerController {
             left: "50%",
             bottom: "clamp(92px, 18vh, 180px)",
             transform: "translateX(-50%)",
-            maxWidth: "min(78vw, 900px)",
+            maxWidth: "min(88vw, 1120px)",
             maxHeight: "28vh",
             padding: "10px 18px",
             borderRadius: "18px",
@@ -412,15 +520,103 @@ class BannerController {
             overflow: "hidden",
             overflowWrap: "break-word",
             whiteSpace: "pre-wrap",
-            pointerEvents: "none",
+            pointerEvents: "auto",
+            userSelect: "none",
+            touchAction: "none",
+            cursor: this._captionOverlayDraggable ? "grab" : "default",
             zIndex: "2147483647",
             opacity: "0",
             transition: "opacity 120ms cubic-bezier(.2, 0, 0, 1)",
         });
+        overlay.addEventListener("pointerdown", (event) =>
+            this.handleRealtimeCaptionOverlayPointerDown(event)
+        );
         overlay.hidden = true;
         document.documentElement.appendChild(overlay);
         this._captionOverlay = overlay;
+        this.applyRealtimeCaptionOverlayPosition(overlay);
         return overlay;
+    }
+
+    applyRealtimeCaptionOverlayPosition(overlay = this._captionOverlay) {
+        if (!overlay) return;
+        overlay.style.cursor = this._captionOverlayDraggable ? "grab" : "default";
+        if (!this._captionOverlayPosition) {
+            Object.assign(overlay.style, {
+                left: "50%",
+                top: "auto",
+                bottom: "clamp(92px, 18vh, 180px)",
+                transform: "translateX(-50%)",
+            });
+            return;
+        }
+        const width = overlay.offsetWidth || Math.min(window.innerWidth * 0.88, 1120);
+        const height = overlay.offsetHeight || 96;
+        const left = Math.min(
+            Math.max(8, this._captionOverlayPosition.left),
+            window.innerWidth - width - 8
+        );
+        const top = Math.min(
+            Math.max(8, this._captionOverlayPosition.top),
+            window.innerHeight - height - 8
+        );
+        this._captionOverlayPosition = { left, top };
+        Object.assign(overlay.style, {
+            left: `${left}px`,
+            top: `${top}px`,
+            bottom: "auto",
+            transform: "none",
+        });
+    }
+
+    handleRealtimeCaptionOverlayPointerDown(event) {
+        if (!this._captionOverlayDraggable || event.button !== 0) return;
+        const overlay = this._captionOverlay;
+        if (!overlay) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = overlay.getBoundingClientRect();
+        this._captionOverlayDragState = {
+            offsetX: event.clientX - rect.left,
+            offsetY: event.clientY - rect.top,
+            width: rect.width,
+            height: rect.height,
+        };
+        overlay.style.cursor = "grabbing";
+        document.addEventListener("pointermove", this.handleRealtimeCaptionOverlayPointerMove);
+        document.addEventListener("pointerup", this.handleRealtimeCaptionOverlayPointerUp, {
+            once: true,
+        });
+    }
+
+    handleRealtimeCaptionOverlayPointerMove(event) {
+        const overlay = this._captionOverlay;
+        const drag = this._captionOverlayDragState;
+        if (!overlay || !drag) return;
+        event.preventDefault();
+        const left = Math.min(
+            Math.max(8, event.clientX - drag.offsetX),
+            window.innerWidth - drag.width - 8
+        );
+        const top = Math.min(
+            Math.max(8, event.clientY - drag.offsetY),
+            window.innerHeight - drag.height - 8
+        );
+        this._captionOverlayPosition = { left, top };
+        Object.assign(overlay.style, {
+            left: `${left}px`,
+            top: `${top}px`,
+            bottom: "auto",
+            transform: "none",
+        });
+    }
+
+    handleRealtimeCaptionOverlayPointerUp() {
+        document.removeEventListener("pointermove", this.handleRealtimeCaptionOverlayPointerMove);
+        if (this._captionOverlay) {
+            this._captionOverlay.style.cursor = this._captionOverlayDraggable ? "grab" : "default";
+        }
+        this._captionOverlayDragState = null;
     }
 
     ensureRealtimeCaptionAnimationStyle() {
@@ -459,6 +655,39 @@ class BannerController {
                     filter: none !important;
                 }
             }
+            #edge-translate-realtime-caption #edge-translate-caption-close-btn {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                width: 20px;
+                height: 20px;
+                border: 0;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.16);
+                color: rgba(255, 255, 255, 0.8);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 200ms cubic-bezier(0.34, 1.8, 0.5, 1), background-color 200ms ease, color 200ms ease, transform 200ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                padding: 0;
+                box-sizing: border-box;
+                z-index: 10000;
+            }
+            #edge-translate-realtime-caption:hover #edge-translate-caption-close-btn {
+                opacity: 1;
+                pointer-events: auto;
+            }
+            #edge-translate-realtime-caption #edge-translate-caption-close-btn:hover {
+                background: rgba(255, 255, 255, 0.3);
+                color: #fff;
+                transform: scale(1.1);
+            }
+            #edge-translate-realtime-caption #edge-translate-caption-close-btn:active {
+                transform: scale(0.9);
+            }
         `;
         document.documentElement.appendChild(style);
     }
@@ -473,8 +702,8 @@ class BannerController {
         const overlay = this.ensureRealtimeCaptionOverlay();
         this.clearRealtimeCaptionHideTimer();
         if (replaceHistory) this._captionDisplayItems = [];
-        this.pushRealtimeCaptionDisplayItem(text, sourceText);
-        this.renderRealtimeCaptionOverlay();
+        const changed = this.pushRealtimeCaptionDisplayItem(text, sourceText);
+        if (changed) this.renderRealtimeCaptionOverlay();
         overlay.hidden = false;
         overlay.style.opacity = "1";
         this._captionRenderedSource = sourceText;
@@ -484,20 +713,66 @@ class BannerController {
     pushRealtimeCaptionDisplayItem(text, sourceText) {
         const translatedText = String(text || "").trim();
         const source = String(sourceText || "");
-        if (!translatedText) return;
-        this._captionDisplayItems = this._captionDisplayItems.filter(
-            (item) => item.source !== source && item.text !== translatedText
-        );
-        this._captionDisplayItems.push({ source, text: translatedText });
-        if (this._captionDisplayItems.length > this._captionDisplayMax) {
-            this._captionDisplayItems = this._captionDisplayItems.slice(-this._captionDisplayMax);
+        if (!translatedText) return false;
+        const lastItem = this._captionDisplayItems.at(-1);
+        if (lastItem?.source === source && lastItem?.text === translatedText) return false;
+
+        let replacedFragment = false;
+        let replacementIndex = -1;
+        const nextItems = [];
+        this._captionDisplayItems.forEach((item) => {
+            const duplicate = item.source === source || item.text === translatedText;
+            const replacedByMergedSource =
+                this.realtimeCaptionSourceIncludes(source, item.source) ||
+                this.realtimeCaptionSourceIncludes(translatedText, item.text);
+            if (replacedByMergedSource) {
+                replacedFragment = true;
+                if (replacementIndex < 0) replacementIndex = nextItems.length;
+            }
+            if (!duplicate && !replacedByMergedSource) nextItems.push(item);
+        });
+        const nextItem = {
+            source,
+            text: translatedText,
+            expanded: replacedFragment,
+        };
+        if (replacementIndex >= 0) {
+            nextItems.splice(replacementIndex, 0, nextItem);
+        } else {
+            nextItems.push(nextItem);
         }
+        this._captionDisplayItems = nextItems;
+        const historyMax = Math.max(
+            this._captionDisplayMax + this._captionStabilizeMaxSources + 2,
+            6
+        );
+        if (this._captionDisplayItems.length > historyMax) {
+            this._captionDisplayItems = this._captionDisplayItems.slice(-historyMax);
+        }
+        return true;
+    }
+
+    realtimeCaptionSourceIncludes(sourceText, fragmentText) {
+        const source = this.normalizeRealtimeCaptionCacheText(sourceText);
+        const fragment = this.normalizeRealtimeCaptionCacheText(fragmentText);
+        return Boolean(source && fragment && source !== fragment && source.includes(fragment));
+    }
+
+    getRealtimeCaptionDisplayMax() {
+        const recentItems = this._captionDisplayItems.slice(-Math.max(3, this._captionDisplayMax));
+        return recentItems.some((item) => item.expanded)
+            ? Math.max(3, this._captionDisplayMax)
+            : this._captionDisplayMax;
     }
 
     renderRealtimeCaptionOverlay() {
         const overlay = this.ensureRealtimeCaptionOverlay();
         overlay.replaceChildren();
-        const items = this._captionDisplayItems.slice(-this._captionDisplayMax);
+        const displayMax = this.getRealtimeCaptionDisplayMax();
+        const items = this._captionDisplayItems.slice(-displayMax);
+        const expanded = items.some((item) => item.expanded);
+        overlay.dataset.expanded = expanded ? "true" : "false";
+        overlay.style.maxHeight = expanded ? "34vh" : "28vh";
         items.forEach((item, index) => {
             const isCurrent = index === items.length - 1;
             const line = document.createElement("div");
@@ -514,11 +789,27 @@ class BannerController {
                 animation: isCurrent
                     ? "edgeCaptionCurrentSlide 190ms 35ms cubic-bezier(.2, 0, 0, 1) both"
                     : "edgeCaptionPreviousLift 180ms cubic-bezier(.2, 0, 0, 1) both",
-                textWrap: "balance",
+                textWrap: isCurrent ? "wrap" : "balance",
                 overflowWrap: "break-word",
             });
             overlay.appendChild(line);
         });
+
+        // Create close button
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.id = "edge-translate-caption-close-btn";
+        closeBtn.setAttribute("aria-label", "Close subtitle translation");
+        closeBtn.innerHTML =
+            "<svg viewBox='0 0 24 24' style='width: 12px; height: 12px; fill: currentColor; display: block;'><path d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/></svg>";
+        closeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+        closeBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+        closeBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.setRealtimeCaptionTranslation(false);
+        });
+        overlay.appendChild(closeBtn);
     }
 
     scheduleRealtimeCaptionOverlayHide(delay = this._captionHoldAfterMissingMs) {
@@ -532,17 +823,34 @@ class BannerController {
             overlay.hidden = true;
             this._captionDisplayItems = [];
             this._captionRenderedSource = "";
+            this._captionLastDisplayedVisibleSeq = 0;
         }, delay);
     }
 
     hideRealtimeCaptionOverlayNow() {
         this.clearRealtimeCaptionHideTimer();
+        this.clearRealtimeCaptionStabilizeTimer();
         if (this._captionOverlay) {
             this._captionOverlay.style.opacity = "0";
             this._captionOverlay.hidden = true;
         }
         this._captionDisplayItems = [];
         this._captionRenderedSource = "";
+        this._captionLastDisplayedVisibleSeq = 0;
+    }
+
+    clearRealtimeCaptionStabilizeTimer() {
+        if (this._captionStabilizeTimer) {
+            clearTimeout(this._captionStabilizeTimer);
+            this._captionStabilizeTimer = null;
+        }
+        if (this._captionStabilizeResolve) {
+            this._captionStabilizeResolve(false);
+        }
+        this._captionStabilizePromise = null;
+        this._captionStabilizeResolve = null;
+        this._captionStabilizeTargetSource = "";
+        this._captionStabilizeTargetVisibleSource = "";
     }
 
     scheduleRealtimeCaptionTranslation() {
@@ -551,11 +859,11 @@ class BannerController {
         this._captionDebounceTimer = setTimeout(() => {
             this._captionDebounceTimer = null;
             this.translateCurrentRealtimeCaption();
-        }, 80);
+        }, this._captionDebounceMs);
         this.scheduleYouTubeCaptionPrefetch();
     }
 
-    scheduleYouTubeCaptionPrefetch(delay = 600) {
+    scheduleYouTubeCaptionPrefetch(delay = 300) {
         if (
             !this._captionModeEnabled ||
             this._captionPrefetchTimer ||
@@ -569,13 +877,15 @@ class BannerController {
         }, delay);
     }
 
-    getCurrentYouTubeCaptionText() {
+    getCurrentYouTubeCaptionText({ singleWindow = false } = {}) {
         const normalize = (value) =>
             String(value || "")
+                .replace(/[\u200B-\u200D\uFEFF]/g, "")
                 .replace(/\u00a0/g, " ")
                 .replace(/[ \t\f\v]+/g, " ")
                 .replace(/ *\n */g, "\n")
                 .trim();
+        const splitCaptionLines = (value) => normalize(value).split("\n").filter(Boolean);
         const isVisible = (node) => {
             const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
             if (!element) return false;
@@ -588,7 +898,7 @@ class BannerController {
             const seen = new Set();
             return Array.from(nodes)
                 .filter(isVisible)
-                .map((node) => normalize(node.textContent))
+                .flatMap((node) => splitCaptionLines(node.textContent))
                 .filter(Boolean)
                 .filter((text) => {
                     if (seen.has(text)) return false;
@@ -596,10 +906,25 @@ class BannerController {
                     return true;
                 });
         };
-        const containers = Array.from(
-            document.querySelectorAll(".ytp-caption-window-container, .caption-window")
-        ).filter(isVisible);
-        const containerLines = containers.flatMap((container) => {
+        const collapseRepeatedLineBlock = (lines) => {
+            const normalizedLines = lines.map((line) =>
+                this.normalizeRealtimeCaptionCacheText(line)
+            );
+            const lineCount = normalizedLines.length;
+            for (let blockSize = 1; blockSize <= Math.floor(lineCount / 2); blockSize += 1) {
+                if (lineCount % blockSize !== 0) continue;
+                let repeated = true;
+                for (let index = blockSize; index < lineCount; index += 1) {
+                    if (normalizedLines[index] !== normalizedLines[index % blockSize]) {
+                        repeated = false;
+                        break;
+                    }
+                }
+                if (repeated) return lines.slice(0, blockSize);
+            }
+            return lines;
+        };
+        const getContainerLines = (container) => {
             const segmentLines = fromNodes(
                 container.querySelectorAll(
                     ".ytp-caption-segment, .caption-visual-line, [class*='caption-segment']"
@@ -610,13 +935,31 @@ class BannerController {
             return genericLines.length
                 ? genericLines
                 : [normalize(container.textContent)].filter(Boolean);
-        });
+        };
+        const containers = Array.from(
+            document.querySelectorAll(".ytp-caption-window-container, .caption-window")
+        ).filter(isVisible);
+        const captionWindows = containers.filter((container) =>
+            container.classList?.contains("caption-window")
+        );
+        const selectedContainers =
+            singleWindow && captionWindows.length ? [captionWindows[0]] : containers;
+        const containerLines = selectedContainers.flatMap(getContainerLines);
         const lines = containerLines.length
             ? containerLines
             : fromNodes(
                   document.querySelectorAll(".ytp-caption-segment, [class*='caption-segment']")
               );
-        return lines.join("\n").trim();
+        const uniqueLines = [];
+        const seenLines = new Set();
+        for (const line of lines) {
+            const key = this.normalizeRealtimeCaptionCacheText(line);
+            if (key && !seenLines.has(key)) {
+                seenLines.add(key);
+                uniqueLines.push(line);
+            }
+        }
+        return collapseRepeatedLineBlock(uniqueLines).join("\n").trim();
     }
 
     getYouTubeVideoElement() {
@@ -649,6 +992,120 @@ class BannerController {
         return Boolean(this.getCurrentYouTubeCaptionText());
     }
 
+    normalizeRealtimeCaptionVisibleSource(sourceText) {
+        return String(sourceText || "")
+            .replace(/\u00a0/g, " ")
+            .replace(/[ \t\f\v]+/g, " ")
+            .replace(/ *\n */g, "\n")
+            .trim();
+    }
+
+    recordRealtimeCaptionVisibleSource(sourceText) {
+        const normalized = this.normalizeRealtimeCaptionVisibleSource(sourceText);
+        if (!normalized) return;
+        const now = Date.now();
+        this._captionVisibleSources = this._captionVisibleSources.filter(
+            (entry) => now - entry.at <= this._captionStabilizeWindowMs
+        );
+        const last = this._captionVisibleSources.at(-1);
+        if (last?.text === normalized) {
+            last.at = now;
+        } else {
+            this._captionVisibleSources.push({
+                text: normalized,
+                at: now,
+                seq: ++this._captionVisibleSourceSeq,
+            });
+        }
+        if (this._captionVisibleSources.length > this._captionVisibleHistoryMax) {
+            this._captionVisibleSources = this._captionVisibleSources.slice(
+                -this._captionVisibleHistoryMax
+            );
+        }
+    }
+
+    isRealtimeCaptionOpenEnded(sourceText) {
+        const normalized = this.normalizeRealtimeCaptionVisibleSource(sourceText);
+        if (!normalized) return false;
+        return !/[.!?。！？…)"'”’\]]$/.test(normalized);
+    }
+
+    buildStabilizedRealtimeCaptionSource(sourceText) {
+        const now = Date.now();
+        const recent = this._captionVisibleSources
+            .filter((entry) => now - entry.at <= this._captionStabilizeWindowMs)
+            .slice(-this._captionStabilizeMaxSources);
+        const current = this.normalizeRealtimeCaptionVisibleSource(sourceText);
+        if (current && !recent.some((entry) => entry.text === current)) {
+            recent.push({ text: current, at: now });
+        }
+        const texts = [];
+        recent.forEach((entry) => {
+            const text = this.normalizeRealtimeCaptionVisibleSource(entry.text);
+            if (!text) return;
+            if (texts.some((existing) => existing.includes(text))) return;
+            for (let index = texts.length - 1; index >= 0; index -= 1) {
+                if (text.includes(texts[index])) texts.splice(index, 1);
+            }
+            texts.push(text);
+        });
+        return texts.join("\n").trim();
+    }
+
+    shouldStabilizeRealtimeCaptionSource(sourceText, requestSourceText, options = {}) {
+        if (!sourceText || !requestSourceText) return false;
+        const cacheKey = this.getRealtimeCaptionCacheKey(requestSourceText, options);
+        if (this._captionTranslationCache.has(cacheKey)) return false;
+        if (this.isRealtimeCaptionOpenEnded(sourceText)) return true;
+        const now = Date.now();
+        return this._captionVisibleSources
+            .slice(0, -1)
+            .some(
+                (entry) =>
+                    now - entry.at <= this._captionStabilizeWindowMs &&
+                    this.isRealtimeCaptionOpenEnded(entry.text) &&
+                    !sourceText.includes(entry.text)
+            );
+    }
+
+    waitForRealtimeCaptionStability(sourceText, requestSourceText) {
+        if (
+            this._captionStabilizeTimer &&
+            this._captionStabilizeTargetVisibleSource === sourceText &&
+            this._captionStabilizeTargetSource === requestSourceText &&
+            this._captionStabilizePromise
+        ) {
+            return this._captionStabilizePromise;
+        }
+        this.clearRealtimeCaptionStabilizeTimer();
+        this._captionStabilizeTargetSource = requestSourceText;
+        this._captionStabilizeTargetVisibleSource = sourceText;
+        this.logRealtimeCaptionDebug("display:stabilize-wait", {
+            chars: requestSourceText.length,
+            visibleChars: sourceText.length,
+        });
+        this._captionStabilizePromise = new Promise((resolve) => {
+            this._captionStabilizeResolve = resolve;
+            this._captionStabilizeTimer = setTimeout(() => {
+                this._captionStabilizeTimer = null;
+                this._captionStabilizePromise = null;
+                this._captionStabilizeResolve = null;
+                const currentSource = this.getCurrentYouTubeCaptionText();
+                if (!this._captionModeEnabled || !currentSource) {
+                    resolve(false);
+                    return;
+                }
+                this.recordRealtimeCaptionVisibleSource(currentSource);
+                const stabilizedSource =
+                    this.buildStabilizedRealtimeCaptionSource(currentSource) || currentSource;
+                this._captionStabilizeTargetSource = "";
+                this._captionStabilizeTargetVisibleSource = "";
+                resolve(stabilizedSource);
+            }, this._captionStabilizeDelayMs);
+        });
+        return this._captionStabilizePromise;
+    }
+
     isYouTubeCaptionTranslationAllowed() {
         if (!this.isYouTubeVideoActive()) return false;
         if (this.hasVisibleYouTubeCaptionText()) return true;
@@ -667,21 +1124,52 @@ class BannerController {
             return this._captionOptionsCache;
         }
         const result = await getOrSetDefaultSettings(
-            ["languageSetting", "LocalTranslatorConfig", "DefaultTranslator"],
+            [
+                "languageSetting",
+                "LocalTranslatorConfig",
+                "DefaultTranslator",
+                "RealtimeCaptionConfig",
+            ],
             DEFAULT_SETTINGS
         );
         const localConfig = result.LocalTranslatorConfig || {};
-        const aiMode = localConfig.mode === "googleAiStudio" || localConfig.mode === "openai";
+        const aiMode =
+            localConfig.mode === "googleAiStudio" ||
+            localConfig.mode === "openai" ||
+            localConfig.mode === "openaiCompatible";
+        const captionConfig = result.RealtimeCaptionConfig || {};
+        const translatorMode = captionConfig.translatorMode === "google" ? "google" : "ai";
+        const useAi = localConfig.enabled && aiMode && translatorMode === "ai";
+        const translatorId =
+            translatorMode === "google"
+                ? "GoogleTranslate"
+                : useAi
+                ? "LocalTranslate"
+                : "GoogleTranslate";
+        const engine = translatorId === "LocalTranslate" ? localConfig.mode : "";
+        this._captionOverlayDraggable = captionConfig.draggableOverlay !== false;
+        this.applyRealtimeCaptionOverlayPosition();
         const options = {
             sl: result.languageSetting?.sl || "auto",
             tl: result.languageSetting?.tl || "en",
-            translatorId:
-                localConfig.enabled && aiMode ? "LocalTranslate" : result.DefaultTranslator,
-            engine: localConfig.enabled && aiMode ? localConfig.mode : "",
+            translatorId,
+            engine,
+            fastTranslatorId: "",
         };
         this._captionOptionsCache = options;
         this._captionOptionsCacheAt = now;
         return options;
+    }
+
+    getRealtimeCaptionFastOptions(options = {}) {
+        const fastTranslatorId = options.fastTranslatorId || "";
+        if (!fastTranslatorId || fastTranslatorId === options.translatorId) return null;
+        return {
+            sl: options.sl,
+            tl: options.tl,
+            translatorId: fastTranslatorId,
+            engine: "",
+        };
     }
 
     normalizeRealtimeCaptionCacheText(text) {
@@ -780,17 +1268,45 @@ class BannerController {
             .split("-")[0];
     }
 
+    getYouTubePlayerElement() {
+        return (
+            document.getElementById("movie_player") || document.querySelector(".html5-video-player")
+        );
+    }
+
+    getYouTubeActiveCaptionTrack() {
+        try {
+            const player = this.getYouTubePlayerElement();
+            if (!player || typeof player.getOption !== "function") return null;
+            const track = player.getOption("captions", "track");
+            return track && typeof track === "object" ? track : null;
+        } catch {
+            return null;
+        }
+    }
+
+    captionTracksMatch(candidate, activeTrack) {
+        if (!candidate || !activeTrack) return false;
+        const candidateVssId = String(candidate.vssId || "");
+        const activeVssId = String(activeTrack.vssId || activeTrack.vss_id || "");
+        if (candidateVssId && activeVssId && candidateVssId === activeVssId) return true;
+
+        const candidateLanguage = this.normalizeCaptionLanguageCode(candidate.languageCode);
+        const activeLanguage = this.normalizeCaptionLanguageCode(
+            activeTrack.languageCode || activeTrack.langCode || activeTrack.lang
+        );
+        return Boolean(candidateLanguage && activeLanguage && candidateLanguage === activeLanguage);
+    }
+
     pickYouTubeCaptionTrack(tracks, options) {
+        return this.getYouTubeCaptionTrackCandidates(tracks, options)[0] || null;
+    }
+
+    getYouTubeCaptionTrackCandidates(tracks, options) {
         const candidates = tracks.filter((track) => track?.baseUrl);
-        if (!candidates.length) return null;
+        if (!candidates.length) return [];
         const sourceLanguage = this.normalizeCaptionLanguageCode(options.sl);
         const targetLanguage = this.normalizeCaptionLanguageCode(options.tl);
-        if (sourceLanguage && sourceLanguage !== "auto") {
-            const exact = candidates.find(
-                (track) => this.normalizeCaptionLanguageCode(track.languageCode) === sourceLanguage
-            );
-            if (exact) return exact;
-        }
         const nonTarget =
             targetLanguage && targetLanguage !== "auto"
                 ? candidates.filter(
@@ -798,11 +1314,26 @@ class BannerController {
                           this.normalizeCaptionLanguageCode(track.languageCode) !== targetLanguage
                   )
                 : candidates;
-        return (
-            nonTarget.find((track) => !/^a\./.test(track.vssId || "")) ||
-            nonTarget[0] ||
-            candidates[0]
+        const activeTrack = this.getYouTubeActiveCaptionTrack();
+        const activeCandidate = nonTarget.find((track) =>
+            this.captionTracksMatch(track, activeTrack)
         );
+        const ordered = [];
+        const pushCandidate = (track) => {
+            if (!track || ordered.includes(track)) return;
+            ordered.push(track);
+        };
+        pushCandidate(activeCandidate);
+        if (sourceLanguage && sourceLanguage !== "auto") {
+            const exact = candidates.find(
+                (track) => this.normalizeCaptionLanguageCode(track.languageCode) === sourceLanguage
+            );
+            pushCandidate(exact);
+        }
+        nonTarget.filter((track) => !/^a\./.test(track.vssId || "")).forEach(pushCandidate);
+        nonTarget.forEach(pushCandidate);
+        candidates.forEach(pushCandidate);
+        return ordered;
     }
 
     getYouTubeCaptionTrackUrl(track) {
@@ -818,13 +1349,26 @@ class BannerController {
     async fetchYouTubeCaptionCues(track) {
         const url = this.getYouTubeCaptionTrackUrl(track);
         if (!url || typeof fetch !== "function") return [];
+        this.logRealtimeCaptionDebug("track:fetch", {
+            languageCode: track.languageCode || "",
+            vssId: track.vssId || "",
+        });
         const response = await fetch(url, { credentials: "include" });
-        if (!response?.ok) return [];
+        if (!response?.ok) {
+            this.logRealtimeCaptionDebug("track:fetch-fail", { status: response?.status || 0 });
+            return [];
+        }
         const body = await response.text();
         const cues = body.trim().startsWith("{")
             ? this.parseYouTubeJsonCaptionCues(body)
             : this.parseYouTubeXmlCaptionCues(body);
-        return this.addYouTubeCaptionCueGroups(this.compactYouTubeCaptionCues(cues));
+        const compacted = this.addYouTubeCaptionCueGroups(this.compactYouTubeCaptionCues(cues));
+        this.logRealtimeCaptionDebug("track:loaded", {
+            cues: compacted.length,
+            firstStartMs: compacted[0]?.startMs || 0,
+            lastStartMs: compacted[compacted.length - 1]?.startMs || 0,
+        });
+        return compacted;
     }
 
     parseYouTubeJsonCaptionCues(body) {
@@ -911,23 +1455,73 @@ class BannerController {
             if (videoId && videoId !== this._captionPrefetchVideoId) {
                 this._captionPrefetchVideoId = videoId;
                 this._captionPrefetchTrackKey = "";
+                this._captionPrefetchEmptyTrackKeys.clear();
+                this._captionPrefetchAllEmptyKey = "";
+                this._captionPrefetchAllEmptyAt = 0;
                 this._captionPrefetchCues = [];
             }
-            const track = this.pickYouTubeCaptionTrack(this.getYouTubeCaptionTracks(), options);
-            const trackKey = track
-                ? `${track.baseUrl}|${track.languageCode || ""}|${track.vssId || ""}`
-                : "";
-            if (
-                !track ||
-                (trackKey === this._captionPrefetchTrackKey && this._captionPrefetchCues.length)
-            ) {
+            const tracks = this.getYouTubeCaptionTrackCandidates(
+                this.getYouTubeCaptionTracks(),
+                options
+            );
+            if (!tracks.length) {
                 return false;
             }
-            const cues = await this.fetchYouTubeCaptionCues(track);
-            if (!cues.length) return false;
-            this._captionPrefetchTrackKey = trackKey;
-            this._captionPrefetchCues = cues;
-            return true;
+            const allTracksKey = tracks
+                .map(
+                    (track) =>
+                        `${track.languageCode || ""}:${track.vssId || ""}:${track.baseUrl || ""}`
+                )
+                .join("|");
+            if (
+                allTracksKey &&
+                allTracksKey === this._captionPrefetchAllEmptyKey &&
+                Date.now() - this._captionPrefetchAllEmptyAt < 30000
+            ) {
+                this.logRealtimeCaptionDebug("track:all-empty-skip", {
+                    tracks: tracks.length,
+                });
+                return false;
+            }
+            let triedTrack = false;
+            for (const track of tracks) {
+                const trackKey = `${track.baseUrl}|${track.languageCode || ""}|${
+                    track.vssId || ""
+                }`;
+                if (
+                    trackKey === this._captionPrefetchTrackKey &&
+                    this._captionPrefetchCues.length
+                ) {
+                    return false;
+                }
+                const emptyAt = this._captionPrefetchEmptyTrackKeys.get(trackKey) || 0;
+                if (Date.now() - emptyAt < 30000) {
+                    this.logRealtimeCaptionDebug("track:empty-skip", {
+                        languageCode: track.languageCode || "",
+                        vssId: track.vssId || "",
+                    });
+                    continue;
+                }
+                triedTrack = true;
+                const cues = await this.fetchYouTubeCaptionCues(track);
+                if (!cues.length) {
+                    this._captionPrefetchEmptyTrackKeys.set(trackKey, Date.now());
+                    continue;
+                }
+                this._captionPrefetchEmptyTrackKeys.clear();
+                this._captionPrefetchAllEmptyKey = "";
+                this._captionPrefetchAllEmptyAt = 0;
+                this._captionPrefetchTrackKey = trackKey;
+                this._captionPrefetchCues = cues;
+                this.logRealtimeCaptionDebug("track:ready", { cues: cues.length });
+                return true;
+            }
+            if (triedTrack && allTracksKey) {
+                this._captionPrefetchAllEmptyKey = allTracksKey;
+                this._captionPrefetchAllEmptyAt = Date.now();
+                this.logRealtimeCaptionDebug("track:all-empty", { tracks: tracks.length });
+            }
+            return false;
         })().finally(() => {
             this._captionPrefetchLoadPromise = null;
         });
@@ -941,12 +1535,13 @@ class BannerController {
         }
         try {
             const options = await this.getRealtimeCaptionTranslateOptions();
+            if (this.isGoogleRealtimeCaptionTranslator(options)) return;
             await this.loadYouTubeCaptionPrefetchCues(options);
             this.warmRealtimeCaptionPrefetchCache(options);
         } catch {
             // Prefetch is opportunistic; visible-caption translation remains authoritative.
         } finally {
-            if (reschedule) this.scheduleYouTubeCaptionPrefetch(1000);
+            if (reschedule) this.scheduleYouTubeCaptionPrefetch(350);
         }
     }
 
@@ -979,7 +1574,22 @@ class BannerController {
             }
             index += 1;
         }
+        this.logRealtimeCaptionDebug("prefetch:window", {
+            entries: entries.length,
+            inFlight: this._captionPrefetchInFlight.size,
+            windowEndMs,
+        });
         this.prefetchRealtimeCaptionSources(entries, options);
+        const fastOptions = this.getRealtimeCaptionFastOptions(options);
+        if (fastOptions) {
+            const fastEntries = entries
+                .slice(0, this._captionFastPrefetchBatchSize)
+                .map((entry) =>
+                    this.createRealtimeCaptionPrefetchEntry(entry.sourceText, fastOptions)
+                )
+                .filter(Boolean);
+            this.prefetchRealtimeCaptionSourcesIndividually(fastEntries, fastOptions);
+        }
     }
 
     createRealtimeCaptionPrefetchEntry(sourceText, options) {
@@ -1000,6 +1610,15 @@ class BannerController {
         return this.prefetchRealtimeCaptionSources([entry], options);
     }
 
+    prefetchRealtimeCaptionSourcesIndividually(entries, options) {
+        const limitedEntries = entries.slice(0, this._captionFastPrefetchBatchSize);
+        if (!limitedEntries.length) return false;
+        limitedEntries.forEach((entry) => {
+            this.prefetchRealtimeCaptionSources([entry], options);
+        });
+        return true;
+    }
+
     prefetchRealtimeCaptionSources(entries, options) {
         if (!entries.length) return false;
         entries.forEach((entry) => this._captionPrefetchInFlight.add(entry.cacheKey));
@@ -1016,37 +1635,140 @@ class BannerController {
             translationProfile: isBatch ? "realtimeCaptionBatch" : "realtimeCaption",
         };
         if (options.engine) request.engine = options.engine;
+        this.logRealtimeCaptionDebug("prefetch:request", {
+            entries: entries.length,
+            isBatch,
+            chars: text.length,
+            engine: options.engine || options.translatorId || "",
+        });
         Promise.resolve(this.channel.request("translate_text_quiet", request))
             .then((result) => {
                 const translated = String(
                     result?.mainMeaning || result?.translatedText || ""
                 ).trim();
-                if (!translated || result?.translationFailed) return;
+                if (!translated || result?.translationFailed) {
+                    this.logRealtimeCaptionDebug("prefetch:empty", {
+                        entries: entries.length,
+                        failed: Boolean(result?.translationFailed),
+                    });
+                    return;
+                }
                 if (!isBatch) {
                     this.cacheRealtimeCaptionTranslation(entries[0].cacheKey, translated);
+                    this.logRealtimeCaptionDebug("prefetch:cached", { entries: 1 });
                     return;
                 }
                 const parsed = this.parseRealtimeCaptionBatchTranslation(
                     translated,
                     entries.length
                 );
+                let cachedCount = 0;
                 entries.forEach((entry, index) => {
-                    if (parsed[index])
+                    if (parsed[index]) {
                         this.cacheRealtimeCaptionTranslation(entry.cacheKey, parsed[index]);
+                        cachedCount += 1;
+                    }
+                });
+                this.logRealtimeCaptionDebug("prefetch:cached", {
+                    entries: entries.length,
+                    cached: cachedCount,
                 });
             })
-            .catch(() => {})
+            .catch((error) => {
+                this.logRealtimeCaptionDebug("prefetch:error", {
+                    message: error?.message || String(error || ""),
+                });
+            })
             .finally(() => {
                 entries.forEach((entry) => this._captionPrefetchInFlight.delete(entry.cacheKey));
             });
         return true;
     }
 
-    findPrefetchedRealtimeCaptionTranslation(sourceText, options) {
-        const direct = this._captionTranslationCache.get(
-            this.getRealtimeCaptionCacheKey(sourceText, options)
+    getActivePrefetchedCaptionCues(sourceText = "") {
+        if (!this._captionPrefetchCues.length) return [];
+        const currentMs = this.getCurrentVideoTimeMs();
+        const normalizedSource = this.normalizeRealtimeCaptionCacheText(sourceText);
+        const active = this._captionPrefetchCues.filter(
+            (cue) => cue.startMs <= currentMs + 700 && cue.endMs >= currentMs - 700
         );
-        if (direct) return { text: direct };
+        if (!normalizedSource || !active.length) return active;
+        const exact = active.filter(
+            (cue) => this.normalizeRealtimeCaptionCacheText(cue.text) === normalizedSource
+        );
+        if (exact.length) return exact;
+        const joined = this.normalizeRealtimeCaptionCacheText(
+            active.map((cue) => cue.text).join("\n")
+        );
+        if (joined === normalizedSource) return active;
+        return active.filter((cue) => {
+            const cueText = this.normalizeRealtimeCaptionCacheText(cue.text);
+            return (
+                cueText &&
+                (normalizedSource.includes(cueText) || cueText.includes(normalizedSource))
+            );
+        });
+    }
+
+    findPrefetchedRealtimeCaptionTranslation(sourceText, options) {
+        const lookupOptions = [options, this.getRealtimeCaptionFastOptions(options)].filter(
+            Boolean
+        );
+        for (const candidateOptions of lookupOptions) {
+            const direct = this._captionTranslationCache.get(
+                this.getRealtimeCaptionCacheKey(sourceText, candidateOptions)
+            );
+            if (direct) {
+                this.logRealtimeCaptionDebug("display:cache-hit", {
+                    mode:
+                        candidateOptions.translatorId === options.translatorId
+                            ? "direct"
+                            : "fast-direct",
+                    sourceLength: sourceText.length,
+                });
+                return {
+                    text: direct,
+                    fast: candidateOptions.translatorId !== options.translatorId,
+                };
+            }
+        }
+        const activeCues = this.getActivePrefetchedCaptionCues(sourceText);
+        if (activeCues.length) {
+            for (const candidateOptions of lookupOptions) {
+                const translated = activeCues
+                    .map((cue) =>
+                        this._captionTranslationCache.get(
+                            this.getRealtimeCaptionCacheKey(cue.text, candidateOptions)
+                        )
+                    )
+                    .filter(Boolean);
+                if (translated.length === activeCues.length) {
+                    this.logRealtimeCaptionDebug("display:cache-hit", {
+                        mode:
+                            candidateOptions.translatorId === options.translatorId
+                                ? "active-cues"
+                                : "fast-active-cues",
+                        cues: activeCues.length,
+                    });
+                    return {
+                        text: translated.join("\n"),
+                        fast: candidateOptions.translatorId !== options.translatorId,
+                    };
+                }
+                this.logRealtimeCaptionDebug("display:cache-partial", {
+                    mode:
+                        candidateOptions.translatorId === options.translatorId
+                            ? "active-cues"
+                            : "fast-active-cues",
+                    cues: activeCues.length,
+                    cached: translated.length,
+                });
+            }
+        }
+        this.logRealtimeCaptionDebug("display:cache-miss", {
+            sourceLength: sourceText.length,
+            activeCues: activeCues.length,
+        });
         return null;
     }
 
@@ -1070,15 +1792,149 @@ class BannerController {
         return sourceText === this._captionLastSource;
     }
 
-    showRealtimeCaptionTranslatedText(translated, sourceText) {
+    canApplyLateMergedRealtimeCaption(sourceText) {
+        if (!String(sourceText || "").includes("\n")) return false;
+        return this._captionDisplayItems.some((item) =>
+            this.realtimeCaptionSourceIncludes(sourceText, item.source)
+        );
+    }
+
+    markRealtimeCaptionMergedReplacementSource(sourceText) {
+        if (!String(sourceText || "").includes("\n")) return;
+        const source = this.normalizeRealtimeCaptionCacheText(sourceText);
+        if (!source) return;
+        this._captionMergedReplacementSources.add(source);
+        if (this._captionMergedReplacementSources.size > 20) {
+            const [oldest] = this._captionMergedReplacementSources;
+            this._captionMergedReplacementSources.delete(oldest);
+        }
+    }
+
+    shouldUseExpandedCaptionReplacement(sourceText) {
+        const source = this.normalizeRealtimeCaptionCacheText(sourceText);
+        return (
+            Boolean(source && this._captionMergedReplacementSources.has(source)) &&
+            this.canApplyLateMergedRealtimeCaption(sourceText)
+        );
+    }
+
+    getRealtimeCaptionVisibleSourceSeq(sourceText) {
+        const source = this.normalizeRealtimeCaptionVisibleSource(sourceText);
+        if (!source) return 0;
+        const exact = this._captionVisibleSources.find((entry) => entry.text === source);
+        if (exact?.seq) return exact.seq;
+        return source
+            .split(/\n+/)
+            .map((line) => this.normalizeRealtimeCaptionVisibleSource(line))
+            .filter(Boolean)
+            .reduce((maxSeq, line) => {
+                const entry = this._captionVisibleSources.find((item) => item.text === line);
+                return Math.max(maxSeq, entry?.seq || 0);
+            }, 0);
+    }
+
+    canDisplayRealtimeCaptionSource(sourceText, { allowOlderReplacement = false } = {}) {
+        const seq = this.getRealtimeCaptionVisibleSourceSeq(sourceText);
+        if (!seq) return true;
+        if (!allowOlderReplacement && seq < this._captionLastDisplayedVisibleSeq) return false;
+        this._captionLastDisplayedVisibleSeq = Math.max(this._captionLastDisplayedVisibleSeq, seq);
+        return true;
+    }
+
+    wasRecentlyVisibleRealtimeCaptionSource(sourceText) {
+        const source = this.normalizeRealtimeCaptionVisibleSource(sourceText);
+        if (!source) return false;
+        const now = Date.now();
+        return this._captionVisibleSources.some(
+            (entry) => now - entry.at <= this._captionStabilizeWindowMs && entry.text === source
+        );
+    }
+
+    enqueueRealtimeCaptionPendingSource(sourceText) {
+        const source = this.normalizeRealtimeCaptionVisibleSource(sourceText);
+        if (!source || source === this._captionInFlightSource) return;
+        this._captionPendingSources = this._captionPendingSources.filter((item) => item !== source);
+        this._captionPendingSources.push(source);
+        if (this._captionPendingSources.length > this._captionPendingMax) {
+            this._captionPendingSources = this._captionPendingSources.slice(
+                -this._captionPendingMax
+            );
+        }
+        this._captionPendingSource = this._captionPendingSources.at(-1) || "";
+    }
+
+    shiftRealtimeCaptionPendingSource() {
+        const source = this._captionPendingSources.shift() || "";
+        this._captionPendingSource = this._captionPendingSources.at(-1) || "";
+        return source;
+    }
+
+    showRealtimeCaptionTranslatedText(translated, sourceText, options = {}) {
         if (!translated) return;
-        this.showRealtimeCaptionOverlay(translated, sourceText);
+        this.logRealtimeCaptionDebug("display:show", {
+            sourceLength: String(sourceText || "").length,
+            translatedLength: String(translated || "").length,
+            lines: String(translated || "")
+                .split(/\n+/)
+                .filter(Boolean).length,
+        });
+        this.showRealtimeCaptionOverlay(translated, sourceText, options);
+    }
+
+    isGoogleRealtimeCaptionTranslator(options = {}) {
+        return options?.translatorId === "GoogleTranslate" && !options?.engine;
+    }
+
+    requestRealtimeCaptionFastFallback(sourceText, options) {
+        const fastOptions = this.getRealtimeCaptionFastOptions(options);
+        if (!fastOptions || this.shouldUseExpandedCaptionReplacement(sourceText)) return null;
+        const cacheKey = this.getRealtimeCaptionCacheKey(sourceText, fastOptions);
+        if (!cacheKey || this._captionTranslationCache.has(cacheKey)) return null;
+        this._captionPrefetchInFlight.add(cacheKey);
+        const request = {
+            text: sourceText,
+            sl: fastOptions.sl,
+            tl: fastOptions.tl,
+            translatorId: fastOptions.translatorId,
+            textRole: "caption",
+            translationProfile: "realtimeCaptionFast",
+        };
+        this.logRealtimeCaptionDebug("display:fast-fallback-request", {
+            translatorId: fastOptions.translatorId,
+            chars: sourceText.length,
+        });
+        const fastPromise = Promise.resolve(this.channel.request("translate_text_quiet", request))
+            .then((result) => {
+                const translated = String(
+                    result?.mainMeaning || result?.translatedText || ""
+                ).trim();
+                if (!translated || result?.translationFailed) return "";
+                this.cacheRealtimeCaptionTranslation(cacheKey, translated);
+                if (
+                    !this._captionModeEnabled ||
+                    this._captionRenderedSource === sourceText ||
+                    (!this.isRealtimeCaptionRequestStillCurrent(sourceText) &&
+                        !this.wasRecentlyVisibleRealtimeCaptionSource(sourceText)) ||
+                    !this.canDisplayRealtimeCaptionSource(sourceText)
+                ) {
+                    return translated;
+                }
+                this.showRealtimeCaptionTranslatedText(translated, sourceText);
+                return translated;
+            })
+            .catch(() => "")
+            .finally(() => {
+                this._captionPrefetchInFlight.delete(cacheKey);
+            });
+        return fastPromise;
     }
 
     shouldBatchRealtimeCaptionTranslation(options) {
         return (
             options?.translatorId === "LocalTranslate" &&
-            (options.engine === "openai" || options.engine === "googleAiStudio")
+            (options.engine === "openai" ||
+                options.engine === "googleAiStudio" ||
+                options.engine === "openaiCompatible")
         );
     }
 
@@ -1086,7 +1942,19 @@ class BannerController {
         const cacheKey = this.getRealtimeCaptionCacheKey(sourceText, options);
         const cached = this._captionTranslationCache.get(cacheKey);
         if (cached) return Promise.resolve(cached);
-        return new Promise((resolve) => {
+        const inFlight = this._captionBatchInFlight.get(cacheKey);
+        if (inFlight) {
+            this.logRealtimeCaptionDebug("display:fallback-join", {
+                mode: "live-batch",
+                chars: sourceText.length,
+            });
+            return inFlight;
+        }
+        this.logRealtimeCaptionDebug("display:fallback-request", {
+            mode: "live-batch",
+            chars: sourceText.length,
+        });
+        const queued = new Promise((resolve) => {
             const existing = this._captionBatchQueue.get(cacheKey);
             if (existing) {
                 existing.resolvers.push(resolve);
@@ -1107,6 +1975,13 @@ class BannerController {
                 }, this._captionBatchDelayMs);
             }
         });
+        this._captionBatchInFlight.set(cacheKey, queued);
+        queued.finally(() => {
+            if (this._captionBatchInFlight.get(cacheKey) === queued) {
+                this._captionBatchInFlight.delete(cacheKey);
+            }
+        });
+        return queued;
     }
 
     flushRealtimeCaptionBatchQueue() {
@@ -1199,38 +2074,72 @@ class BannerController {
         if (!this.isYouTubeCaptionTranslationAllowed()) {
             this._captionLastSource = "";
             this._captionPendingSource = "";
+            this._captionPendingSources = [];
+            this._captionVisibleSources = [];
+            this._captionVisibleSourceSeq = 0;
+            this._captionLastDisplayedVisibleSeq = 0;
+            this._captionMergedReplacementSources.clear();
+            this.clearRealtimeCaptionStabilizeTimer();
             this._captionLastRequestId += 1;
             this.hideRealtimeCaptionOverlayNow();
             return;
         }
-        const sourceText = this.getCurrentYouTubeCaptionText();
+        const options = await this.getRealtimeCaptionTranslateOptions();
+        const googleCaptionMode = this.isGoogleRealtimeCaptionTranslator(options);
+        const sourceText = this.getCurrentYouTubeCaptionText({
+            singleWindow: googleCaptionMode,
+        });
         if (!sourceText) {
             this._captionLastSource = "";
             this._captionPendingSource = "";
+            this._captionPendingSources = [];
+            this._captionVisibleSources = [];
+            this._captionVisibleSourceSeq = 0;
+            this._captionLastDisplayedVisibleSeq = 0;
+            this._captionMergedReplacementSources.clear();
+            this.clearRealtimeCaptionStabilizeTimer();
             this._captionLastRequestId += 1;
             this.scheduleRealtimeCaptionOverlayHide();
             return;
         }
-        if (sourceText === this._captionLastSource) {
+        this.recordRealtimeCaptionVisibleSource(sourceText);
+        const stabilizedCandidate =
+            this.buildStabilizedRealtimeCaptionSource(sourceText) || sourceText;
+        let requestSourceText = sourceText;
+        if (
+            !googleCaptionMode &&
+            this.shouldStabilizeRealtimeCaptionSource(sourceText, stabilizedCandidate, options)
+        ) {
+            const stabilized = await this.waitForRealtimeCaptionStability(
+                sourceText,
+                stabilizedCandidate
+            );
+            if (!stabilized || !this._captionModeEnabled) return;
+            requestSourceText = stabilized;
+            this.markRealtimeCaptionMergedReplacementSource(requestSourceText);
+        } else {
+            this.clearRealtimeCaptionStabilizeTimer();
+        }
+        if (requestSourceText === this._captionLastSource) {
             const overlayVisible = this._captionOverlay && !this._captionOverlay.hidden;
-            if (overlayVisible && this._captionRenderedSource === sourceText) return;
-            if (this._captionInFlight && this._captionInFlightSource === sourceText) return;
+            if (overlayVisible && this._captionRenderedSource === requestSourceText) return;
+            if (this._captionInFlight && this._captionInFlightSource === requestSourceText) return;
         }
         this.clearRealtimeCaptionHideTimer();
-        this._captionLastSource = sourceText;
+        this._captionLastSource = requestSourceText;
         if (this._captionInFlight) {
-            this._captionPendingSource = sourceText;
+            this.enqueueRealtimeCaptionPendingSource(requestSourceText);
             return;
         }
-        await this.translateRealtimeCaptionSource(sourceText);
+        await this.translateRealtimeCaptionSource(requestSourceText, options);
     }
 
-    async translateRealtimeCaptionSource(sourceText) {
+    async translateRealtimeCaptionSource(sourceText, preparedOptions = null) {
         if (!this._captionModeEnabled || !sourceText) return;
         const requestId = ++this._captionLastRequestId;
         let directRequestStarted = false;
         try {
-            const options = await this.getRealtimeCaptionTranslateOptions();
+            const options = preparedOptions || (await this.getRealtimeCaptionTranslateOptions());
             const contextRequest = this.getRealtimeCaptionContextRequestForOptions(
                 sourceText,
                 options
@@ -1239,32 +2148,79 @@ class BannerController {
             const cacheKey =
                 contextRequest.cacheKey ||
                 this.getRealtimeCaptionCacheKey(requestSourceText, options);
-            const cached = this.findPrefetchedRealtimeCaptionTranslation(sourceText, options);
+            const googleCaptionMode = this.isGoogleRealtimeCaptionTranslator(options);
+            const cached = googleCaptionMode
+                ? null
+                : this.findPrefetchedRealtimeCaptionTranslation(sourceText, options);
             if (cached?.text) {
-                if (!this.isRealtimeCaptionRequestStillCurrent(sourceText)) return;
-                this.showRealtimeCaptionTranslatedText(cached.text, sourceText);
+                const allowExpandedReplacement =
+                    this.shouldUseExpandedCaptionReplacement(sourceText);
+                if (
+                    !this.isRealtimeCaptionRequestStillCurrent(sourceText) &&
+                    !this.wasRecentlyVisibleRealtimeCaptionSource(sourceText)
+                ) {
+                    return;
+                }
+                if (
+                    !this.canDisplayRealtimeCaptionSource(sourceText, {
+                        allowOlderReplacement: allowExpandedReplacement,
+                    })
+                ) {
+                    return;
+                }
+                this.showRealtimeCaptionTranslatedText(cached.text, sourceText, {
+                    allowExpandedReplacement,
+                    replaceHistory: googleCaptionMode,
+                });
                 return;
             }
             if (this.shouldBatchRealtimeCaptionTranslation(options)) {
+                this.requestRealtimeCaptionFastFallback(sourceText, options);
                 const translated = await this.queueRealtimeCaptionBatchTranslation(
                     requestSourceText,
                     options
                 );
+                const canApplyLateMerge = this.shouldUseExpandedCaptionReplacement(sourceText);
+                const canApplyRecentCaption =
+                    sourceText === this._captionLastSource ||
+                    this.wasRecentlyVisibleRealtimeCaptionSource(sourceText);
                 if (
-                    requestId !== this._captionLastRequestId ||
                     !this._captionModeEnabled ||
-                    sourceText !== this._captionLastSource
+                    (!canApplyRecentCaption && !canApplyLateMerge) ||
+                    (requestId !== this._captionLastRequestId &&
+                        !canApplyRecentCaption &&
+                        !canApplyLateMerge)
                 ) {
                     return;
                 }
                 if (!translated) return;
+                if (
+                    !this.canDisplayRealtimeCaptionSource(sourceText, {
+                        allowOlderReplacement: canApplyLateMerge,
+                    })
+                ) {
+                    return;
+                }
                 this.cacheRealtimeCaptionTranslation(cacheKey, translated);
-                this.showRealtimeCaptionTranslatedText(translated, sourceText);
+                if (
+                    options.fastTranslatorId &&
+                    this._captionRenderedSource === sourceText &&
+                    !canApplyLateMerge
+                ) {
+                    return;
+                }
+                this.showRealtimeCaptionTranslatedText(translated, sourceText, {
+                    allowExpandedReplacement: canApplyLateMerge,
+                });
                 return;
             }
             this._captionInFlight = true;
             this._captionInFlightSource = sourceText;
             directRequestStarted = true;
+            this.logRealtimeCaptionDebug("display:fallback-request", {
+                mode: "direct",
+                chars: requestSourceText.length,
+            });
             const request = {
                 text: requestSourceText,
                 sl: options.sl,
@@ -1275,17 +2231,31 @@ class BannerController {
             };
             if (options.engine) request.engine = options.engine;
             const result = await this.channel.request("translate_text_quiet", request);
+            const canApplyRecentCaption =
+                sourceText === this._captionLastSource ||
+                this.wasRecentlyVisibleRealtimeCaptionSource(sourceText);
             if (
-                requestId !== this._captionLastRequestId ||
                 !this._captionModeEnabled ||
-                sourceText !== this._captionLastSource
+                !canApplyRecentCaption ||
+                (requestId !== this._captionLastRequestId && !canApplyRecentCaption)
             ) {
                 return;
             }
             const translated = String(result?.mainMeaning || result?.translatedText || "").trim();
             if (!translated || result?.translationFailed) return;
+            const allowExpandedReplacement = this.shouldUseExpandedCaptionReplacement(sourceText);
+            if (
+                !this.canDisplayRealtimeCaptionSource(sourceText, {
+                    allowOlderReplacement: allowExpandedReplacement,
+                })
+            ) {
+                return;
+            }
             this.cacheRealtimeCaptionTranslation(cacheKey, translated);
-            this.showRealtimeCaptionTranslatedText(translated, sourceText);
+            this.showRealtimeCaptionTranslatedText(translated, sourceText, {
+                allowExpandedReplacement,
+                replaceHistory: this.isGoogleRealtimeCaptionTranslator(options),
+            });
         } catch {
             if (
                 requestId === this._captionLastRequestId &&
@@ -1297,13 +2267,13 @@ class BannerController {
             if (directRequestStarted) {
                 this._captionInFlight = false;
                 this._captionInFlightSource = "";
-                const pendingSource = this._captionPendingSource;
-                this._captionPendingSource = "";
+                const pendingSource = this.shiftRealtimeCaptionPendingSource();
                 if (
                     this._captionModeEnabled &&
                     pendingSource &&
                     pendingSource !== sourceText &&
-                    pendingSource === this._captionLastSource
+                    (pendingSource === this._captionLastSource ||
+                        this.wasRecentlyVisibleRealtimeCaptionSource(pendingSource))
                 ) {
                     this.translateRealtimeCaptionSource(pendingSource);
                 }
@@ -1583,7 +2553,10 @@ class BannerController {
     }
 
     getDomPageBatchOptions() {
-        if (this._domPageTranslateOptions.engine === "openai") {
+        if (
+            this._domPageTranslateOptions.engine === "openai" ||
+            this._domPageTranslateOptions.engine === "openaiCompatible"
+        ) {
             if (this._domBatchFailureCount >= 3) return { maxChars: 1800, maxItems: 1 };
             if (this._domBatchFailureCount >= 2) return { maxChars: 4000, maxItems: 6 };
             if (this._domBatchFailureCount >= 1) return { maxChars: 7000, maxItems: 32 };
@@ -1603,7 +2576,7 @@ class BannerController {
         const engine = this._domPageTranslateOptions.engine;
         if (this._domBatchFailureCount >= 3) return 6;
         if (this._domBatchFailureCount >= 1) return 12;
-        if (engine === "openai") return 16;
+        if (engine === "openai" || engine === "openaiCompatible") return 16;
         if (engine === "googleAiStudio") return 32;
         return 8;
     }
@@ -2618,6 +3591,12 @@ class BannerController {
                     model,
                     logo: this.getProviderLogoHtml("chatgpt", "ChatGPT"),
                 };
+            case "openaiCompatible":
+                return {
+                    label: "OpenAI-compatible",
+                    model,
+                    logo: this.getProviderLogoHtml("chatgpt", "OpenAI-compatible"),
+                };
             default:
                 return {
                     label: "Google AI Studio",
@@ -2704,7 +3683,7 @@ class BannerController {
                 "right: 0",
                 `height: ${this._domPageBannerHeight}px`,
                 "z-index: 2147483647",
-                "font-family: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
                 "pointer-events: none",
             ].join(";");
             const root = host.attachShadow({ mode: "open" });
@@ -2712,34 +3691,102 @@ class BannerController {
                 <style>
                     :host {
                         color-scheme: light;
-                        --et-primary: #1a73e8;
-                        --et-primary-container: #e8f0fe;
-                        --et-on-primary-container: #174ea6;
-                        --et-surface: #fff;
-                        --et-surface-container: #f8fafd;
-                        --et-outline: #dadce0;
-                        --et-outline-variant: #e8eaed;
-                        --et-text: #202124;
-                        --et-muted: #5f6368;
-                        --et-success: #188038;
-                        --et-error: #d93025;
+                        --et-primary: #1A73E8;
+                        --et-primary-container: #E8F0FE;
+                        --et-on-primary-container: #174EA6;
+                        --et-surface: linear-gradient(135deg, rgba(244, 248, 255, 0.90), rgba(255, 255, 255, 0.85));
+                        --et-surface-container: rgba(26, 115, 232, 0.06);
+                        --et-outline: rgba(26, 115, 232, 0.12);
+                        --et-outline-variant: rgba(26, 115, 232, 0.06);
+                        --et-text: #1F1F1F;
+                        --et-muted: #5F6368;
+                        --et-success: #386A20;
+                        --et-error: #B3261E;
+                        --pulse-color: rgba(26, 115, 232, 0.20);
+                        --et-progress-track: rgba(26, 115, 232, 0.08);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        :host {
+                            color-scheme: dark;
+                            --et-primary: #8AB4F8;
+                            --et-primary-container: #185ABC;
+                            --et-on-primary-container: #E8F0FE;
+                            --et-surface: linear-gradient(135deg, rgba(32, 33, 36, 0.90), rgba(20, 21, 24, 0.85));
+                            --et-surface-container: rgba(138, 180, 248, 0.06);
+                            --et-outline: rgba(138, 180, 248, 0.12);
+                            --et-outline-variant: rgba(138, 180, 248, 0.06);
+                            --et-text: #E8EAED;
+                            --et-muted: #9AA0A6;
+                            --et-success: #B2F195;
+                            --et-error: #F2B8B5;
+                            --pulse-color: rgba(138, 180, 248, 0.20);
+                            --et-progress-track: rgba(138, 180, 248, 0.08);
+                        }
                     }
                     .bar {
                         position: relative;
-                        height: ${this._domPageBannerHeight}px;
+                        margin: 12px 24px;
+                        height: 60px;
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
                         gap: 16px;
                         box-sizing: border-box;
-                        padding: 8px 16px 9px;
+                        padding: 0 24px 8px;
                         color: var(--et-text);
                         background: var(--et-surface);
-                        border-bottom: 1px solid var(--et-outline-variant);
-                        box-shadow: 0 1px 2px rgba(60, 64, 67, 0.14), 0 2px 6px rgba(60, 64, 67, 0.08);
+                        border: 1px solid var(--et-outline);
+                        border-radius: 999px;
+                        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02), inset 0 1px 0 rgba(255, 255, 255, 0.5);
                         font-size: 13px;
                         line-height: 1.2;
                         pointer-events: auto;
+                        backdrop-filter: blur(28px) saturate(190%);
+                        -webkit-backdrop-filter: blur(28px) saturate(190%);
+                        animation: spring-entrance 450ms cubic-bezier(0.34, 1.25, 0.64, 1) both;
+                        transition: all 300ms cubic-bezier(0.25, 1, 0.5, 1);
+                    }
+                    .bar:hover {
+                        transform: translateY(1px) scale(1.008);
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+                        border-color: rgba(26, 115, 232, 0.24);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .bar:hover {
+                            border-color: rgba(138, 180, 248, 0.24);
+                        }
+                    }
+                    .bar[data-state="starting"],
+                    .bar[data-state="running"] {
+                        border-color: rgba(26, 115, 232, 0.3);
+                        box-shadow: 0 4px 24px rgba(26, 115, 232, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .bar[data-state="starting"],
+                        .bar[data-state="running"] {
+                            border-color: rgba(138, 180, 248, 0.3);
+                            box-shadow: 0 4px 24px rgba(138, 180, 248, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                        }
+                    }
+                    .bar[data-state="complete"] {
+                        border-color: rgba(56, 106, 32, 0.3);
+                        box-shadow: 0 4px 24px rgba(56, 106, 32, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .bar[data-state="complete"] {
+                            border-color: rgba(178, 241, 149, 0.3);
+                            box-shadow: 0 4px 24px rgba(178, 241, 149, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                        }
+                    }
+                    .bar[data-state="error"] {
+                        border-color: rgba(179, 38, 30, 0.3);
+                        box-shadow: 0 4px 24px rgba(179, 38, 30, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .bar[data-state="error"] {
+                            border-color: rgba(242, 184, 181, 0.3);
+                            box-shadow: 0 4px 24px rgba(242, 184, 181, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                        }
                     }
                     :host([data-visible="false"]) .bar {
                         display: none;
@@ -2752,18 +3799,23 @@ class BannerController {
                     }
                     .status-dot {
                         position: relative;
-                        width: 10px;
-                        height: 10px;
-                        border-radius: 999px;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
                         flex: 0 0 auto;
                         background: var(--et-primary);
-                        box-shadow: 0 0 0 5px rgba(26, 115, 232, 0.10);
+                        transition: all 300ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                    }
+                    .bar[data-state="starting"] .status-dot,
+                    .bar[data-state="running"] .status-dot {
+                        animation: pulse-breath 1.6s ease-in-out infinite;
                     }
                     .text {
                         display: flex;
                         flex-direction: column;
+                        justify-content: center;
                         min-width: 0;
-                        gap: 3px;
+                        gap: 2px;
                     }
                     .summary {
                         display: flex;
@@ -2776,23 +3828,31 @@ class BannerController {
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
-                        font-size: 14px;
-                        font-weight: 500;
+                        font-size: 13px;
+                        font-weight: 700;
+                        letter-spacing: -0.1px;
                     }
                     .provider {
                         display: inline-flex;
                         align-items: center;
-                        gap: 5px;
-                        max-width: 180px;
+                        gap: 6px;
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
-                        border-radius: 999px;
-                        padding: 3px 8px;
+                        border-radius: 8px;
+                        padding: 2px 10px;
                         color: var(--et-on-primary-container);
                         background: var(--et-primary-container);
-                        font-size: 12px;
+                        border: 1px solid var(--et-outline);
+                        font-size: 11px;
                         font-weight: 600;
+                        height: 22px;
+                        box-sizing: border-box;
+                        transition: all 300ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                    }
+                    .provider:hover {
+                        transform: translateY(-1px) scale(1.03);
+                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
                     }
                     .provider span {
                         min-width: 0;
@@ -2802,17 +3862,24 @@ class BannerController {
                     .model {
                         display: inline-flex;
                         align-items: center;
-                        max-width: 220px;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                        white-space: nowrap;
+                        padding: 2px 8px;
+                        height: 22px;
+                        border-radius: 8px;
+                        border: 1px solid var(--et-outline-variant);
+                        background: var(--et-surface-container);
+                        font-size: 10px;
+                        font-weight: 600;
                         color: var(--et-muted);
-                        font-size: 12px;
-                        font-weight: 500;
+                        box-sizing: border-box;
+                        transition: all 300ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                    }
+                    .model:hover {
+                        transform: translateY(-1px) scale(1.03);
+                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
                     }
                     .provider-logo {
-                        width: 16px;
-                        height: 16px;
+                        width: 14px;
+                        height: 14px;
                         flex: 0 0 auto;
                         object-fit: contain;
                     }
@@ -2824,39 +3891,44 @@ class BannerController {
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
-                        max-width: min(62vw, 720px);
-                        font-size: 12px;
-                        font-weight: 400;
+                        max-width: min(50vw, 520px);
+                        font-size: 11px;
+                        font-weight: 500;
                     }
                     .actions {
                         display: flex;
                         align-items: center;
-                        gap: 6px;
+                        gap: 8px;
                         flex: 0 0 auto;
                     }
                     .progress-meta {
-                        min-width: 48px;
+                        min-width: 36px;
                         box-sizing: border-box;
-                        padding: 0 2px;
-                        border-radius: 999px;
-                        color: var(--et-muted);
-                        font-size: 12px;
+                        color: var(--et-primary);
+                        font-size: 11px;
+                        font-weight: 600;
                         text-align: right;
                         font-variant-numeric: tabular-nums;
                     }
+                    .bar[data-state="complete"] .progress-meta {
+                        color: var(--et-success);
+                    }
+                    .bar[data-state="error"] .progress-meta {
+                        color: var(--et-error);
+                    }
                     .token-meta {
                         display: none;
-                        max-width: 260px;
+                        max-width: 220px;
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
                         box-sizing: border-box;
-                        padding: 5px 9px;
-                        border-radius: 999px;
+                        padding: 3px 10px;
+                        border-radius: 8px;
                         background: var(--et-surface-container);
                         color: var(--et-muted);
                         border: 1px solid var(--et-outline-variant);
-                        font-size: 12px;
+                        font-size: 11px;
                         font-weight: 500;
                         font-variant-numeric: tabular-nums;
                     }
@@ -2866,55 +3938,90 @@ class BannerController {
                         justify-content: center;
                         gap: 6px;
                         border: 0;
-                        border-radius: 999px;
+                        border-radius: 16px;
                         background: transparent;
                         color: var(--et-on-primary-container);
                         cursor: pointer;
                         font: inherit;
-                        height: 36px;
-                        min-width: 36px;
-                        padding: 0 10px;
-                        font-weight: 500;
-                        transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1), box-shadow 120ms cubic-bezier(0.2, 0, 0, 1);
+                        height: 32px;
+                        padding: 0 14px;
+                        font-size: 12px;
+                        font-weight: 600;
+                        transition: all 250ms cubic-bezier(0.25, 1, 0.5, 1);
                     }
                     button svg {
-                        width: 18px;
-                        height: 18px;
+                        width: 14px;
+                        height: 14px;
                         flex: 0 0 auto;
                         fill: currentColor;
                     }
-                    button:hover { background: rgba(26, 115, 232, 0.08); }
-                    button:active { background: rgba(26, 115, 232, 0.14); }
-                    .hide {
-                        padding: 0 12px;
+                    button:hover {
                         background: var(--et-primary-container);
+                        transform: scale(1.06);
+                    }
+                    button:active {
+                        transform: scale(0.92);
+                    }
+                    .hide {
+                        background: var(--et-surface-container);
+                        border: 1px solid var(--et-outline);
+                    }
+                    .hide:hover {
+                        background: var(--et-primary-container);
+                        color: var(--et-on-primary-container);
+                        border-color: transparent;
+                        transform: scale(1.06);
+                    }
+                    .hide:active {
+                        transform: scale(0.92);
                     }
                     .close {
                         color: var(--et-muted);
                         padding: 0;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 50%;
+                        transition: all 350ms cubic-bezier(0.25, 1, 0.5, 1);
+                    }
+                    .close:hover {
+                        background: var(--et-surface-container);
+                        color: var(--et-text);
+                        transform: rotate(90deg) scale(1.1);
+                    }
+                    .close:active {
+                        transform: rotate(180deg) scale(0.9);
                     }
                     .progress {
                         position: absolute;
-                        left: 0;
-                        right: 0;
-                        bottom: 0;
-                        height: 2px;
+                        left: 24px;
+                        right: 24px;
+                        bottom: 4px;
+                        height: 4px;
                         overflow: hidden;
-                        background: transparent;
+                        background: var(--et-progress-track);
+                        border-radius: 999px;
                     }
                     .progress-fill {
                         width: 0%;
                         height: 100%;
                         background: var(--et-primary);
-                        transition: width 180ms ease;
+                        border-radius: 999px;
+                        transition: width 350ms cubic-bezier(0.34, 1.8, 0.5, 1);
                     }
                     .bar[data-state="starting"] .progress-fill {
-                        width: 32%;
-                        animation: indeterminate 1.2s ease-in-out infinite;
+                        width: 100% !important;
+                        background: linear-gradient(90deg, transparent, var(--et-primary) 50%, transparent);
+                        background-size: 200% 100%;
+                        animation: shimmer 1.5s infinite linear;
                     }
                     .bar[data-state="error"] .status-dot {
                         background: var(--et-error);
-                        box-shadow: 0 0 0 4px rgba(217, 48, 37, 0.10);
+                        box-shadow: 0 0 0 4px rgba(179, 38, 30, 0.2);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .bar[data-state="error"] .status-dot {
+                            box-shadow: 0 0 0 4px rgba(242, 184, 181, 0.2);
+                        }
                     }
                     .bar[data-state="error"] .progress-fill {
                         width: 100%;
@@ -2922,7 +4029,12 @@ class BannerController {
                     }
                     .bar[data-state="complete"] .status-dot {
                         background: var(--et-success);
-                        box-shadow: 0 0 0 4px rgba(24, 128, 56, 0.10);
+                        box-shadow: 0 0 0 4px rgba(56, 106, 32, 0.2);
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .bar[data-state="complete"] .status-dot {
+                            box-shadow: 0 0 0 4px rgba(178, 241, 149, 0.2);
+                        }
                     }
                     .bar[data-state="complete"] .progress-fill {
                         background: var(--et-success);
@@ -2930,27 +4042,37 @@ class BannerController {
                     .restore {
                         position: fixed;
                         top: 10px;
-                        right: 12px;
+                        right: 16px;
                         display: none;
                         align-items: center;
-                        gap: 8px;
-                        height: 36px;
-                        padding: 0 14px 0 12px;
+                        gap: 6px;
+                        height: 32px;
+                        padding: 0 14px;
                         border: 1px solid var(--et-outline);
-                        border-radius: 999px;
+                        border-radius: 16px;
                         background: var(--et-surface);
-                        color: var(--et-on-primary-container);
-                        box-shadow: 0 1px 2px rgba(60, 64, 67, 0.18), 0 3px 8px rgba(60, 64, 67, 0.12);
+                        color: var(--et-primary);
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
                         font: inherit;
-                        font-size: 13px;
-                        font-weight: 500;
+                        font-size: 12px;
+                        font-weight: 600;
                         pointer-events: auto;
+                        backdrop-filter: blur(16px);
+                        -webkit-backdrop-filter: blur(16px);
+                        transition: all 300ms cubic-bezier(0.25, 1, 0.5, 1);
                     }
                     :host([data-visible="false"]) .restore {
                         display: inline-flex;
+                        animation: spring-entrance 450ms cubic-bezier(0.34, 1.25, 0.64, 1) both;
                     }
                     .restore:hover {
-                        background: var(--et-surface-container);
+                        background: var(--et-primary-container);
+                        color: var(--et-on-primary-container);
+                        border-color: transparent;
+                        transform: scale(1.06);
+                    }
+                    .restore:active {
+                        transform: scale(0.92);
                     }
                     .sr-only {
                         position: absolute;
@@ -2963,17 +4085,47 @@ class BannerController {
                         white-space: nowrap;
                         border: 0;
                     }
-                    @keyframes indeterminate {
-                        0% { transform: translateX(-110%); }
-                        55% { transform: translateX(95%); }
-                        100% { transform: translateX(220%); }
+                    @keyframes spring-entrance {
+                        0% {
+                            transform: translateY(-24px) scale(0.95);
+                            opacity: 0;
+                            filter: blur(4px);
+                        }
+                        100% {
+                            transform: translateY(0) scale(1);
+                            opacity: 1;
+                            filter: blur(0);
+                        }
+                    }
+                    @keyframes shimmer {
+                        0% { background-position: 200% 0; }
+                        100% { background-position: -200% 0; }
+                    }
+                    @keyframes pulse-breath {
+                        0% {
+                            transform: scale(0.9);
+                            box-shadow: 0 0 0 0px var(--pulse-color);
+                        }
+                        50% {
+                            transform: scale(1.15);
+                            box-shadow: 0 0 0 10px transparent;
+                        }
+                        100% {
+                            transform: scale(0.9);
+                            box-shadow: 0 0 0 0px transparent;
+                        }
                     }
                     @media (max-width: 640px) {
-                        .bar { gap: 8px; padding-left: 12px; padding-right: 8px; }
-                        .provider { max-width: 120px; }
-                        .model { max-width: 130px; }
-                        .status { max-width: 42vw; }
-                        .token-meta { max-width: 120px; }
+                        .bar {
+                            margin: 8px 8px;
+                            gap: 8px;
+                            padding-left: 12px;
+                            padding-right: 8px;
+                        }
+                        .provider { max-width: 100px; }
+                        .model { max-width: 100px; }
+                        .status { max-width: 32vw; }
+                        .token-meta { max-width: 100px; }
                         .progress-meta { display: none; }
                         .hide .button-text { display: none; }
                     }
@@ -2986,6 +4138,10 @@ class BannerController {
                             animation: none;
                             transform: none;
                         }
+                        .bar[data-state="starting"] .status-dot,
+                        .bar[data-state="running"] .status-dot {
+                            animation: none;
+                        }
                     }
                 </style>
                 <div class="bar" role="status" aria-live="polite" data-role="bar">
@@ -2993,7 +4149,7 @@ class BannerController {
                         <span class="status-dot" aria-hidden="true"></span>
                         <div class="text">
                             <div class="summary">
-                                <span class="title" data-role="title">Page translation</span>
+                                <span class="title" data-role="title">AI Page Translation</span>
                                 <span class="provider" data-role="engine"></span>
                                 <span class="model" data-role="model"></span>
                             </div>
@@ -3005,7 +4161,7 @@ class BannerController {
                         <span class="progress-meta" data-role="progress-meta"></span>
                         <button type="button" class="hide" data-action="hide" aria-label="Hide translation bar">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M2.1 3.51 3.51 2.1 21.9 20.49l-1.41 1.41-3.08-3.08A11.46 11.46 0 0 1 12 20C7 20 2.73 16.89 1 12.5a11.82 11.82 0 0 1 4.2-5.34L2.1 3.51Zm5.66 6.25A4.68 4.68 0 0 0 7.5 12a4.5 4.5 0 0 0 4.5 4.5c.78 0 1.51-.2 2.15-.55l-1.69-1.69a2.48 2.48 0 0 1-2.72-2.72L7.76 9.76ZM12 5c5 0 9.27 3.11 11 7.5a11.7 11.7 0 0 1-3.18 4.35l-2.84-2.84c.33-.61.52-1.29.52-2.01A4.5 4.5 0 0 0 12 7.5c-.72 0-1.4.19-2.01.52L7.82 5.85A11.57 11.57 0 0 1 12 5Zm0 4.5A2.5 2.5 0 0 1 14.5 12c0 .16-.02.32-.05.47L11.53 9.55c.15-.03.31-.05.47-.05Z" />
+                                <path d="M2.1 3.51 3.51 2.1 21.9 20.49l-1.41 1.41-3.08-3.08A11.46 11.46 0 0 1 12 20C7 20 2.73 16.89 1 12.5a11.82 11.82 0 0 1 4.2-5.34L2.1 3.51Zm5.66 6.25A4.68 4.68 0 0 0 7.5 12a4.5 4.5 0 0 0 4.5 4.5c.78 0 1.51-.2 2.15-.55l-1.69-1.69a2.48 2.48 0 0 1-2.72-2.72L7.76 9.76ZM12 5c5 0 9.27 3.11 11 7.5a11.7 11.7 0 0 1-3.18 4.35l-2.84-2.84c.33-.61.52-1.29.52-2.01A4.5 4.5 0 0 0 12 7.5c-.72 0-1.4.19-2.01.52L7.82 5.85A11.57 11.57 0 0 1 12 5Zm0 4.5A2.5 2.5 0 1 1 14.5 12c0 .16-.02.32-.05.47L11.53 9.55c.15-.03.31-.05.47-.05Z" />
                             </svg>
                             <span class="button-text">Hide</span>
                         </button>
