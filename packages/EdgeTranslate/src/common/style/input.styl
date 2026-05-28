@@ -1,332 +1,20 @@
-// ────────────────────────────────────────────
-// iOS 26 / iPadOS 26 — "Liquid Glass" design tokens
-// Implementation: Chrome-native modern CSS primitives
-//   • backdrop-filter — translucent glass surfaces with real-time blur/saturation
-//   • light-dark()    — Chrome 123+ → auto theme without media queries
-//   • color-mix()     — Chrome 111+ → blended tints
-//   • linear()        — Chrome 113+ → iOS-style spring physics
-//   • SF Pro stack    — native rendering on Apple silicon; system-ui everywhere else
-// Backwards-compat: the M3 token names below are aliased so existing code
-// keeps compiling, but new components should reach for the iOS 26 names.
-// ────────────────────────────────────────────
-
-// Primary
-color-primary = #0b57d0
-color-primary-dark = #a8c7fa
-color-primary-hover = #0842a0
-color-on-primary = #ffffff
-color-on-primary-dark = #0b1f3a
-color-primary-container = #d3e3fd
-color-primary-container-dark = #1f3b68
-color-secondary = #0f6d58
-color-secondary-container = #cce8dd
-// tertiary tokens removed (unused after the iOS 26 pivot)
-
-// Surface
-color-surface = #ffffff
-color-surface-dark = #1b2026
-color-surface-container = #f1f4f8
-color-surface-container-low = #f8fafd
-color-surface-container-high = #e9eef6
-color-surface-container-dark = #242a31
-color-surface-container-low-dark = #15191d
-color-surface-container-high-dark = #2d343d
-color-on-surface = #1f1f1f
-color-on-surface-dark = #e8eaed
-color-on-surface-variant = #5f6368
-color-on-surface-variant-dark = #bdc1c6
-
-// Outline
-color-outline = #747775
-color-outline-dark = #9aa0a6
-color-outline-variant = #dde6ef
-color-outline-variant-dark = #3d4651
-
-// Background (ambient mesh)
-color-bg-light = #f8fafd
-color-bg-dark = #15191d
-
-// Error & Status
-color-error = #b3261e
-color-error-dark = #f2b8b5
-
-// ─── M3 Expressive motion curves ────────────────────────────────────────
-// linear() approximations of the Android 16~17 spring tokens (computed by
-// sampling spring physics into 24 stops). Falls back to cubic-bezier on
-// browsers that don't support linear() — the curve is similar enough.
+// ════════════════════════════════════════════════════════════════════════
+// EdgeTranslate — Shared design tokens
 //
-//   spring-fast    : stiffness 1400, damping 38   (subtle bounce, ~280ms)
-//   spring-default : stiffness  800, damping 28   (signature M3E feel, ~420ms)
-//   spring-slow    : stiffness  400, damping 28   (drawer/sheet, ~600ms)
-//   emphasized     : Emphasized Decelerate (no overshoot)
-//   emphasized-acc : Emphasized Accelerate (exit)
-//
-m3-spring-fast = linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1)
-m3-spring-default = linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)
-m3-spring-slow = linear(0, 0.013 3%, 0.082 8%, 0.273 16%, 0.5 24%, 0.7 32%, 0.86 40%, 0.965 48%, 1.034 56%, 1.063 65%, 1.044 75%, 1.007 86%, 1)
-m3-emphasized = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)
-m3-emphasized-accelerate = linear(0, 0.002 8.5%, 0.024 19.3%, 0.108 30%, 0.279 41.3%, 0.526 53%, 0.747 63%, 0.892 73%, 0.969 84%, 1)
+// Single source of truth for the entire extension. Tokens use modern
+// Chrome-native CSS only (light-dark, color-mix, linear() easing,
+// accent-color, scrollbar-color). No M3 vestiges, no manual @media dark
+// blocks anywhere downstream.
+// ════════════════════════════════════════════════════════════════════════
 
-// ─── M3 Expressive duration tokens (Android 16~17) ────────────────────────
-// Match the spec exactly so we can compose duration + easing semantically.
-dur-short-1 = 50ms
-dur-short-2 = 100ms
-dur-short-3 = 150ms
-dur-short-4 = 200ms
-dur-medium-1 = 250ms
-dur-medium-2 = 300ms
-dur-medium-3 = 350ms
-dur-medium-4 = 400ms
-dur-long-1 = 450ms
-dur-long-2 = 500ms
-dur-long-3 = 550ms
-dur-long-4 = 600ms
-
-// ─── Purposeful motion (use these — NOT bare m3-spring everywhere) ────────
-// state-change → smooth emphasized (color / hover-elev / state layer)
-// entrance     → emphasized decelerate + spatial spring for transform only
-// exit         → emphasized accelerate
-// press        → fast spring on transform + border-radius
-// transition   → standard between two known visual states
-motion-state-fast = dur-short-2 m3-emphasized
-motion-state-standard = dur-short-4 m3-emphasized
-motion-state-slow = dur-medium-2 m3-emphasized
-
-motion-press-transform = dur-short-3 m3-spring-fast
-motion-press-shape = dur-short-4 m3-spring-default
-
-motion-entrance-fade = dur-medium-1 m3-emphasized
-motion-entrance-spatial = dur-medium-4 m3-spring-default
-motion-exit = dur-short-3 m3-emphasized-accelerate
-
-// Back-compat aliases (kept so existing styl files don't break, but new code
-// should reach for the semantic names above).
-motion-micro = motion-state-fast
-motion-fast = motion-state-fast
-motion-standard = motion-state-standard
-motion-emphasized = motion-entrance-fade
-motion-spring = motion-press-transform
-motion-spring-strong = motion-entrance-spatial
-motion-spring-slow = motion-entrance-spatial
-
-// Elevation shadows
-elevation-1 = 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)
-elevation-2 = 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04)
-elevation-3 = 0 12px 40px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.03)
-elevation-floating = 0 18px 44px rgba(30, 47, 72, 0.16), 0 4px 12px rgba(30, 47, 72, 0.08)
-
-// Glassmorphism
-glass-bg-light = rgba(255, 255, 255, 0.76)
-glass-bg-dark = rgba(30, 36, 44, 0.72)
-glass-border-light = rgba(255, 255, 255, 0.82)
-glass-border-dark = rgba(255, 255, 255, 0.08)
-glass-blur = blur(24px) saturate(180%)
-
-// Radii
-radius-s = 8px
-radius-m = 12px
-radius-l = 16px
-radius-xl = 20px
-radius-xxl = 24px
-radius-pill = 999px
-
-font-stack = Roboto, "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif
-
-app-background-light = linear-gradient(135deg, #f8fafd 0%, #eef4ff 42%, #f7fbf7 100%)
-app-background-dark = linear-gradient(135deg, #15191d 0%, #1a2431 46%, #15211d 100%)
-
-focus-ring-light = 0 0 0 4px rgba(11, 87, 208, .16)
-focus-ring-dark = 0 0 0 4px rgba(168, 199, 250, .2)
-
-
-// ────────────────────────────────────────────
-// Radio Button
-// ────────────────────────────────────────────
-scale = 1.3
-.radio
-    position: relative
-    width: (16px * scale)
-    height: (16px * scale)
-    background-clip: border-box
-    -webkit-appearance: none
-    -moz-appearance: none
-    appearance: none
-    margin: -.15px 8px 0 0
-    vertical-align: text-bottom
-    border-radius: 50%
-    background-color: color-surface
-    border: (1px * scale) solid color-outline
-    cursor: pointer
-    transition: background-color motion-fast, border-color motion-fast, box-shadow motion-fast, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)
-    &:before
-        content: ''
-        display: block
-        height: 0
-        width: 0
-        transition: width motion-standard, height motion-standard
-    &:disabled
-        opacity: .65
-        cursor: not-allowed
-    &:checked
-        border: (1px * scale) solid color-primary
-        background-color: color-surface
-        animation: android17-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards
-        &:before
-            height: (8px * scale)
-            width: (8px * scale)
-            border-radius: 50%
-            margin: (3px * scale) 0 0 (3px * scale)
-            background-color: color-primary
-    &:active
-        transform: scale(0.92)
-    &:focus
-        outline: none
-        box-shadow: focus-ring-light
-
-
-// ────────────────────────────────────────────
-// Checkbox
-// ────────────────────────────────────────────
-.checkbox
-    position: relative
-    width: (16px * scale)
-    height: (16px * scale)
-    background-clip: border-box
-    -webkit-appearance: none
-    -moz-appearance: none
-    appearance: none
-    margin: -.15px 8px 0 0
-    vertical-align: text-bottom
-    border-radius: 6px
-    transition: background-color motion-fast, border-color motion-fast, box-shadow motion-fast, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)
-    background-color: color-surface
-    border: 2px solid color-outline
-    cursor: pointer
-    &:checked
-        background-color: color-primary
-        border-color: color-primary
-        animation: android17-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards
-        &:after
-            content: ''
-            display: block
-            height: (4px * scale)
-            width: (7px * scale)
-            border: 0 solid #fff
-            border-width: 0 0 2px 2px
-            transform: rotate(-45deg)
-            position: absolute
-            top: (3px * scale)
-            left: (3px * scale)
-    &:active
-        transform: scale(0.92)
-    &:disabled
-        opacity: .65
-        cursor: not-allowed
-    &:focus
-        outline: none
-        box-shadow: focus-ring-light
-
-
-// ────────────────────────────────────────────
-// Switch Toggle (Material You M3)
-// ────────────────────────────────────────────
-.switch
-    -webkit-appearance: none
-    -moz-appearance: none
-    appearance: none
-    position: relative
-    width: 52px
-    height: 32px
-    border: 2px solid color-outline
-    outline: 0
-    border-radius: radius-pill
-    box-sizing: border-box
-    background-color: color-surface-container
-    cursor: pointer
-    transition: background-color motion-standard, border-color motion-standard, box-shadow motion-fast, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)
-    &:after
-        content: " "
-        position: absolute
-        width: 16px
-        height: 16px
-        top: 6px
-        left: 6px
-        border-radius: 50%
-        background-color: color-outline
-        transition: transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1), width 200ms cubic-bezier(0.2, 0.8, 0.2, 1), height 200ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color motion-standard
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15)
-    &:hover
-        background-color: color-surface-container-high
-        &:after
-            background-color: color-on-surface-variant
-    &:checked
-        border-color: color-primary
-        background-color: color-primary
-        &:after
-            width: 24px
-            height: 24px
-            top: 2px
-            left: 2px
-            background-color: color-on-primary
-            transform: translateX(20px)
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18)
-    &:active
-        transform: scale(0.92)
-    &:focus
-        box-shadow: focus-ring-light
-    &:disabled
-        opacity: .5
-        cursor: not-allowed
-
-
-// ────────────────────────────────────────────
-// Spring Pop Keyframe (shared)
-// ────────────────────────────────────────────
-@keyframes android17-pop
-    0%
-        transform: scale(0.85)
-    60%
-        transform: scale(1.08)
-    100%
-        transform: scale(1)
-
-@keyframes expressive-enter
-    0%
-        opacity: 0
-        transform: translateY(12px) scale(.96)
-        filter: saturate(.86)
-    60%
-        opacity: 1
-        transform: translateY(-1px) scale(1.01)
-        filter: saturate(1.04)
-    100%
-        opacity: 1
-        transform: translateY(0) scale(1)
-        filter: saturate(1)
-
-
-// ────────────────────────────────────────────
-// Chrome-native primitives — exposed as CSS custom properties so JSX/inline
-// styles (banner_controller, content panels) can consume them without Stylus
-// preprocessing. All values use modern CSS features supported by Chrome:
-//   light-dark()      — auto adapts to color-scheme without media queries
-//   color-mix()       — M3 surface tints derived from primary color
-//   @property         — animatable color/blur custom props
-//   accent-color      — native form controls inherit M3 primary
-//   scrollbar-color   — native scrollbar in M3 palette
-//
-// Most values are wrapped in unquote() so the Stylus parser passes the modern
-// CSS through unchanged (Stylus doesn't recognise the `in oklab` / linear()
-// argument syntax natively).
-// ────────────────────────────────────────────
 :root
     color-scheme: unquote('light dark')
     accent-color: unquote('light-dark(#007aff, #0a84ff)')
-    scrollbar-color: unquote('light-dark(rgba(60, 60, 67, 0.36), rgba(235, 235, 245, 0.36)) transparent')
+    scrollbar-color: unquote('light-dark(rgba(60,60,67,.36), rgba(235,235,245,.36)) transparent')
     scrollbar-width: thin
 
-    // ─── iOS 26 system colors (light-dark auto) ───────────────────────────
-    // Sourced from Apple's Human Interface Guidelines for iOS 26 / iPadOS 26.
+    // ─── iOS 26 system palette ─────────────────────────────────────────
+    --ios-tint: unquote('light-dark(#007aff, #0a84ff)')
     --ios-system-blue: unquote('light-dark(#007aff, #0a84ff)')
     --ios-system-green: unquote('light-dark(#34c759, #30d158)')
     --ios-system-indigo: unquote('light-dark(#5856d6, #5e5ce6)')
@@ -336,275 +24,62 @@ scale = 1.3
     --ios-system-red: unquote('light-dark(#ff3b30, #ff453a)')
     --ios-system-teal: unquote('light-dark(#30b0c7, #40c8e0)')
     --ios-system-yellow: unquote('light-dark(#ffcc00, #ffd60a)')
-    --ios-tint: var(--ios-system-blue)
 
-    // ─── iOS 26 labels (text colors with adaptive opacity) ────────────────
-    --ios-label-primary: unquote('light-dark(rgba(0,0,0,0.88), rgba(255,255,255,0.92))')
-    --ios-label-secondary: unquote('light-dark(rgba(60,60,67,0.6), rgba(235,235,245,0.6))')
-    --ios-label-tertiary: unquote('light-dark(rgba(60,60,67,0.3), rgba(235,235,245,0.3))')
-    --ios-label-quaternary: unquote('light-dark(rgba(60,60,67,0.18), rgba(235,235,245,0.16))')
+    // ─── Labels ────────────────────────────────────────────────────────
+    --ios-label: unquote('light-dark(rgba(0,0,0,.88), rgba(255,255,255,.92))')
+    --ios-label-secondary: unquote('light-dark(rgba(60,60,67,.6), rgba(235,235,245,.6))')
+    --ios-label-tertiary: unquote('light-dark(rgba(60,60,67,.3), rgba(235,235,245,.3))')
 
-    // ─── iOS 26 background system (grouped + system) ──────────────────────
-    --ios-bg-system: unquote('light-dark(#ffffff, #000000)')
-    --ios-bg-grouped: unquote('light-dark(#f2f2f7, #000000)')
-    --ios-bg-secondary: unquote('light-dark(#f2f2f7, #1c1c1e)')
-    --ios-bg-tertiary: unquote('light-dark(#ffffff, #2c2c2e)')
-    --ios-fill-primary: unquote('light-dark(rgba(120,120,128,0.2), rgba(120,120,128,0.36))')
-    --ios-fill-secondary: unquote('light-dark(rgba(120,120,128,0.16), rgba(120,120,128,0.32))')
-    --ios-fill-tertiary: unquote('light-dark(rgba(120,120,128,0.12), rgba(118,118,128,0.24))')
-    --ios-fill-quaternary: unquote('light-dark(rgba(120,120,128,0.08), rgba(118,118,128,0.18))')
+    // ─── Fills ─────────────────────────────────────────────────────────
+    --ios-fill-1: unquote('light-dark(rgba(120,120,128,.2), rgba(120,120,128,.36))')
+    --ios-fill-2: unquote('light-dark(rgba(120,120,128,.16), rgba(120,120,128,.32))')
+    --ios-fill-3: unquote('light-dark(rgba(120,120,128,.12), rgba(118,118,128,.24))')
+    --ios-fill-4: unquote('light-dark(rgba(120,120,128,.08), rgba(118,118,128,.18))')
 
-    // ─── Liquid Glass — the signature iOS 26 material ────────────────────
-    // Thin / regular / thick = three glass densities. Each provides a base
-    // translucent fill plus a backdrop-filter recipe that callers compose
-    // (filter shorthand must be applied directly on the element).
-    --ios-glass-thin: unquote('light-dark(rgba(255,255,255,0.42), rgba(28,28,30,0.42))')
-    --ios-glass-regular: unquote('light-dark(rgba(255,255,255,0.6), rgba(28,28,30,0.6))')
-    --ios-glass-thick: unquote('light-dark(rgba(255,255,255,0.76), rgba(28,28,30,0.78))')
-    --ios-glass-stroke: unquote('light-dark(rgba(255,255,255,0.7), rgba(255,255,255,0.08))')
-    --ios-glass-filter-thin: blur(20px) saturate(180%);
-    --ios-glass-filter-regular: blur(30px) saturate(180%);
-    --ios-glass-filter-thick: blur(48px) saturate(190%);
+    // ─── Liquid Glass material ─────────────────────────────────────────
+    --glass: unquote('light-dark(rgba(255,255,255,.42), rgba(28,28,30,.5))')
+    --glass-thick: unquote('light-dark(rgba(255,255,255,.6), rgba(28,28,30,.65))')
+    --glass-thin: unquote('light-dark(rgba(255,255,255,.28), rgba(28,28,30,.38))')
+    --glass-stroke: unquote('light-dark(rgba(255,255,255,.7), rgba(255,255,255,.08))')
+    --glass-shine: unquote('inset 0 1px 0 rgba(255,255,255,.45), inset 0 -1px 0 rgba(0,0,0,.05)')
+    --glass-drop: 0 12px 32px rgba(0, 0, 0, .14), 0 32px 64px -16px rgba(0, 0, 0, .22)
+    --glass-blur: blur(48px) saturate(220%) brightness(1.04)
+    --glass-blur-light: blur(28px) saturate(180%)
 
-    // ─── M3 token aliases for backwards-compat (do not use in new code) ───
-    --md-sys-color-primary: var(--ios-system-blue)
-    --md-sys-color-on-primary: unquote('light-dark(#ffffff, #ffffff)')
-    --md-sys-color-primary-container: unquote('color-mix(in oklab, var(--ios-system-blue) 18%, var(--ios-bg-system))')
-    --md-sys-color-on-primary-container: var(--ios-system-blue)
-    --md-sys-color-secondary: var(--ios-system-purple)
-    --md-sys-color-tertiary: var(--ios-system-pink)
-    --md-sys-color-error: var(--ios-system-red)
-    --md-sys-color-surface: var(--ios-bg-system)
-    --md-sys-color-on-surface: var(--ios-label-primary)
-    --md-sys-color-on-surface-variant: var(--ios-label-secondary)
-    --md-sys-color-outline: unquote('light-dark(rgba(60,60,67,0.29), rgba(84,84,88,0.65))')
-    --md-sys-color-outline-variant: unquote('light-dark(rgba(60,60,67,0.12), rgba(84,84,88,0.35))')
-    --md-sys-color-surface-container-lowest: var(--ios-bg-system)
-    --md-sys-color-surface-container-low: var(--ios-bg-secondary)
-    --md-sys-color-surface-container: var(--ios-bg-secondary)
-    --md-sys-color-surface-container-high: var(--ios-bg-tertiary)
-    --md-sys-color-surface-container-highest: var(--ios-bg-tertiary)
+    // ─── Continuous corners (iOS) ──────────────────────────────────────
+    --r-xs: 8px
+    --r-sm: 12px
+    --r-md: 16px
+    --r-lg: 22px
+    --r-xl: 28px
+    --r-2xl: 34px
+    --r-pill: 9999px
 
-    // M3 Expressive motion — CSS-native linear() springs.
-    // Android 16~17 distinguishes two spring families:
-    //   *-spatial  : critically under-damped (overshoot), for position/scale/rotation
-    //   *-effects  : critically damped (no overshoot), for color/opacity/elevation
-    --md-sys-motion-spring-fast-spatial: unquote('linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1)')
-    --md-sys-motion-spring-default-spatial: unquote('linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)')
-    --md-sys-motion-spring-slow-spatial: unquote('linear(0, 0.013 3%, 0.082 8%, 0.273 16%, 0.5 24%, 0.7 32%, 0.86 40%, 0.965 48%, 1.034 56%, 1.063 65%, 1.044 75%, 1.007 86%, 1)')
-    --md-sys-motion-spring-fast-effects: unquote('linear(0, 0.131, 0.339 5%, 0.587 9%, 0.793 13%, 0.91 17%, 0.969 21%, 0.992 25%, 1)')
-    --md-sys-motion-spring-default-effects: unquote('linear(0, 0.075, 0.205, 0.378 8%, 0.591 13%, 0.79 19%, 0.916 26%, 0.974 33%, 0.995 42%, 1)')
-    --md-sys-motion-spring-slow-effects: unquote('linear(0, 0.025, 0.075, 0.158, 0.275 8%, 0.426 12%, 0.587 17%, 0.737 23%, 0.857 30%, 0.94 39%, 0.982 50%, 1)')
-    // Aliases (back-compat)
-    --md-sys-motion-spring-fast: var(--md-sys-motion-spring-fast-spatial)
-    --md-sys-motion-spring-default: var(--md-sys-motion-spring-default-spatial)
-    --md-sys-motion-spring-slow: var(--md-sys-motion-spring-slow-spatial)
-    --md-sys-motion-emphasized: unquote('linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)')
-    --md-sys-motion-emphasized-accelerate: unquote('linear(0, 0.002 8.5%, 0.024 19.3%, 0.108 30%, 0.279 41.3%, 0.526 53%, 0.747 63%, 0.892 73%, 0.969 84%, 1)')
+    // ─── Font stack ────────────────────────────────────────────────────
+    --font: unquote('-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif')
 
-    // ─── iOS 26 shapes (continuous corner curves) ─────────────────────────
-    --ios-radius-xs: 6px
-    --ios-radius-sm: 10px
-    --ios-radius-md: 14px
-    --ios-radius-lg: 18px
-    --ios-radius-xl: 22px
-    --ios-radius-2xl: 28px
-    --ios-radius-3xl: 34px
-    --ios-radius-pill: 9999px
-
-    // M3 shape aliases
-    --md-sys-shape-corner-none: 0
-    --md-sys-shape-corner-xs: var(--ios-radius-xs)
-    --md-sys-shape-corner-sm: var(--ios-radius-sm)
-    --md-sys-shape-corner-md: var(--ios-radius-md)
-    --md-sys-shape-corner-lg: var(--ios-radius-lg)
-    --md-sys-shape-corner-xl: var(--ios-radius-2xl)
-    --md-sys-shape-corner-full: var(--ios-radius-pill)
-
-    // Focus ring (iOS-style — solid 3px primary tint)
-    --md-sys-focus-ring: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 35%, transparent)')
-
-    // ─── iOS 26 typography — SF Pro stack ─────────────────────────────────
-    // SF Pro renders natively on Apple silicon (which is the relevant audience
-    // for the iOS-26 aesthetic). On other platforms `system-ui` falls back
-    // gracefully to Segoe UI / Roboto.
-    --ios-font-stack: unquote('-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif')
-    --md-sys-typography-font-stack: var(--ios-font-stack)
-
-    // ─── M3 Expressive Typography Scale (Roboto Flex) ────────────────────
-    // size / line-height / letter-spacing per Android 16~17 spec
-    --md-sys-typescale-display-large: 400 57px/64px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-display-medium: 400 45px/52px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-display-small: 400 36px/44px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-headline-large: 500 32px/40px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-headline-medium: 500 28px/36px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-headline-small: 500 24px/32px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-title-large: 500 22px/28px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-title-medium: 500 16px/24px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-title-small: 500 14px/20px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-body-large: 400 16px/24px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-body-medium: 400 14px/20px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-body-small: 400 12px/16px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-label-large: 500 14px/20px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-label-medium: 500 12px/16px var(--md-sys-typography-font-stack)
-    --md-sys-typescale-label-small: 500 11px/16px var(--md-sys-typography-font-stack)
-
-    // ─── State layer opacities (M3E hover/focus/pressed/drag) ─────────────
-    --md-sys-state-hover-opacity: 0.08
-    --md-sys-state-focus-opacity: 0.10
-    --md-sys-state-pressed-opacity: 0.12
-    --md-sys-state-dragged-opacity: 0.16
-
-    // ─── iOS 26 elevation — soft tight shadow + faint stroke ──────────────
-    --ios-elev-0: none
-    --ios-elev-1: unquote('0 1px 2px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.05)')
-    --ios-elev-2: unquote('0 1px 2px rgba(0,0,0,0.08), 0 6px 16px rgba(0,0,0,0.07)')
-    --ios-elev-3: unquote('0 2px 4px rgba(0,0,0,0.08), 0 12px 24px rgba(0,0,0,0.1)')
-    --ios-elev-4: unquote('0 4px 8px rgba(0,0,0,0.1), 0 24px 36px rgba(0,0,0,0.14)')
-    --ios-elev-floating: unquote('0 8px 28px rgba(0,0,0,0.18), 0 32px 64px -16px rgba(0,0,0,0.22)')
-    // M3 elevation aliases
-    --md-sys-elevation-0: var(--ios-elev-0)
-    --md-sys-elevation-1: var(--ios-elev-1)
-    --md-sys-elevation-2: var(--ios-elev-2)
-    --md-sys-elevation-3: var(--ios-elev-3)
-    --md-sys-elevation-4: var(--ios-elev-4)
-    --md-sys-elevation-5: var(--ios-elev-floating)
+    // ─── Motion (Chrome-native linear() springs) ───────────────────────
+    --spring: linear(0, .046 4%, .196 9%, .523 19%, .81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, .987 86%, 1)
+    --spring-snappy: linear(0, .083 6%, .286 12%, .572 21%, .844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, .998 78%, .999 90%, 1)
+    --emphasized: linear(0, .005, .018 1.5%, .066 3.7%, .171 7.5%, .346 13.6%, .547 21%, .722 29.4%, .853 38.4%, .937 47.7%, .978 56.8%, .997 67.4%, 1)
 
 
-// ────────────────────────────────────────────
-// Global resets — native focus / selection styling
-// ────────────────────────────────────────────
+// ─── Global resets ───────────────────────────────────────────────────────
+*,
+*::before,
+*::after
+    box-sizing: border-box
+
 :focus-visible
     outline: none
-    box-shadow: var(--md-sys-focus-ring)
+    box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 35%, transparent)')
 
 ::selection
-    background-color: unquote('color-mix(in oklab, var(--md-sys-color-primary) 28%, transparent)')
-    color: var(--md-sys-color-on-surface)
+    background-color: unquote('color-mix(in oklab, var(--ios-tint) 28%, transparent)')
+    color: unquote('var(--ios-label)')
 
 @media (prefers-reduced-motion: reduce)
     *
-        animation-duration: 0.01ms !important
-        animation-iteration-count: 1 !important
-        transition-duration: 0.01ms !important
+        animation-duration: .01ms !important
+        transition-duration: .01ms !important
         scroll-behavior: auto !important
-
-
-// ────────────────────────────────────────────
-// iOS 26 component patterns (Liquid Glass + native springs)
-// ────────────────────────────────────────────
-
-// Liquid Glass — three densities. Use the matching modifier on any container.
-.ios-glass
-.ios-glass--regular
-    background: unquote('var(--ios-glass-regular)')
-    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.35), var(--ios-elev-1)')
-
-.ios-glass--thin
-    background: unquote('var(--ios-glass-thin)')
-    backdrop-filter: unquote('var(--ios-glass-filter-thin)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thin)')
-    border: 0.5px solid unquote('var(--ios-glass-stroke)')
-
-.ios-glass--thick
-    background: unquote('var(--ios-glass-thick)')
-    backdrop-filter: unquote('var(--ios-glass-filter-thick)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thick)')
-    border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.45), var(--ios-elev-2)')
-
-
-// iOS 26 Filled Button — vivid tint, pill shape, springy press.
-.ios-btn-filled
-    display: inline-flex
-    align-items: center
-    justify-content: center
-    gap: 6px
-    height: 50px
-    padding: 0 24px
-    min-width: 100px
-    border: 0
-    border-radius: unquote('var(--ios-radius-pill)')
-    background: unquote('var(--ios-tint)')
-    color: white
-    font: 600 17px/1 unquote('var(--ios-font-stack)')
-    letter-spacing: -0.4px
-    cursor: pointer
-    box-shadow: unquote('inset 0 -1px 0 rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.08)')
-    transition: unquote('transform 220ms var(--md-sys-motion-spring-default-spatial), background-color 180ms var(--md-sys-motion-emphasized), box-shadow 220ms var(--md-sys-motion-spring-default-effects), filter 180ms var(--md-sys-motion-emphasized)')
-.ios-btn-filled:hover
-    filter: brightness(1.06)
-.ios-btn-filled:active
-    transform: scale(0.96)
-    filter: brightness(0.92)
-
-
-// iOS 26 Tinted Button — translucent fill of the system tint.
-.ios-btn-tinted
-    display: inline-flex
-    align-items: center
-    justify-content: center
-    gap: 6px
-    height: 50px
-    padding: 0 22px
-    border: 0
-    border-radius: unquote('var(--ios-radius-pill)')
-    background: unquote('color-mix(in oklab, var(--ios-tint) 18%, transparent)')
-    color: unquote('var(--ios-tint)')
-    font: 600 17px/1 unquote('var(--ios-font-stack)')
-    cursor: pointer
-    transition: unquote('background-color 180ms var(--md-sys-motion-emphasized), transform 220ms var(--md-sys-motion-spring-default-spatial)')
-.ios-btn-tinted:hover
-    background: unquote('color-mix(in oklab, var(--ios-tint) 26%, transparent)')
-.ios-btn-tinted:active
-    transform: scale(0.96)
-
-
-// iOS 26 Plain (text) Button — no fill, just the tint label.
-.ios-btn-plain
-    display: inline-flex
-    align-items: center
-    justify-content: center
-    gap: 6px
-    height: 44px
-    padding: 0 12px
-    border: 0
-    border-radius: unquote('var(--ios-radius-md)')
-    background: transparent
-    color: unquote('var(--ios-tint)')
-    font: 500 17px/1 unquote('var(--ios-font-stack)')
-    cursor: pointer
-    transition: unquote('background-color 180ms var(--md-sys-motion-emphasized), opacity 180ms var(--md-sys-motion-emphasized)')
-.ios-btn-plain:hover
-    background: unquote('var(--ios-fill-quaternary)')
-.ios-btn-plain:active
-    opacity: 0.5
-
-
-// iOS 26 Section — grouped list container.
-.ios-section
-    background: unquote('var(--ios-bg-tertiary)')
-    border-radius: unquote('var(--ios-radius-xl)')
-    overflow: hidden
-    box-shadow: unquote('var(--ios-elev-1)')
-
-
-// iOS 26 List Row — used inside .ios-section.
-.ios-row
-    display: flex
-    align-items: center
-    gap: 12px
-    min-height: 50px
-    padding: 12px 16px
-    border-bottom: 0.5px solid unquote('var(--md-sys-color-outline-variant)')
-    color: unquote('var(--ios-label-primary)')
-    font: 400 15px/1.3 unquote('var(--ios-font-stack)')
-.ios-row:last-child
-    border-bottom: 0
-.ios-row__label
-    flex: 1
-.ios-row__value
-    color: unquote('var(--ios-label-secondary)')

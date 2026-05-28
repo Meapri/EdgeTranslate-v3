@@ -1,135 +1,140 @@
 @import '../common/style/input.styl'
 
 // ════════════════════════════════════════════════════════════════════════
-// EdgeTranslate Options — iOS 26 Liquid Glass
+// EdgeTranslate Options — iOS 26 Liquid Glass (fresh build)
 //
-// Layout: a single rounded Liquid Glass "app window" hovers in the centre
-// of an ambient-mesh canvas. Inside: floating glass toolbar header, glass
-// sidebar with system-blue tinted active state, glass cards stacking down
-// the content column.
-//
-// All tokens from input.styl :root (--ios-* / --md-sys-*).
+// Design intent:
+//   • Full-bleed multi-stop gradient covers the entire viewport.
+//   • One Liquid Glass app window floats centred over it.
+//   • Sticky glass toolbar header carries the brand.
+//   • Sidebar is its own glass tier with iOS pill nav items.
+//   • Each settings group is a translucent card; rows are tinted fills.
+//   • Form controls are iOS pills, switches are iOS toggles.
 // ════════════════════════════════════════════════════════════════════════
 
-options-max-width = 1180px
-options-gap = 22px
 
-// ─── Document / Body ────────────────────────────────────────────────────
+// ─── Hero gradient ────────────────────────────────────────────────────
 html,
 body
     width: 100%
     min-height: 100%
     margin: 0
     padding: 0
-    color: unquote('var(--ios-label-primary)')
-    background: unquote('var(--ios-bg-grouped)')
-    font-family: unquote('var(--ios-font-stack)')
+    color: unquote('var(--ios-label)')
+    font-family: unquote('var(--font)')
     font-weight: 400
     letter-spacing: -0.2px
-    font-variant-ligatures: none
     -webkit-font-smoothing: antialiased
     -moz-osx-font-smoothing: grayscale
+    background: unquote('linear-gradient(135deg, color-mix(in oklab, var(--ios-system-blue) 58%, light-dark(white, #14142a)) 0%, color-mix(in oklab, var(--ios-system-purple) 52%, light-dark(white, #14142a)) 48%, color-mix(in oklab, var(--ios-system-teal) 50%, light-dark(white, #14142a)) 100%)')
 
 body
     position: relative
     min-height: 100vh
-    padding: 28px
+    padding: 32px
     box-sizing: border-box
     overflow-x: hidden
 
-// Ambient mesh — soft radial blobs to give the page colour depth.
 body::before
     content: ''
     position: fixed
-    inset: -40px
+    inset: -80px
     z-index: 0
     pointer-events: none
-    background: unquote('radial-gradient(120% 80% at 0% 0%, color-mix(in oklab, var(--ios-system-blue) 14%, transparent), transparent 56%), radial-gradient(120% 80% at 100% 100%, color-mix(in oklab, var(--ios-system-teal) 12%, transparent), transparent 60%), radial-gradient(80% 70% at 100% 0%, color-mix(in oklab, var(--ios-system-purple) 10%, transparent), transparent 55%)')
+    background: unquote('radial-gradient(45% 35% at 12% 12%, color-mix(in oklab, var(--ios-system-pink) 60%, transparent), transparent 70%), radial-gradient(50% 40% at 88% 96%, color-mix(in oklab, var(--ios-system-orange) 52%, transparent), transparent 70%), radial-gradient(55% 45% at 100% 0%, color-mix(in oklab, var(--ios-system-indigo) 64%, transparent), transparent 70%)')
+    filter: blur(40px)
+    opacity: .8
 
 [hidden]
     display: none !important
 
-// ─── App window ────────────────────────────────────────────────────────
+
+// ─── App window ──────────────────────────────────────────────────────
 #option
     position: relative
     z-index: 1
     width: 100%
-    max-width: options-max-width
-    min-height: calc(100vh - 56px)
+    max-width: 1180px
+    min-height: calc(100vh - 64px)
     margin: 0 auto
     display: flex
     flex-direction: column
     overflow: hidden
-    border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    border-radius: unquote('var(--ios-radius-3xl)')
-    background: unquote('var(--ios-glass-thick)')
-    backdrop-filter: unquote('var(--ios-glass-filter-thick)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thick)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.35), var(--ios-elev-floating)')
-    animation: options-enter 460ms motion-press-shape both
+    border: 0.5px solid unquote('var(--glass-stroke)')
+    border-radius: unquote('var(--r-2xl)')
+    background: unquote('var(--glass)')
+    backdrop-filter: unquote('var(--glass-blur)')
+    -webkit-backdrop-filter: unquote('var(--glass-blur)')
+    box-shadow: unquote('var(--glass-shine), var(--glass-drop)')
+    animation: enter 480ms unquote('var(--spring)') both
 
-// ─── Header (sticky Liquid Glass toolbar) ──────────────────────────────
+@keyframes enter
+    0%
+        opacity: 0
+        transform: translateY(12px) scale(.99)
+    100%
+        opacity: 1
+        transform: translateY(0) scale(1)
+
+
+// ─── Toolbar header ──────────────────────────────────────────────────
 header
     position: sticky
     top: 0
     z-index: 4
     min-height: 76px
     padding: 16px 32px
-    box-sizing: border-box
     display: flex
     align-items: center
     gap: 14px
-    color: unquote('var(--ios-label-primary)')
+    color: unquote('var(--ios-label)')
     font-size: 22px
     font-weight: 700
     letter-spacing: -0.5px
-    background: unquote('var(--ios-glass-regular)')
-    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    border-bottom: 0.5px solid unquote('var(--md-sys-color-outline-variant)')
+    background: unquote('var(--glass-thick)')
+    backdrop-filter: unquote('var(--glass-blur-light)')
+    -webkit-backdrop-filter: unquote('var(--glass-blur-light)')
+    border-bottom: 0.5px solid unquote('color-mix(in oklab, var(--ios-label-tertiary) 50%, transparent)')
 
 header img
     width: 44px
     height: 44px
-    flex: 0 0 auto
     border-radius: 12px
-    box-shadow: unquote('var(--ios-elev-1)')
+    box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.12)
 
 .space
     display: none
 
-// ─── Content layout ────────────────────────────────────────────────────
+
+// ─── Content layout ──────────────────────────────────────────────────
 .content
     position: relative
     z-index: 1
     flex: 1 1 auto
-    width: 100%
-    box-sizing: border-box
     padding: 24px 32px 16px
+    box-sizing: border-box
 
 .main-layout
     display: grid
     grid-template-columns: 240px minmax(0, 1fr)
-    gap: options-gap
+    gap: 24px
     align-items: start
 
-// ─── Sidebar (Liquid Glass with iOS pill tabs) ─────────────────────────
+
+// ─── Sidebar ─────────────────────────────────────────────────────────
 .sidebar
     position: sticky
     top: 96px
     display: flex
     flex-direction: column
     gap: 4px
-    min-width: 0
     padding: 8px
-    box-sizing: border-box
-    border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    border-radius: unquote('var(--ios-radius-2xl)')
-    background: unquote('var(--ios-glass-regular)')
-    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.28), var(--ios-elev-1)')
-    animation: sidebar-fade 280ms motion-emphasized both
+    border: 0.5px solid unquote('var(--glass-stroke)')
+    border-radius: unquote('var(--r-xl)')
+    background: unquote('var(--glass-thin)')
+    backdrop-filter: unquote('var(--glass-blur-light)')
+    -webkit-backdrop-filter: unquote('var(--glass-blur-light)')
+    box-shadow: unquote('var(--glass-shine)')
 
 .tab-content
     min-width: 0
@@ -139,91 +144,103 @@ header img
 
 .tab-pane.active
     display: block
-    animation: tab-fade-in 280ms motion-emphasized both
+    animation: tab-fade 280ms unquote('var(--emphasized)') both
 
+@keyframes tab-fade
+    0%
+        opacity: 0
+        transform: translateY(4px)
+    100%
+        opacity: 1
+        transform: translateY(0)
+
+
+// ─── Sidebar nav pill ────────────────────────────────────────────────
 .nav-tab
-    position: relative
     width: 100%
     min-height: 44px
     padding: 10px 12px
-    box-sizing: border-box
     display: flex
     align-items: center
     gap: 12px
     border: 0
-    border-radius: unquote('var(--ios-radius-md)')
+    border-radius: unquote('var(--r-sm)')
     background: transparent
     color: unquote('var(--ios-label-secondary)')
-    font: inherit
-    font-size: 15px
-    font-weight: 500
+    font: 500 15px/1.4 unquote('var(--font)')
     letter-spacing: -0.2px
     text-align: left
     cursor: pointer
-    transition: background-color motion-state-fast, color motion-state-fast, transform 200ms motion-press-transform
+    transition: unquote('background-color 180ms var(--emphasized), color 180ms var(--emphasized), transform 200ms var(--spring)')
 
 .nav-tab:hover
-    color: unquote('var(--ios-label-primary)')
-    background: unquote('var(--ios-fill-quaternary)')
+    color: unquote('var(--ios-label)')
+    background: unquote('var(--ios-fill-4)')
 
 .nav-tab:active
-    transform: scale(0.97)
+    transform: scale(.97)
 
 .nav-tab.active
     color: unquote('var(--ios-tint)')
-    background: unquote('color-mix(in oklab, var(--ios-tint) 14%, transparent)')
+    background: unquote('color-mix(in oklab, var(--ios-tint) 16%, transparent)')
     font-weight: 600
 
 .nav-icon
     width: 20px
     height: 20px
     flex: 0 0 auto
-    display: inline-block
     background-color: currentColor
-    font-size: 0
 
 .nav-icon-settings
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2.05 2.05 0 0 1-2.9 2.9l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.37 1.09V21a2.05 2.05 0 0 1-4.1 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2.05 2.05 0 0 1-2.9-2.9l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.51-1H3a2.05 2.05 0 0 1 0-4.1h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2.05 2.05 0 0 1 2.9-2.9l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6a1.7 1.7 0 0 0 .37-1.09V3a2.05 2.05 0 0 1 4.1 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2.05 2.05 0 0 1 2.9 2.9l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.55.66.95 1.21 1H21a2.05 2.05 0 0 1 0 4.1h-.09A1.7 1.7 0 0 0 19.4 15Z'/%3E%3C/svg%3E") center / contain no-repeat
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2.05 2.05 0 0 1-2.9 2.9l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6a1.7 1.7 0 0 0-.37 1.09V21a2.05 2.05 0 0 1-4.1 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2.05 2.05 0 0 1-2.9-2.9l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.51-1H3a2.05 2.05 0 0 1 0-4.1h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2.05 2.05 0 0 1 2.9-2.9l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6a1.7 1.7 0 0 0 .37-1.09V3a2.05 2.05 0 0 1 4.1 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2.05 2.05 0 0 1 2.9 2.9l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.55.66.95 1.21 1H21a2.05 2.05 0 0 1 0 4.1h-.09A1.7 1.7 0 0 0 19.4 15Z'/%3E%3C/svg%3E") center / contain no-repeat
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z'/%3E%3C/svg%3E") center / contain no-repeat
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z'/%3E%3C/svg%3E") center / contain no-repeat
 
 .nav-icon-engines
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8V4H8'/%3E%3Crect width='16' height='12' x='4' y='8' rx='4'/%3E%3Cpath d='M2 14h2'/%3E%3Cpath d='M20 14h2'/%3E%3Cpath d='M9 13h.01'/%3E%3Cpath d='M15 13h.01'/%3E%3Cpath d='M10 17h4'/%3E%3C/svg%3E") center / contain no-repeat
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8V4H8'/%3E%3Crect width='16' height='12' x='4' y='8' rx='4'/%3E%3Cpath d='M2 14h2'/%3E%3Cpath d='M20 14h2'/%3E%3Cpath d='M9 13h.01'/%3E%3Cpath d='M15 13h.01'/%3E%3Cpath d='M10 17h4'/%3E%3C/svg%3E") center / contain no-repeat
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8V4H8'/%3E%3Crect width='16' height='12' x='4' y='8' rx='4'/%3E%3Cpath d='M2 14h2M20 14h2M9 13h.01M15 13h.01M10 17h4'/%3E%3C/svg%3E") center / contain no-repeat
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8V4H8'/%3E%3Crect width='16' height='12' x='4' y='8' rx='4'/%3E%3Cpath d='M2 14h2M20 14h2M9 13h.01M15 13h.01M10 17h4'/%3E%3C/svg%3E") center / contain no-repeat
 
 .nav-icon-captions
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='4'/%3E%3Cpath d='M7 12h4'/%3E%3Cpath d='M13 12h4'/%3E%3Cpath d='M7 15h7'/%3E%3C/svg%3E") center / contain no-repeat
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='4'/%3E%3Cpath d='M7 12h4'/%3E%3Cpath d='M13 12h4'/%3E%3Cpath d='M7 15h7'/%3E%3C/svg%3E") center / contain no-repeat
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='4'/%3E%3Cpath d='M7 12h4M13 12h4M7 15h7'/%3E%3C/svg%3E") center / contain no-repeat
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='4'/%3E%3Cpath d='M7 12h4M13 12h4M7 15h7'/%3E%3C/svg%3E") center / contain no-repeat
 
-// ─── Glass card (per section in the content column) ────────────────────
+
+// ─── Settings group cards ────────────────────────────────────────────
 .card-container
     position: relative
     margin: 0 0 16px
     padding: 22px
-    border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    border-radius: unquote('var(--ios-radius-2xl)')
-    background: unquote('var(--ios-glass-regular)')
-    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.28), var(--ios-elev-1)')
-    animation: card-slide-in 320ms motion-emphasized both
+    border: 0.5px solid unquote('var(--glass-stroke)')
+    border-radius: unquote('var(--r-xl)')
+    background: unquote('var(--glass-thin)')
+    backdrop-filter: unquote('var(--glass-blur-light)')
+    -webkit-backdrop-filter: unquote('var(--glass-blur-light)')
+    box-shadow: unquote('var(--glass-shine)')
+    animation: card-in 360ms unquote('var(--emphasized)') both
 
-// iOS Settings-app style section header.
+@keyframes card-in
+    0%
+        opacity: 0
+        transform: translateY(8px)
+    100%
+        opacity: 1
+        transform: translateY(0)
+
+// iOS Settings-app small caps section title.
 .setting-title
     display: block
-    margin: 0 0 14px
+    margin: 0 0 12px
     color: unquote('var(--ios-label-secondary)')
-    font-size: 12px
-    font-weight: 600
+    font: 600 12px/1.2 unquote('var(--font)')
     letter-spacing: 0.6px
     text-transform: uppercase
 
-// Plain wrappers — no extra surface.
+
+// Inline wrappers (no extra surface)
 #content-settings,
 #layout-settings,
 #caption-settings,
 #other-settings,
 .content > .row
-    position: relative
     background: transparent
     border: 0
     box-shadow: none
@@ -235,17 +252,13 @@ header img
     display: grid
     gap: 8px
 
-// ─── Setting row (grid of list items) ─────────────────────────────────
+
+// ─── Row + list-row column ───────────────────────────────────────────
 .row
-    position: relative
-    z-index: 1
     display: grid
     grid-template-columns: repeat(2, minmax(0, 1fr))
     gap: 8px 10px
     align-items: stretch
-    margin: 0
-    padding: 0
-    box-sizing: border-box
 
 .row:has(> .column:only-child),
 .row:has(> .provider-heading)
@@ -258,23 +271,21 @@ header img
     gap: 12px
     min-height: 56px
     padding: 12px 14px
-    box-sizing: border-box
     border: 0
-    border-radius: unquote('var(--ios-radius-md)')
-    background: unquote('var(--ios-fill-quaternary)')
-    transition: background-color motion-state-fast
+    border-radius: unquote('var(--r-sm)')
+    background: unquote('var(--ios-fill-4)')
+    transition: background-color 180ms unquote('var(--emphasized)')
 
 .column:hover
-    background: unquote('var(--ios-fill-tertiary)')
+    background: unquote('var(--ios-fill-3)')
 
 .checked-label,
 .radio-label
     width: 100%
-    min-width: 0
     display: flex
     align-items: center
     gap: 10px
-    color: unquote('var(--ios-label-primary)')
+    color: unquote('var(--ios-label)')
     cursor: pointer
     font-size: 15px
     font-weight: 500
@@ -291,61 +302,58 @@ header img
     font-size: 13px
     font-weight: 600
 
-// ─── Form fields (iOS rounded fill) ───────────────────────────────────
+
+// ─── Form fields ─────────────────────────────────────────────────────
 input[type="text"],
 input[type="password"],
 input[type="number"],
 select
-    width: 100%
-    min-height: 44px
-    box-sizing: border-box
-    padding: 10px 14px
-    color: unquote('var(--ios-label-primary)')
-    background-color: unquote('var(--ios-fill-tertiary)')
-    border: 0
-    border-radius: unquote('var(--ios-radius-md)')
-    font: inherit
-    font-size: 15px
-    font-weight: 500
-    letter-spacing: -0.2px
-    outline: none
-    transition: background-color motion-state-fast, box-shadow motion-state-fast
     appearance: none
     -webkit-appearance: none
-    -moz-appearance: none
+    width: 100%
+    min-height: 44px
+    padding: 10px 14px
+    color: unquote('var(--ios-label)')
+    background-color: unquote('var(--ios-fill-3)')
+    border: 0
+    border-radius: unquote('var(--r-sm)')
+    font: 500 15px/1.4 unquote('var(--font)')
+    letter-spacing: -0.2px
+    outline: none
+    transition: unquote('background-color 180ms var(--emphasized), box-shadow 180ms var(--emphasized)')
 
 select
     cursor: pointer
     padding-right: 40px
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
     background-repeat: no-repeat
     background-position: right 14px center
-    background-size: 14px 14px
+    background-size: 12px 12px
 
 input[type="text"]:hover,
 input[type="password"]:hover,
 input[type="number"]:hover,
 select:hover
-    background-color: unquote('var(--ios-fill-secondary)')
+    background-color: unquote('var(--ios-fill-2)')
 
 input[type="text"]:focus-visible,
 input[type="password"]:focus-visible,
 input[type="number"]:focus-visible,
 select:focus-visible
-    background-color: unquote('var(--ios-fill-secondary)')
-    box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 30%, transparent)')
+    background-color: unquote('var(--ios-fill-2)')
+    box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 32%, transparent)')
 
-// ─── Provider heading (engines tab) ───────────────────────────────────
+
+// ─── Provider heading + badge ────────────────────────────────────────
 .provider-heading
     grid-column: 1 / -1
     min-height: 60px
     justify-content: flex-start
     gap: 12px
-    color: unquote('var(--ios-label-primary)')
-    font-size: 16px
-    font-weight: 600
+    color: unquote('var(--ios-label)')
+    font: 600 16px/1.3 unquote('var(--font)')
     letter-spacing: -0.3px
-    background: unquote('color-mix(in oklab, var(--ios-tint) 10%, var(--ios-fill-quaternary))')
+    background: unquote('color-mix(in oklab, var(--ios-tint) 12%, var(--ios-fill-4))')
 
 .provider-badge
     width: 36px
@@ -354,9 +362,11 @@ select:focus-visible
     align-items: center
     justify-content: center
     flex: 0 0 auto
-    border-radius: unquote('var(--ios-radius-md)')
-    background: unquote('var(--ios-bg-tertiary)')
-    box-shadow: unquote('var(--ios-elev-1)')
+    border-radius: unquote('var(--r-sm)')
+    background: unquote('var(--glass-thick)')
+    backdrop-filter: blur(12px)
+    -webkit-backdrop-filter: blur(12px)
+    box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 4px 10px rgba(0,0,0,.08)
 
 .provider-badge img
     width: 22px
@@ -366,73 +376,104 @@ select:focus-visible
 .provider-badge-chatgpt img
     border-radius: 6px
 
-// ─── Helper text (note paragraph) ─────────────────────────────────────
+
+// ─── Helper text ─────────────────────────────────────────────────────
 p.i18n
-    position: relative
     margin: 14px 0 2px
     padding: 12px 14px
     color: unquote('var(--ios-label-secondary)')
-    background: unquote('var(--ios-fill-quaternary)')
+    background: unquote('var(--ios-fill-4)')
     border: 0
-    border-radius: unquote('var(--ios-radius-md)')
+    border-radius: unquote('var(--r-sm)')
     font-size: 13px
     line-height: 1.55
 
-// ─── iOS toggles / radio / checkbox (overrides input.styl base) ───────
-.switch,
-.checkbox,
-.radio
-    flex: 0 0 auto
-    position: relative
-    box-sizing: border-box
 
+// ─── iOS switch / checkbox / radio ───────────────────────────────────
 .switch
-    width: 51px
-    height: 31px
-    border: 0 !important
-    border-radius: unquote('var(--ios-radius-pill)')
-    background-color: unquote('var(--ios-fill-primary)')
-    cursor: pointer
-    outline: none
     appearance: none
     -webkit-appearance: none
-    -moz-appearance: none
-    transition: background-color motion-state-standard, transform 200ms motion-press-transform
+    position: relative
+    width: 51px
+    height: 31px
+    flex: 0 0 auto
+    border: 0
+    border-radius: unquote('var(--r-pill)')
+    background-color: unquote('var(--ios-fill-1)')
+    cursor: pointer
+    outline: none
+    transition: unquote('background-color 220ms var(--emphasized), transform 200ms var(--spring)')
 
-.switch:after
-    content: ' '
+.switch::after
+    content: ''
     position: absolute
     width: 27px
     height: 27px
     top: 2px
     left: 2px
     border-radius: 50%
-    background-color: #ffffff
-    box-shadow: 0 3px 8px rgba(0,0,0,0.16), 0 1px 2px rgba(0,0,0,0.06)
-    transition: transform 320ms motion-press-transform
+    background: white
+    box-shadow: 0 3px 8px rgba(0,0,0,.16), 0 1px 2px rgba(0,0,0,.06)
+    transition: transform 300ms unquote('var(--spring)')
 
 .switch:checked
     background-color: unquote('var(--ios-system-green)')
 
-.switch:checked:after
+.switch:checked::after
     transform: translateX(20px)
 
-.switch:active,
-.checkbox:active,
-.radio:active
-    transform: scale(0.96)
+.switch:active
+    transform: scale(.97)
 
-.checkbox,
+.radio,
+.checkbox
+    appearance: none
+    -webkit-appearance: none
+    position: relative
+    flex: 0 0 auto
+    width: 20px
+    height: 20px
+    border: 2px solid unquote('var(--ios-label-tertiary)')
+    background-color: unquote('var(--ios-fill-3)')
+    cursor: pointer
+    outline: none
+    transition: unquote('background-color 160ms var(--emphasized), border-color 160ms var(--emphasized), transform 200ms var(--spring)')
+
 .radio
-    background-color: unquote('var(--ios-fill-tertiary)') !important
-    transition: background-color motion-state-fast, border-color motion-state-fast, transform 200ms motion-press-transform
+    border-radius: 50%
 
-.checkbox:checked,
-.radio:checked
-    background-color: unquote('var(--ios-tint)') !important
-    border-color: unquote('var(--ios-tint)') !important
+.checkbox
+    border-radius: 6px
 
-// ─── Footer ───────────────────────────────────────────────────────────
+.radio:checked,
+.checkbox:checked
+    background-color: unquote('var(--ios-tint)')
+    border-color: unquote('var(--ios-tint)')
+
+.radio:checked::before
+    content: ''
+    position: absolute
+    inset: 4px
+    border-radius: 50%
+    background: white
+
+.checkbox:checked::after
+    content: ''
+    position: absolute
+    left: 5px
+    top: 2px
+    width: 5px
+    height: 10px
+    border: solid white
+    border-width: 0 2px 2px 0
+    transform: rotate(45deg)
+
+.radio:active,
+.checkbox:active
+    transform: scale(.92)
+
+
+// ─── Footer ──────────────────────────────────────────────────────────
 footer
     position: relative
     z-index: 1
@@ -450,38 +491,6 @@ footer a
 footer a:hover
     text-decoration: underline
 
-// ─── Motion ───────────────────────────────────────────────────────────
-@keyframes options-enter
-    0%
-        opacity: 0
-        transform: translateY(8px) scale(0.99)
-    100%
-        opacity: 1
-        transform: translateY(0) scale(1)
-
-@keyframes sidebar-fade
-    0%
-        opacity: 0
-        transform: translateX(-8px)
-    100%
-        opacity: 1
-        transform: translateX(0)
-
-@keyframes tab-fade-in
-    0%
-        opacity: 0
-        transform: translateY(4px)
-    100%
-        opacity: 1
-        transform: translateY(0)
-
-@keyframes card-slide-in
-    0%
-        opacity: 0
-        transform: translateY(8px)
-    100%
-        opacity: 1
-        transform: translateY(0)
 
 // ─── Responsive ──────────────────────────────────────────────────────
 @media (max-width: 920px)
@@ -490,7 +499,7 @@ footer a:hover
 
     #option
         min-height: calc(100vh - 36px)
-        border-radius: unquote('var(--ios-radius-2xl)')
+        border-radius: unquote('var(--r-xl)')
 
     .main-layout
         grid-template-columns: 1fr
@@ -504,10 +513,3 @@ footer a:hover
 
     .row
         grid-template-columns: 1fr
-
-@media (prefers-reduced-motion: reduce)
-    *,
-    *::before,
-    *::after
-        animation-duration: 1ms !important
-        transition-duration: 1ms !important
