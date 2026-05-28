@@ -1,5 +1,4 @@
 const PDF_NATIVE_BYPASS_PARAM = "edge_translate_pdf_native";
-const PDF_PAGE_TRANSLATE_EVENT = "edge_translate_pdf_page_translate";
 
 function getOriginalPdfUrl(locationLike = window.location) {
     try {
@@ -59,57 +58,18 @@ function bindClosePdfReaderButton(documentRef = document) {
     return true;
 }
 
-function createPdfPageTranslateEvent(windowRef = window) {
-    if (typeof windowRef.CustomEvent === "function") {
-        return new windowRef.CustomEvent(PDF_PAGE_TRANSLATE_EVENT, {
-            bubbles: true,
-            detail: { source: "pdf-viewer-toolbar" },
-        });
-    }
-
-    const documentRef = windowRef.document;
-    const event = documentRef.createEvent("CustomEvent");
-    event.initCustomEvent(PDF_PAGE_TRANSLATE_EVENT, true, false, {
-        source: "pdf-viewer-toolbar",
-    });
-    return event;
-}
-
-function requestPdfPageTranslation({ windowRef = window } = {}) {
-    if (!windowRef || typeof windowRef.dispatchEvent !== "function") return false;
-    windowRef.dispatchEvent(createPdfPageTranslateEvent(windowRef));
-    return true;
-}
-
-function bindPdfPageTranslateButton(documentRef = document, windowRef = window) {
-    const button = documentRef.getElementById("edgeTranslatePdfPageTranslateButton");
-    if (!button) return false;
-    button.addEventListener("click", () => requestPdfPageTranslation({ windowRef }));
-    return true;
-}
-
-function bindPdfViewerControls(documentRef = document, windowRef = window) {
-    const closeBound = bindClosePdfReaderButton(documentRef);
-    const translateBound = bindPdfPageTranslateButton(documentRef, windowRef);
-    return closeBound || translateBound;
-}
-
 if (typeof document !== "undefined") {
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () => bindPdfViewerControls());
+        document.addEventListener("DOMContentLoaded", () => bindClosePdfReaderButton());
     } else {
-        bindPdfViewerControls();
+        bindClosePdfReaderButton();
     }
 }
 
 export {
     PDF_NATIVE_BYPASS_PARAM,
-    PDF_PAGE_TRANSLATE_EVENT,
     getOriginalPdfUrl,
     buildNativePdfUrl,
     closePdfReader,
     bindClosePdfReaderButton,
-    requestPdfPageTranslation,
-    bindPdfPageTranslateButton,
-    bindPdfViewerControls,
 };

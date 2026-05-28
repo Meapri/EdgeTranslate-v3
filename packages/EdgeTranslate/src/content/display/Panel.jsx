@@ -8,7 +8,6 @@ import SimpleBar from "simplebar-react";
 import SimpleBarStyle from "simplebar-react/dist/simplebar.min.css";
 import Channel from "common/scripts/channel.js";
 import { checkTimestamp } from "./utils.js";
-import Moveable from "./library/moveable/moveable.js";
 import { delayPromise } from "common/scripts/promise.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 import Result from "./Result.jsx"; // display translate result
@@ -36,15 +35,30 @@ const scrollbarWidth = getScrollbarWidth();
 let documentBodyCSS = "";
 // The duration time of result panel's transition. unit: ms.
 const transitionDuration = 360;
-const transitionEasing = "cubic-bezier(0.2, 0, 0, 1)";
+const transitionEasing = "cubic-bezier(0.25, 1, 0.5, 1)";
 const DarkPrimary = "#a8c7fa";
 const DarkOnSurface = "#e8eaed";
 const DarkOnSurfaceVariant = "#bdc1c6";
-const DarkSurface = "#1b2026";
-const DarkSurfaceContainer = "#20262d";
 const DarkOutline = "#3d4651";
-const MotionFast = "120ms cubic-bezier(0.2, 0, 0, 1)";
-const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
+const MotionStandard = "280ms cubic-bezier(0.25, 1, 0.5, 1)";
+const MotionFloatingSpotlightIn = "210ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionFloatingSpotlightOut = "170ms cubic-bezier(0.32, 0, 0.67, 0)";
+const MotionSnappy = "360ms cubic-bezier(0.16, 1, 0.3, 1)";
+const DetachResizeMotion = "240ms cubic-bezier(0.2, 1, 0.2, 1)";
+const PanelRadius = "24px";
+const FloatingMargin = 16;
+const SlideOverMargin = 16;
+const SlideOverWidthMin = 320;
+const SlideOverWidthMax = 420;
+const DockPreviewZone = 44;
+const DockCommitZone = 26;
+const FlickDockZone = 120;
+const FlickVelocity = 0.95;
+const FloatingWidthMin = 260;
+const FloatingWidthMaxRatio = 0.42;
+const FloatingHeightMin = 220;
+const FloatingHeightMaxRatio = 0.78;
 
 import { pickBestVoice } from "./voiceSelection.js";
 
@@ -77,15 +91,25 @@ export default function ResultPanel() {
         headElRef = useRef(), // panel head element
         bodyElRef = useRef(); // panel body element
 
-    // Indicate whether the movable panel is ready or not.
+    // Indicate whether the native window controller is ready or not.
     const [moveableReady, setMoveableReady] = useState(false);
-    // store the moveable object returned by moveable.js
-    const moveablePanelRef = useRef(null);
+    const windowControllerRef = useRef(null);
+    const frameRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
+    const pendingFrameRef = useRef(null);
+    const frameRafRef = useRef(0);
+    const panelMotionTimerRef = useRef(0);
+    const closeTimerRef = useRef(0);
     const simplebarRef = useRef();
 
     // 기억된 부동 패널 위치(사용자가 드래그로 이동한 경우)
     const lastFloatingPosRef = useRef(null); // { x: number, y: number }
     const userMovedRef = useRef(false);
+    const dragStateRef = useRef({
+        startType: "floating",
+        startFixedPosition: "right",
+        dockCandidate: null,
+        samples: [],
+    });
     // 마지막 앵커(선택된 단어) 기준 좌표 기억 (캐시 히트 시 position 누락 대비)
     const lastAnchorPosRef = useRef(null); // [x, y]
     const lastOpenedAtRef = useRef(0);
@@ -100,6 +124,7 @@ export default function ResultPanel() {
         floatingData: {
             width: 0.15, // V2 원본과 동일한 비율 값 (15%)
             height: 0.6, // V2 원본과 동일한 비율 값 (60%)
+            position: null,
         },
     });
 
@@ -248,26 +273,307 @@ export default function ResultPanel() {
     // flag whether the user set to resize document body when panel is resized in fixed display mode
     const resizePageFlag = useRef(false);
 
+    function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function getViewportMetrics() {
+        return {
+            width: window.innerWidth - (hasScrollbar() ? scrollbarWidth : 0),
+            height: window.innerHeight,
+        };
+    }
+
+    function getFloatingSizeFromSetting() {
+        const viewport = getViewportMetrics();
+        const configuredWidth = displaySettingRef.current.floatingData.width * viewport.width;
+        const configuredHeight = displaySettingRef.current.floatingData.height * viewport.height;
+        return {
+            width: clamp(
+                configuredWidth,
+                Math.min(FloatingWidthMin, viewport.width - FloatingMargin * 2),
+                Math.max(FloatingWidthMin, viewport.width * FloatingWidthMaxRatio)
+            ),
+            height: clamp(
+                configuredHeight,
+                Math.min(FloatingHeightMin, viewport.height - FloatingMargin * 2),
+                Math.max(FloatingHeightMin, viewport.height * FloatingHeightMaxRatio)
+            ),
+        };
+    }
+
+    function getFixedPanelWidth(viewport = getViewportMetrics()) {
+        return clamp(
+            displaySettingRef.current.fixedData.width * viewport.width,
+            Math.min(SlideOverWidthMin, viewport.width - SlideOverMargin * 2),
+            Math.min(SlideOverWidthMax, viewport.width * 0.42, viewport.width - SlideOverMargin * 2)
+        );
+    }
+
+    function clampFloatingPosition(position, width, height) {
+        const viewport = getViewportMetrics();
+        return [
+            clamp(
+                position[0],
+                FloatingMargin,
+                Math.max(FloatingMargin, viewport.width - width - FloatingMargin)
+            ),
+            clamp(
+                position[1],
+                FloatingMargin,
+                Math.max(FloatingMargin, viewport.height - height - FloatingMargin)
+            ),
+        ];
+    }
+
+    function getDockCandidate(translate, width) {
+        const viewport = getViewportMetrics();
+        if (translate[0] <= DockPreviewZone) return "left";
+        if (translate[0] + width >= viewport.width - DockPreviewZone) return "right";
+        return null;
+    }
+
+    function getDockCommitCandidate(translate, width) {
+        const viewport = getViewportMetrics();
+        if (translate[0] <= DockCommitZone) return "left";
+        if (translate[0] + width >= viewport.width - DockCommitZone) return "right";
+        return null;
+    }
+
+    function recordDragSample(inputEvent, translate) {
+        if (!inputEvent) return;
+        const samples = dragStateRef.current.samples || [];
+        samples.push({
+            x: inputEvent.clientX,
+            y: inputEvent.clientY,
+            panelX: translate[0],
+            at: performance.now(),
+        });
+        if (samples.length > 5) samples.shift();
+        dragStateRef.current.samples = samples;
+    }
+
+    function getDragVelocityX() {
+        const samples = dragStateRef.current.samples || [];
+        if (samples.length < 2) return 0;
+        const first = samples[0];
+        const last = samples[samples.length - 1];
+        const elapsed = Math.max(1, last.at - first.at);
+        return (last.x - first.x) / elapsed;
+    }
+
+    function getReleaseDockCandidate(translate, width) {
+        const directCandidate = getDockCommitCandidate(translate, width);
+        if (directCandidate) return directCandidate;
+
+        const viewport = getViewportMetrics();
+        const velocityX = getDragVelocityX();
+        const nearLeft = translate[0] <= FlickDockZone;
+        const nearRight = translate[0] + width >= viewport.width - FlickDockZone;
+        if (nearLeft && velocityX <= -FlickVelocity) return "left";
+        if (nearRight && velocityX >= FlickVelocity) return "right";
+        return null;
+    }
+
+    function shouldStartPanelDrag(path) {
+        if (!path || !headElRef.current || !path.includes(headElRef.current)) return false;
+
+        return !path.some((node) => {
+            if (!node || node === headElRef.current || typeof node.matches !== "function") {
+                return false;
+            }
+            return node.matches(
+                "button, a, select, input, textarea, ul, li, [role='menuitem'], [data-no-panel-drag]"
+            );
+        });
+    }
+
+    function persistFloatingFrame(position, width, height) {
+        const viewport = getViewportMetrics();
+        displaySettingRef.current.floatingData.width = width / viewport.width;
+        displaySettingRef.current.floatingData.height = height / viewport.height;
+        displaySettingRef.current.floatingData.position = {
+            x: position[0] / viewport.width,
+            y: position[1] / viewport.height,
+        };
+        lastFloatingPosRef.current = { x: position[0], y: position[1] };
+        userMovedRef.current = true;
+    }
+
+    function getSavedFloatingPosition(width, height) {
+        const position = displaySettingRef.current.floatingData.position;
+        if (!position || typeof position.x !== "number" || typeof position.y !== "number") {
+            return null;
+        }
+        const viewport = getViewportMetrics();
+        return clampFloatingPosition(
+            [position.x * viewport.width, position.y * viewport.height],
+            width,
+            height
+        );
+    }
+
+    function setDockPreview(position) {
+        dragStateRef.current.dockCandidate = position;
+        setHighlight((previous) => {
+            if (
+                previous.show === Boolean(position) &&
+                previous.position === (position || "right")
+            ) {
+                return previous;
+            }
+            return {
+                show: Boolean(position),
+                position: position || "right",
+            };
+        });
+    }
+
+    function clearDockPreview() {
+        dragStateRef.current.dockCandidate = null;
+        setHighlight({ show: false, position: "right" });
+    }
+
+    function setPanelMotionState(state, duration = 260) {
+        const panel = panelElRef.current;
+        if (!panel) return;
+
+        if (panelMotionTimerRef.current) {
+            clearTimeout(panelMotionTimerRef.current);
+            panelMotionTimerRef.current = 0;
+        }
+
+        if (state) panel.dataset.motion = state;
+        else delete panel.dataset.motion;
+
+        if (state && duration > 0) {
+            panelMotionTimerRef.current = window.setTimeout(() => {
+                if (panelElRef.current === panel && panel.dataset.motion === state) {
+                    delete panel.dataset.motion;
+                }
+                panelMotionTimerRef.current = 0;
+            }, duration);
+        }
+    }
+
+    function openPanel() {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = 0;
+        }
+        setPanelMotionState("");
+        lastOpenedAtRef.current = Date.now();
+        setOpen(true);
+    }
+
+    function closePanel() {
+        if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+
+        const panel = panelElRef.current;
+        if (!panel) {
+            setOpen(false);
+            return;
+        }
+
+        if (displaySettingRef.current.type === "fixed") {
+            setPanelMotionState("closing", 170);
+            closeTimerRef.current = window.setTimeout(() => {
+                closeTimerRef.current = 0;
+                setOpen(false);
+            }, 170);
+            return;
+        }
+
+        setPanelMotionState("closing", 170);
+        closeTimerRef.current = window.setTimeout(() => {
+            closeTimerRef.current = 0;
+            setOpen(false);
+        }, 170);
+    }
+
+    function writePanelFrame(frame, animate = false, duration = 260, easing = transitionEasing) {
+        const panel = panelElRef.current;
+        if (!panel) return;
+
+        const nextFrame = {
+            ...frameRef.current,
+            ...frame,
+        };
+        frameRef.current = nextFrame;
+
+        if (animate) {
+            panel.style.transition = `transform ${duration}ms ${easing}, width ${duration}ms ${easing}, height ${duration}ms ${easing}, box-shadow ${duration}ms ${easing}, border-color ${duration}ms ${easing}, background-color ${duration}ms ${easing}`;
+            window.setTimeout(() => {
+                if (panelElRef.current === panel) panel.style.transition = "";
+            }, duration + 60);
+        } else if (panel.dataset.motion !== "detaching") {
+            panel.style.transition = "";
+        }
+
+        panel.style.width = `${Math.round(nextFrame.width)}px`;
+        panel.style.height = `${Math.round(nextFrame.height)}px`;
+        panel.style.transform = `translate3d(${Math.round(nextFrame.x)}px, ${Math.round(
+            nextFrame.y
+        )}px, 0)`;
+    }
+
+    function setPanelFrame(frame, animate = false, duration = 260, easing = transitionEasing) {
+        if (animate) {
+            if (frameRafRef.current) {
+                cancelAnimationFrame(frameRafRef.current);
+                frameRafRef.current = 0;
+                pendingFrameRef.current = null;
+            }
+            writePanelFrame(frame, true, duration, easing);
+            return;
+        }
+
+        pendingFrameRef.current = {
+            ...(pendingFrameRef.current || frameRef.current),
+            ...frame,
+        };
+        frameRef.current = pendingFrameRef.current;
+
+        if (frameRafRef.current) return;
+        frameRafRef.current = requestAnimationFrame(() => {
+            frameRafRef.current = 0;
+            const nextFrame = pendingFrameRef.current;
+            pendingFrameRef.current = null;
+            writePanelFrame(nextFrame);
+        });
+    }
+
+    function getAnchorPosition(width, height) {
+        let base = null;
+        if (contentRef.current.position && Array.isArray(contentRef.current.position)) {
+            base = [contentRef.current.position[0], contentRef.current.position[1]];
+        } else if (lastAnchorPosRef.current) {
+            base = [lastAnchorPosRef.current[0], lastAnchorPosRef.current[1]];
+        }
+        if (!base) return null;
+
+        const XBias = 20;
+        const YBias = 20;
+        const threshold = height / 4;
+        let position = [base[0], base[1]];
+        if (position[0] + width > window.innerWidth) position[0] = position[0] - width - XBias;
+        if (position[1] + height > window.innerHeight + threshold) {
+            const nextY = position[1] - height - YBias + threshold;
+            position[1] = nextY < 0 ? 0 : nextY;
+        }
+        return clampFloatingPosition([position[0] + XBias, position[1] + YBias], width, height);
+    }
+
     /**
-     * V2 원본과 동일한 bounds 업데이트 함수 복원
+     * Keep the native window frame visible after viewport changes.
      */
     const updateBounds = useCallback(async () => {
-        // If the panel is open
-        if (containerElRef.current) {
-            await getDisplaySetting();
-            let scrollLeft = document.documentElement.scrollLeft || document.body.scrollLeft;
-            let scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-
-            // V2 원본과 동일한 bounds 계산 - 자유로운 드래그를 위해 넓은 영역 허용
-            moveablePanelRef.current?.setBounds({
-                left: scrollLeft,
-                top: scrollTop,
-                right: scrollLeft + window.innerWidth - (hasScrollbar() ? scrollbarWidth : 0),
-                bottom:
-                    scrollTop +
-                    (1 + displaySettingRef.current.floatingData.height) * window.innerHeight -
-                    64,
-            });
+        if (!panelElRef.current || displaySettingRef.current.type !== "floating") return;
+        const frame = frameRef.current;
+        if (!frame.width || !frame.height) return;
+        const [x, y] = clampFloatingPosition([frame.x, frame.y], frame.width, frame.height);
+        if (x !== frame.x || y !== frame.y) {
+            setPanelFrame({ x, y }, true, 180);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -319,8 +625,7 @@ export default function ResultPanel() {
                 if (detail.position && Array.isArray(detail.position)) {
                     lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
                 }
-                lastOpenedAtRef.current = Date.now();
-                setOpen(true);
+                openPanel();
                 setContentType("LOADING");
                 setContent(detail);
             }
@@ -332,8 +637,7 @@ export default function ResultPanel() {
                 if (detail.position && Array.isArray(detail.position)) {
                     lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
                 }
-                lastOpenedAtRef.current = Date.now();
-                setOpen(true);
+                openPanel();
                 setContentType("RESULT");
                 setContent(detail);
             }
@@ -345,8 +649,7 @@ export default function ResultPanel() {
                 if (detail.position && Array.isArray(detail.position)) {
                     lastAnchorPosRef.current = [detail.position[0], detail.position[1]];
                 }
-                lastOpenedAtRef.current = Date.now();
-                setOpen(true);
+                openPanel();
                 setContentType("RESULT");
                 setContent((previous) => ({
                     ...(previous || {}),
@@ -382,7 +685,7 @@ export default function ResultPanel() {
                     });
                     break;
                 case "close_result_frame":
-                    setOpen(false);
+                    closePanel();
                     break;
                 default:
                     break;
@@ -422,6 +725,273 @@ export default function ResultPanel() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    function getEventPath(event) {
+        return event.path || (event.composedPath && event.composedPath()) || [];
+    }
+
+    function setupNativeWindowController(panelEl) {
+        let interaction = null;
+
+        const endInteraction = () => {
+            interaction = null;
+            clearDockPreview();
+            document.removeEventListener("pointermove", onPointerMove, true);
+            document.removeEventListener("pointerup", onPointerUp, true);
+            document.removeEventListener("pointercancel", onPointerCancel, true);
+        };
+
+        const attachDocumentPointerListeners = () => {
+            document.addEventListener("pointermove", onPointerMove, true);
+            document.addEventListener("pointerup", onPointerUp, true);
+            document.addEventListener("pointercancel", onPointerCancel, true);
+        };
+
+        const getFloatingFrameForPointer = (event, anchor) => {
+            const floatingSize = getFloatingSizeFromSetting();
+            const pointerXRatio = anchor?.pointerXRatio ?? 0.5;
+            const pointerYOffset = anchor?.pointerYOffset ?? 32;
+            const [x, y] = clampFloatingPosition(
+                [
+                    event.clientX - floatingSize.width * pointerXRatio,
+                    event.clientY - pointerYOffset,
+                ],
+                floatingSize.width,
+                floatingSize.height
+            );
+
+            return {
+                x,
+                y,
+                width: floatingSize.width,
+                height: floatingSize.height,
+            };
+        };
+
+        const applyDetachResizeTransition = () => {
+            panelEl.style.transition = `width ${DetachResizeMotion}, height ${DetachResizeMotion}, box-shadow ${DetachResizeMotion}, filter ${DetachResizeMotion}, border-color ${DetachResizeMotion}`;
+        };
+
+        const beginDrag = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const startType = displaySettingRef.current.type;
+            const startFrame = { ...frameRef.current };
+            const floatingSize = getFloatingSizeFromSetting();
+            const pointerAnchor = {
+                pointerXRatio: clamp(
+                    (event.clientX - startFrame.x) / Math.max(1, startFrame.width),
+                    0.18,
+                    0.82
+                ),
+                pointerYOffset: clamp(
+                    event.clientY - startFrame.y,
+                    18,
+                    Math.min(64, floatingSize.height * 0.32)
+                ),
+            };
+            if (startType !== "fixed") setPanelMotionState("dragging", 0);
+
+            interaction = {
+                mode: "drag",
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                startFrame,
+                latestFrame: startFrame,
+                pointerAnchor,
+                undocked: startType !== "fixed",
+            };
+            dragStateRef.current = {
+                startType,
+                startFixedPosition: displaySettingRef.current.fixedData.position,
+                dockCandidate: null,
+                samples: [],
+            };
+            recordDragSample(event, [frameRef.current.x, frameRef.current.y]);
+            clearDockPreview();
+            panelEl.setPointerCapture?.(event.pointerId);
+            attachDocumentPointerListeners();
+        };
+
+        const beginResize = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            interaction = {
+                mode: "resize",
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                startFrame: { ...frameRef.current },
+                latestFrame: { ...frameRef.current },
+            };
+            panelEl.setPointerCapture?.(event.pointerId);
+            attachDocumentPointerListeners();
+        };
+
+        const onPointerDown = (event) => {
+            if (event.button !== 0) return;
+            const path = getEventPath(event);
+            if (path.some((node) => node?.dataset?.panelResizeHandle)) {
+                beginResize(event);
+                return;
+            }
+            if (shouldStartPanelDrag(path)) beginDrag(event);
+        };
+
+        const onPointerMove = (event) => {
+            if (!interaction || event.pointerId !== interaction.pointerId) return;
+
+            const dx = event.clientX - interaction.startClientX;
+            const dy = event.clientY - interaction.startClientY;
+            const startFrame = interaction.startFrame;
+
+            if (interaction.mode === "drag") {
+                if (dragStateRef.current.startType === "fixed" && !interaction.undocked) {
+                    if (Math.hypot(dx, dy) < 3) return;
+                    interaction.undocked = true;
+                    displaySettingRef.current.type = "floating";
+                    setDisplayType("floating");
+                    setPanelMotionState("detaching", 240);
+                    applyDetachResizeTransition();
+                    removeFixedPanel();
+                }
+
+                if (dragStateRef.current.startType === "fixed") {
+                    const nextFrame = getFloatingFrameForPointer(event, interaction.pointerAnchor);
+                    interaction.startFrame = nextFrame;
+                    interaction.latestFrame = nextFrame;
+                    setPanelFrame(nextFrame);
+                    recordDragSample(event, [nextFrame.x, nextFrame.y]);
+                    setDockPreview(getDockCandidate([nextFrame.x, nextFrame.y], nextFrame.width));
+                    return;
+                }
+
+                const [x, y] = clampFloatingPosition(
+                    [startFrame.x + dx, startFrame.y + dy],
+                    startFrame.width,
+                    startFrame.height
+                );
+                const nextFrame = {
+                    ...startFrame,
+                    x,
+                    y,
+                };
+                interaction.latestFrame = nextFrame;
+                setPanelFrame(nextFrame);
+                recordDragSample(event, [x, y]);
+                setDockPreview(getDockCandidate([x, y], startFrame.width));
+                return;
+            }
+
+            if (interaction.mode === "resize") {
+                const viewport = getViewportMetrics();
+                const width = clamp(
+                    startFrame.width + dx,
+                    Math.min(FloatingWidthMin, viewport.width - FloatingMargin * 2),
+                    viewport.width - startFrame.x - FloatingMargin
+                );
+                const height = clamp(
+                    startFrame.height + dy,
+                    Math.min(FloatingHeightMin, viewport.height - FloatingMargin * 2),
+                    viewport.height - startFrame.y - FloatingMargin
+                );
+                const nextFrame = {
+                    ...startFrame,
+                    width,
+                    height,
+                };
+                interaction.latestFrame = nextFrame;
+                setPanelFrame(nextFrame);
+            }
+        };
+
+        const finishDrag = () => {
+            const frame = interaction.latestFrame;
+            clearDockPreview();
+
+            if (dragStateRef.current.startType === "fixed" && !interaction.undocked) {
+                endInteraction();
+                return;
+            }
+
+            const dockPosition = getReleaseDockCandidate([frame.x, frame.y], frame.width);
+            if (dockPosition) {
+                displaySettingRef.current.fixedData.position = dockPosition;
+                displaySettingRef.current.fixedData.width = clamp(
+                    frame.width / getViewportMetrics().width,
+                    0.16,
+                    0.42
+                );
+                displaySettingRef.current.type = "fixed";
+                displaySettingRef.current.floatingData.position = null;
+                userMovedRef.current = false;
+                setPanelMotionState("docking", 260);
+                showFixedPanel(true, { slideIn: false, duration: 260 });
+                updateDisplaySetting();
+                endInteraction();
+                return;
+            }
+
+            const [x, y] = clampFloatingPosition([frame.x, frame.y], frame.width, frame.height);
+            const finalFrame = { ...frame, x, y };
+            displaySettingRef.current.type = "floating";
+            persistFloatingFrame([x, y], finalFrame.width, finalFrame.height);
+            setPanelMotionState("settling", 260);
+            setPanelFrame(finalFrame, true, 220);
+            updateDisplaySetting();
+            endInteraction();
+        };
+
+        const finishResize = () => {
+            const frame = interaction.latestFrame;
+            const [x, y] = clampFloatingPosition([frame.x, frame.y], frame.width, frame.height);
+            const finalFrame = { ...frame, x, y };
+            displaySettingRef.current.type = "floating";
+            persistFloatingFrame([x, y], finalFrame.width, finalFrame.height);
+            setPanelMotionState("settling", 240);
+            setPanelFrame(finalFrame, true, 180);
+            updateDisplaySetting();
+            endInteraction();
+        };
+
+        const onPointerUp = (event) => {
+            if (!interaction || event.pointerId !== interaction.pointerId) return;
+            panelEl.releasePointerCapture?.(event.pointerId);
+            if (interaction.mode === "drag") finishDrag(event);
+            else finishResize(event);
+        };
+
+        const onPointerCancel = (event) => {
+            if (!interaction || event.pointerId !== interaction.pointerId) return;
+            panelEl.releasePointerCapture?.(event.pointerId);
+            setPanelMotionState("settling", 220);
+            setPanelFrame(interaction.startFrame, true, 180);
+            endInteraction();
+        };
+
+        panelEl.addEventListener("pointerdown", onPointerDown);
+
+        return () => {
+            if (frameRafRef.current) {
+                cancelAnimationFrame(frameRafRef.current);
+                frameRafRef.current = 0;
+                pendingFrameRef.current = null;
+            }
+            if (closeTimerRef.current) {
+                clearTimeout(closeTimerRef.current);
+                closeTimerRef.current = 0;
+            }
+            if (panelMotionTimerRef.current) {
+                clearTimeout(panelMotionTimerRef.current);
+                panelMotionTimerRef.current = 0;
+            }
+            endInteraction();
+            setPanelMotionState("");
+            panelEl.removeEventListener("pointerdown", onPointerDown);
+        };
+    }
+
     /**
      * When status of result panel is changed(open or close), this function will be triggered.
      */
@@ -430,8 +1000,8 @@ export default function ResultPanel() {
 
         /* If panel is closed */
         if (!panelEl) {
-            // Clear the outdated moveable object.
-            moveablePanelRef.current = null;
+            windowControllerRef.current?.();
+            windowControllerRef.current = null;
             setMoveableReady(false);
 
             // 패널을 닫을 때 임시 위치 기억은 유지(다음 열기에 사용),
@@ -453,186 +1023,13 @@ export default function ResultPanel() {
         // Tell select.js that we are displaying results.
         window.isDisplayingResult = true;
 
-        /* Make the resultPanel resizable and draggable */
-        moveablePanelRef.current = new Moveable(panelEl, {
-            draggable: true,
-            resizable: true,
-            /* Set threshold value to increase the resize area */
-            threshold: 5,
-            /**
-             * Set thresholdPosition to decide where the resizable area is
-             */
-            thresholdPosition: 0.7,
-            minWidth: 180,
-            minHeight: 150,
-            // V2처럼 자유로운 드래그를 위해 bounds를 나중에 동적으로 설정
-        });
-
-        let startTranslate = [0, 0];
-        // To flag whether the floating panel should be changed to fixed panel.
-        let floatingToFixed = false;
-        // Store the fixed direction on bound event.
-        let fixedDirection = "";
-
-        /* V2 원본과 동일한 draggable events 복원 */
-        moveablePanelRef.current
-            .on("dragStart", ({ set, stop, inputEvent }) => {
-                if (inputEvent) {
-                    const path =
-                        inputEvent.path || (inputEvent.composedPath && inputEvent.composedPath());
-                    // If drag element isn't the head element, stop the drag event.
-                    if (!path || !headElRef.current?.isSameNode(path[0])) {
-                        stop();
-                        return;
-                    }
-                }
-                set(startTranslate);
-            })
-            .on("drag", ({ target, translate }) => {
-                startTranslate = translate;
-                target.style.transform = `translate(${translate[0]}px, ${translate[1]}px)`;
-            })
-            .on("dragEnd", ({ translate, inputEvent }) => {
-                startTranslate = translate;
-
-                /* Change the display type of result panel */
-                if (inputEvent && displaySettingRef.current.type === "floating") {
-                    // 사용자가 이동한 위치를 기억
-                    if (Array.isArray(translate) && translate.length === 2) {
-                        lastFloatingPosRef.current = { x: translate[0], y: translate[1] };
-                        userMovedRef.current = true;
-                    }
-                    if (floatingToFixed) {
-                        displaySettingRef.current.fixedData.position = fixedDirection;
-                        displaySettingRef.current.type = "fixed";
-                        // 고정 모드로 전환 시 부동 위치는 사용하지 않음
-                        // lastFloatingPosRef.current = null;
-                        // userMovedRef.current = false;
-                        // remove the highlight part
-                        setHighlight({
-                            show: false,
-                            position: "right",
-                        });
-                        showFixedPanel();
-                        updateDisplaySetting();
-                    }
-                }
-            })
-            // The result panel drag out of the drag area
-            .on("bound", ({ direction, distance }) => {
-                /* Whether to show hight part on the one side of the page*/
-                if (displaySettingRef.current.type === "floating") {
-                    let threshold = 10;
-                    if (distance > threshold) {
-                        if (direction === "left" || direction === "right") {
-                            fixedDirection = direction;
-                            floatingToFixed = true;
-                            // show highlight part
-                            setHighlight({
-                                show: true,
-                                position: direction,
-                            });
-                        }
-                    }
-                }
-            })
-            // The result panel drag into drag area first time
-            .on("boundEnd", () => {
-                if (floatingToFixed)
-                    // remove the highlight part
-                    setHighlight({
-                        show: false,
-                        position: "right",
-                    });
-                floatingToFixed = false;
-                // Change the display type from fixed to floating
-                if (displaySettingRef.current.type === "fixed") {
-                    displaySettingRef.current.type = "floating";
-                    removeFixedPanel();
-                    showFloatingPanel();
-                    updateDisplaySetting();
-                    // The height of content in fixed panel may be different from the height in floating panel so we need to update the height of floating panel after a little delay.
-                    setTimeout(showFloatingPanel, 50);
-                }
-            });
-        /* Listen to resizable  events */
-        moveablePanelRef.current
-            .on("resizeStart", ({ set }) => {
-                set(startTranslate);
-            })
-            .on("resize", ({ target, width, height, translate, inputEvent }) => {
-                target.style.width = `${width}px`;
-                target.style.height = `${height}px`;
-                target.style.transform = `translate(${translate[0]}px, ${translate[1]}px)`;
-                if (inputEvent) {
-                    if (displaySettingRef.current.type === "fixed" && resizePageFlag.current) {
-                        document.body.style.width = `${(1 - width / window.innerWidth) * 100}%`;
-                    }
-                    // 부동 모드에서 리사이즈 시 현재 위치도 기억
-                    if (
-                        displaySettingRef.current.type === "floating" &&
-                        Array.isArray(translate) &&
-                        translate.length === 2
-                    ) {
-                        lastFloatingPosRef.current = { x: translate[0], y: translate[1] };
-                        userMovedRef.current = true;
-                    }
-                }
-            })
-            .on("resizeEnd", ({ translate, width, height, inputEvent, target }) => {
-                startTranslate = translate;
-                target.style.transform = `translate(${translate[0]}px, ${translate[1]}px)`;
-
-                // Update new size of the result panel
-                if (inputEvent) {
-                    if (displaySettingRef.current.type === "floating") {
-                        displaySettingRef.current.floatingData.width = width / window.innerWidth;
-                        displaySettingRef.current.floatingData.height = height / window.innerHeight;
-                    } else {
-                        displaySettingRef.current.fixedData.width = width / window.innerWidth;
-                    }
-                    updateDisplaySetting();
-                }
-            });
-        showPanel();
+        windowControllerRef.current?.();
+        windowControllerRef.current = setupNativeWindowController(panelEl);
+        setMoveableReady(true);
+        panelEl.style.opacity = "0";
+        requestAnimationFrame(showPanel);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-
-    /* 콘텐츠 타입 변경 후: 높이 조정 + (필요 시) 앵커 기준 재배치 */
-    useEffect(() => {
-        if (displaySettingRef.current.type === "floating") {
-            setTimeout(showFloatingPanel, contentType === "LOADING" ? 0 : 100);
-            // 사용자가 직접 옮기지 않았고, 앵커가 있다면 재배치
-            if (!userMovedRef.current && moveablePanelRef.current) {
-                const width = displaySettingRef.current.floatingData.width * window.innerWidth;
-                const height = displaySettingRef.current.floatingData.height * window.innerHeight;
-                let base = null;
-                if (contentRef.current.position && Array.isArray(contentRef.current.position)) {
-                    base = [contentRef.current.position[0], contentRef.current.position[1]];
-                } else if (lastAnchorPosRef.current) {
-                    base = [lastAnchorPosRef.current[0], lastAnchorPosRef.current[1]];
-                }
-                if (base) {
-                    const XBias = 20,
-                        YBias = 20,
-                        threshold = height / 4;
-                    let position = [base[0], base[1]];
-                    if (position[0] + width > window.innerWidth)
-                        position[0] = position[0] - width - XBias;
-                    if (position[1] + height > window.innerHeight + threshold) {
-                        let newPosition1 = position[1] - height - YBias + threshold;
-                        position[1] = newPosition1 < 0 ? 0 : newPosition1;
-                    }
-                    position = [position[0] + XBias, position[1] + YBias];
-                    moveablePanelRef.current.request("draggable", {
-                        x: position[0],
-                        y: position[1],
-                    });
-                }
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [contentType]);
 
     // Update drag bounds when users scroll the page
     useEvent("scroll", updateBounds, window);
@@ -645,7 +1042,7 @@ export default function ResultPanel() {
         const openedRecently = Date.now() - lastOpenedAtRef.current < 500;
         if (contentTypeRef.current === "LOADING" || openedRecently) return;
         if (!panelFix) {
-            setOpen(false);
+            closePanel();
         }
     });
 
@@ -659,73 +1056,60 @@ export default function ResultPanel() {
         if (displaySettingRef.current.type === "floating") {
             /* show floating panel */
             let position;
-            let width = displaySettingRef.current.floatingData.width * window.innerWidth;
-            let height = displaySettingRef.current.floatingData.height * window.innerHeight;
+            const { width, height } = getFloatingSizeFromSetting();
 
-            // 위치 우선순위: 현재 position -> 마지막 앵커 -> 마지막 부동 -> 기본
-            if (contentRef.current.position) {
-                /* Adjust the position of result panel. Avoid to beyond the range of page */
-                const XBias = 20,
-                    YBias = 20,
-                    threshold = height / 4;
-                position = [contentRef.current.position[0], contentRef.current.position[1]];
-
-                // The result panel would exceeds the right boundary of the page.
-                if (position[0] + width > window.innerWidth) {
-                    position[0] = position[0] - width - XBias;
-                }
-                // The result panel would exceeds the bottom boundary of the page.
-                if (position[1] + height > window.innerHeight + threshold) {
-                    // Make true the panel wouldn't exceed the top boundary.
-                    let newPosition1 = position[1] - height - YBias + threshold;
-                    position[1] = newPosition1 < 0 ? 0 : newPosition1;
-                }
-                position = [position[0] + XBias, position[1] + YBias];
-            } else if (lastAnchorPosRef.current) {
-                const XBias = 20,
-                    YBias = 20,
-                    threshold = height / 4;
-                position = [lastAnchorPosRef.current[0], lastAnchorPosRef.current[1]];
-                if (position[0] + width > window.innerWidth) {
-                    position[0] = position[0] - width - XBias;
-                }
-                if (position[1] + height > window.innerHeight + threshold) {
-                    let newPosition1 = position[1] - height - YBias + threshold;
-                    position[1] = newPosition1 < 0 ? 0 : newPosition1;
-                }
-                position = [position[0] + XBias, position[1] + YBias];
+            // iPadOS-style memory: once the user moves the panel, reopen it in that frame.
+            const savedPosition = getSavedFloatingPosition(width, height);
+            const anchorPosition = getAnchorPosition(width, height);
+            if (savedPosition) {
+                position = savedPosition;
             } else if (userMovedRef.current && lastFloatingPosRef.current) {
-                position = [lastFloatingPosRef.current.x, lastFloatingPosRef.current.y];
+                position = clampFloatingPosition(
+                    [lastFloatingPosRef.current.x, lastFloatingPosRef.current.y],
+                    width,
+                    height
+                );
+            } else if (anchorPosition) {
+                position = anchorPosition;
             } else {
-                position = [
-                    (1 - displaySettingRef.current.floatingData.width) * window.innerWidth -
-                        (hasScrollbar() ? scrollbarWidth : 0),
-                    0,
-                ];
+                const viewport = getViewportMetrics();
+                position = clampFloatingPosition(
+                    [viewport.width - width - FloatingMargin, FloatingMargin],
+                    width,
+                    height
+                );
             }
 
-            showFloatingPanel();
-            // V2처럼 즉시 위치 설정 (setTimeout 없이)
-            moveablePanelRef.current.request("draggable", { x: position[0], y: position[1] });
+            setDisplayType("floating");
+            writePanelFrame({
+                x: position[0],
+                y: position[1],
+                width,
+                height,
+            });
+            requestAnimationFrame(() => {
+                if (panelElRef.current) panelElRef.current.style.opacity = "";
+                setPanelMotionState("floating-opening", 210);
+            });
         } else {
-            showFixedPanel();
+            showFixedPanel(true);
         }
-        // Indicate that the movable panel is ready to show.
-        setMoveableReady(true);
     }
 
     /**
      * Show the result panel in the floating type.
      */
     function showFloatingPanel() {
-        if (!moveablePanelRef.current) return;
+        if (!panelElRef.current) return;
         setDisplayType("floating");
 
-        let panelWidth = displaySettingRef.current.floatingData.width * window.innerWidth;
-        let panelHeight = displaySettingRef.current.floatingData.height * window.innerHeight;
+        let { width: panelWidth, height: panelHeight } = getFloatingSizeFromSetting();
 
         /* Fit the panel to the content size */
-        if (contentTypeRef.current === "RESULT" || contentTypeRef.current === "ERROR") {
+        if (
+            (contentTypeRef.current === "RESULT" && !contentRef.current?.isStreaming) ||
+            contentTypeRef.current === "ERROR"
+        ) {
             // Guard against unmounted refs or transient nulls from SimpleBar
             const headH = headElRef.current?.clientHeight || 0;
             const contentEl =
@@ -738,7 +1122,15 @@ export default function ResultPanel() {
             if (actualHeight !== headH && panelHeight > actualHeight) panelHeight = actualHeight;
         }
 
-        moveablePanelRef.current.request("resizable", {
+        const frame = frameRef.current;
+        const [x, y] = clampFloatingPosition(
+            [frame.x || FloatingMargin, frame.y || FloatingMargin],
+            panelWidth,
+            panelHeight
+        );
+        setPanelFrame({
+            x,
+            y,
             width: panelWidth,
             height: panelHeight,
         });
@@ -747,53 +1139,52 @@ export default function ResultPanel() {
     /**
      * Show the result panel in the fixed type.
      */
-    function showFixedPanel() {
+    function showFixedPanel(animate = false, options = {}) {
         setDisplayType("fixed");
-        let width = displaySettingRef.current.fixedData.width * window.innerWidth;
-        // the offset left value for fixed result panel
-        let offsetLeft = 0;
+        const viewport = getViewportMetrics();
+        const width = getFixedPanelWidth(viewport);
+        const height = viewport.height - SlideOverMargin * 2;
+        let offsetLeft = SlideOverMargin;
         if (displaySettingRef.current.fixedData.position === "right")
-            offsetLeft = window.innerWidth - width - (hasScrollbar() ? scrollbarWidth : 0);
-        getOrSetDefaultSettings("LayoutSettings", DEFAULT_SETTINGS).then(async (result) => {
-            resizePageFlag.current = result.LayoutSettings.Resize;
-            // user set to resize the document body
-            if (resizePageFlag.current) {
-                // If `documentBodyCSS` is empty, this means the panel is created for the first time. Ths creation animation is only needed when the panel is firstly created.
-                if (documentBodyCSS === "") {
-                    // store the original css text. when fixed panel is removed, restore the style of document.body
-                    documentBodyCSS = document.body.style.cssText;
+            offsetLeft = viewport.width - width - SlideOverMargin;
 
-                    document.body.style.position = "absolute";
-                    document.body.style.transition = `width ${transitionDuration}ms ${transitionEasing}`;
-                    panelElRef.current.style.transition = `width ${transitionDuration}ms ${transitionEasing}`;
-                    /* set the start width to make the transition effect work */
-                    document.body.style.width = "100%";
-                    move(0, window.innerHeight, offsetLeft, 0);
-                    // wait some time to make the setting of width applied
-                    await delayPromise(50);
-                }
-                // the fixed panel in on the left side
-                if (displaySettingRef.current.fixedData.position === "left") {
-                    document.body.style.right = "0";
-                    document.body.style.left = "";
-                }
-                // the fixed panel in on the right side
-                else {
-                    document.body.style.margin = "0";
-                    document.body.style.right = "";
-                    document.body.style.left = "0";
-                }
-                // set the target width for document body
-                document.body.style.width = `${
-                    (1 - displaySettingRef.current.fixedData.width) * 100
-                }%`;
-                // set the target width for the result panel
-                move(width, window.innerHeight, offsetLeft, 0);
-                /* cancel the transition effect after the panel showed */
-                await delayPromise(transitionDuration);
-                panelElRef.current.style.transition = "";
-                document.body.style.transition = "";
-            } else move(width, window.innerHeight, offsetLeft, 0);
+        const targetFrame = {
+            width,
+            height,
+            x: offsetLeft,
+            y: SlideOverMargin,
+        };
+
+        Promise.resolve().then(async () => {
+            if (documentBodyCSS) {
+                resizePageFlag.current = true;
+                await removeFixedPanel();
+            }
+            resizePageFlag.current = false;
+
+            const slideIn = options.slideIn ?? animate;
+            const duration = options.duration ?? 210;
+            const easing = options.easing ?? transitionEasing;
+
+            if (slideIn) {
+                writePanelFrame(targetFrame);
+                requestAnimationFrame(() => {
+                    if (panelElRef.current) panelElRef.current.style.opacity = "";
+                    setPanelMotionState("floating-opening", duration);
+                });
+                return;
+            }
+
+            if (panelElRef.current) panelElRef.current.style.opacity = "";
+            move(
+                targetFrame.width,
+                targetFrame.height,
+                targetFrame.x,
+                targetFrame.y,
+                animate,
+                duration,
+                easing
+            );
         });
     }
 
@@ -818,15 +1209,26 @@ export default function ResultPanel() {
      * @param {number} left x-axis coordinate of the target position
      * @param {number} top y-axis coordinate of the target position
      */
-    function move(width, height, left, top) {
-        moveablePanelRef.current.request("draggable", {
-            x: left,
-            y: top,
-        });
-        moveablePanelRef.current.request("resizable", {
-            width,
-            height,
-        });
+    function move(
+        width,
+        height,
+        left,
+        top,
+        animate = false,
+        duration = 260,
+        easing = transitionEasing
+    ) {
+        setPanelFrame(
+            {
+                width,
+                height,
+                x: left,
+                y: top,
+            },
+            animate,
+            duration,
+            easing
+        );
     }
 
     /**
@@ -860,6 +1262,7 @@ export default function ResultPanel() {
                         displaySettingRef.current.floatingData = {
                             width: 0.15,
                             height: 0.6,
+                            position: null,
                         };
                         needsUpdate = true;
                     } else {
@@ -872,9 +1275,12 @@ export default function ResultPanel() {
                             displaySettingRef.current.floatingData.height = 0.6;
                             needsUpdate = true;
                         }
-                        // position 값 제거 (V2에서는 자동 계산)
-                        if (displaySettingRef.current.floatingData.position) {
-                            delete displaySettingRef.current.floatingData.position;
+                        const position = displaySettingRef.current.floatingData.position;
+                        if (
+                            position &&
+                            (typeof position.x !== "number" || typeof position.y !== "number")
+                        ) {
+                            displaySettingRef.current.floatingData.position = null;
                             needsUpdate = true;
                         }
                     }
@@ -916,6 +1322,8 @@ export default function ResultPanel() {
                     <Panel
                         ref={onDisplayStatusChange}
                         displayType={displayType}
+                        data-display-type={displayType}
+                        $isTranslating={contentType === "LOADING" || content?.isStreaming}
                         data-testid="Panel"
                     >
                         {
@@ -975,7 +1383,7 @@ export default function ResultPanel() {
                                                 );
                                             })}
                                         </SourceOption>
-                                        <HeadIcons>
+                                        <HeadIcons data-no-panel-drag="true">
                                             <HeadIcon
                                                 role="button"
                                                 title={chrome.i18n.getMessage("Settings")}
@@ -1002,7 +1410,7 @@ export default function ResultPanel() {
                                             <HeadIcon
                                                 role="button"
                                                 title={chrome.i18n.getMessage("CloseResultFrame")}
-                                                onClick={() => setOpen(false)}
+                                                onClick={closePanel}
                                                 data-testid="CloseIcon"
                                             >
                                                 <CloseIcon />
@@ -1016,6 +1424,12 @@ export default function ResultPanel() {
                                             {contentType === "ERROR" && <Error {...content} />}
                                         </SimpleBar>
                                     </Body>
+                                    {displayType === "floating" && (
+                                        <ResizeHandle
+                                            data-panel-resize-handle="bottom-right"
+                                            aria-hidden="true"
+                                        />
+                                    )}
                                 </Fragment>
                             )
                         }
@@ -1024,9 +1438,10 @@ export default function ResultPanel() {
             )}
             {highlight.show && (
                 <Highlight
+                    $position={highlight.position}
                     style={{
-                        width: displaySettingRef.current.fixedData.width * window.innerWidth,
-                        [highlight.position]: 0,
+                        width: getFixedPanelWidth(),
+                        [highlight.position]: SlideOverMargin,
                     }}
                 />
             )}
@@ -1040,7 +1455,6 @@ export default function ResultPanel() {
 
 export const MaxZIndex = 2147483647;
 const ColorPrimary = "#0b57d0";
-const PanelBorderRadius = "8px";
 export const ContentWrapperCenterClassName = "simplebar-content-wrapper-center";
 
 const GlobalStyle = createGlobalStyle`
@@ -1135,6 +1549,18 @@ const GlobalStyle = createGlobalStyle`
  * }} props
  */
 const Panel = styled.div`
+    --et-outline-color: rgba(255, 255, 255, 0.76);
+    --et-glass-top: rgba(255, 255, 255, 0.9);
+    --et-glass-bottom: rgba(248, 250, 253, 0.56);
+    --et-glass-sheen: rgba(255, 255, 255, 0.7);
+
+    @media (prefers-color-scheme: dark) {
+        --et-outline-color: rgba(255, 255, 255, 0.1);
+        --et-glass-top: rgba(33, 39, 46, 0.88);
+        --et-glass-bottom: rgba(22, 27, 32, 0.62);
+        --et-glass-sheen: rgba(255, 255, 255, 0.08);
+    }
+
     display: flex;
     flex-direction: column;
     flex-wrap: nowrap;
@@ -1144,11 +1570,21 @@ const Panel = styled.div`
     top: 0;
     left: 0;
     z-index: ${MaxZIndex};
-    border-radius: ${(props) => (props.displayType === "floating" ? PanelBorderRadius : 0)};
-    overflow: visible;
-    box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
-    background: #ffffff;
-    border: 1px solid rgba(225, 227, 225, 0.92);
+    border-radius: ${PanelRadius};
+    overflow: hidden;
+    isolation: isolate;
+    box-shadow: 0 24px 64px rgba(30, 47, 72, 0.2), 0 8px 18px rgba(30, 47, 72, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.94), transparent 34%),
+        radial-gradient(circle at 92% 8%, rgba(211, 227, 253, 0.52), transparent 32%),
+        linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
+    background-clip: padding-box;
+    backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
+    -webkit-backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
+    opacity: 1;
+    scale: 1;
+    transform-origin: 50% 24px;
+    will-change: transform, scale, opacity, filter, width, height;
 
     /* Normalize the style of panel */
     padding: 0;
@@ -1165,47 +1601,100 @@ const Panel = styled.div`
     font-family: system-ui, -apple-system,
         /* Firefox supports this but not yet 'system-ui' */ "Segoe UI", Roboto, Helvetica, Arial,
         sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-    animation: et-panel-enter ${MotionStandard} both;
-    transition: background-color ${MotionStandard}, box-shadow ${MotionStandard},
-        color ${MotionStandard}, opacity ${MotionFast};
 
-    @keyframes et-panel-enter {
+    transition: background-color ${MotionStandard}, box-shadow ${MotionSnappy},
+        filter ${MotionSnappy}, color ${MotionStandard}, opacity ${MotionFast},
+        border-color ${MotionFast}, scale ${MotionSnappy};
+
+    border: 1px solid var(--et-outline-color);
+
+    &[data-display-type="fixed"] {
+        box-shadow: 0 28px 70px rgba(30, 47, 72, 0.22), 0 12px 34px rgba(30, 47, 72, 0.14),
+            inset 0 1px 0 rgba(255, 255, 255, 0.82);
+        background: radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.94), transparent 34%),
+            radial-gradient(circle at 94% 10%, rgba(211, 227, 253, 0.56), transparent 30%),
+            linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 253, 0.62));
+    }
+
+    &[data-motion="undocking"] {
+        border-color: rgba(211, 227, 253, 0.9);
+        box-shadow: 0 32px 74px rgba(30, 47, 72, 0.24), 0 14px 28px rgba(30, 47, 72, 0.14),
+            inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        filter: saturate(1.08) brightness(1.02);
+    }
+
+    &[data-motion="dragging"] {
+        border-color: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 34px 78px rgba(30, 47, 72, 0.26), 0 16px 32px rgba(30, 47, 72, 0.12),
+            inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        filter: saturate(1.1);
+    }
+
+    &[data-motion="detaching"] {
+        border-color: rgba(255, 255, 255, 0.86);
+        box-shadow: 0 34px 78px rgba(30, 47, 72, 0.24), 0 16px 32px rgba(30, 47, 72, 0.11),
+            inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        filter: saturate(1.08) brightness(1.015);
+    }
+
+    &[data-motion="docking"],
+    &[data-motion="settling"] {
+        box-shadow: 0 26px 66px rgba(30, 47, 72, 0.2), 0 9px 20px rgba(30, 47, 72, 0.11),
+            inset 0 1px 0 rgba(255, 255, 255, 0.84);
+        filter: saturate(1.04);
+    }
+
+    &[data-motion="floating-opening"] {
+        animation: et-floating-spotlight-in ${MotionFloatingSpotlightIn} both;
+    }
+
+    &[data-motion="closing"] {
+        opacity: 0;
+        scale: 0.98;
+        filter: blur(10px) saturate(0.88) brightness(1.04);
+        box-shadow: 0 10px 28px rgba(30, 47, 72, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.62);
+        transition: opacity ${MotionFloatingSpotlightOut}, scale ${MotionFloatingSpotlightOut},
+            filter ${MotionFloatingSpotlightOut}, box-shadow ${MotionFloatingSpotlightOut},
+            border-color ${MotionFloatingSpotlightOut};
+    }
+
+    @keyframes et-floating-spotlight-in {
         from {
             opacity: 0;
+            scale: 0.98;
+            filter: blur(12px) saturate(0.86) brightness(1.04);
         }
 
         to {
             opacity: 1;
+            scale: 1;
+            filter: blur(0) saturate(1) brightness(1);
         }
     }
 
     &:before {
         content: "";
         position: absolute;
-        left: 0;
-        right: 0;
-        z-index: -1;
-        display: block;
-        background: rgba(255, 255, 255, 0.82);
-        backdrop-filter: blur(10px);
-        height: 100%;
-        border-radius: ${(props) => (props.displayType === "floating" ? PanelBorderRadius : 0)};
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(180deg, var(--et-glass-sheen), transparent 34%);
+        opacity: 0.58;
     }
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background: ${DarkSurface};
-        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.3);
-
-        &:before {
-            background: rgba(27, 32, 38, 0.86);
-        }
+        background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.1), transparent 34%),
+            radial-gradient(circle at 92% 8%, rgba(31, 59, 104, 0.42), transparent 32%),
+            linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 24px 56px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.36),
+            0 1px 4px rgba(0, 0, 0, 0.2);
     }
 `;
 
 const Head = styled.div`
-    min-height: 56px;
-    padding: 8px 10px 8px 12px;
+    min-height: 50px;
+    padding: 6px 10px 6px 12px;
     display: flex;
     justify-content: flex-start;
     align-items: center;
@@ -1214,14 +1703,19 @@ const Head = styled.div`
     min-width: 0;
     overflow: visible;
     cursor: grab;
-    border-bottom: 1px solid #e1e3e1;
-    background: linear-gradient(180deg, #ffffff, #f8fafd);
-    border-radius: ${PanelBorderRadius} ${PanelBorderRadius} 0 0;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.72);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(248, 250, 253, 0.28));
+    border-radius: inherit;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
     transition: background ${MotionStandard}, border-color ${MotionStandard};
 
     @media (prefers-color-scheme: dark) {
         border-bottom-color: ${DarkOutline};
-        background: linear-gradient(180deg, ${DarkSurfaceContainer}, ${DarkSurface});
+        background: linear-gradient(180deg, rgba(32, 38, 45, 0.7), rgba(27, 32, 38, 0.5));
     }
 `;
 
@@ -1245,40 +1739,59 @@ const HeadIcon = styled.div`
     -moz-osx-font-smoothing: grayscale;
     cursor: pointer;
     font-size: 18px;
-    width: 36px;
-    height: 36px;
-    margin: 0 1px;
-    background-color: transparent;
+    width: 34px;
+    height: 34px;
+    margin: 0 3px;
+    background-color: rgba(241, 244, 248, 0.66);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
     border-radius: 999px;
-    transition: background-color ${MotionFast}, color ${MotionFast};
+    box-shadow: 0 4px 12px rgba(30, 47, 72, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.68);
+    transition: transform ${MotionSnappy}, background-color 0.2s, box-shadow 0.2s, color 0.2s;
+    transform: scale(1);
 
     svg {
         fill: #5f6368;
-        width: 20px;
-        height: 20px;
+        width: 18px;
+        height: 18px;
         display: block;
-        transition: fill ${MotionFast};
+        transition: fill 0.2s ease, transform 0.2s ease;
     }
 
     &:hover {
-        background: rgba(11, 87, 208, 0.08);
+        background-color: rgba(211, 227, 253, 0.82);
+        transform: scale(1.1);
+        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
     }
 
     &:hover svg {
         fill: ${ColorPrimary};
     }
 
+    &:active {
+        transform: scale(0.92);
+        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
+    }
+
     @media (prefers-color-scheme: dark) {
+        background-color: #242a31;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+
         svg {
             fill: ${DarkOnSurfaceVariant};
         }
 
         &:hover {
-            background: rgba(168, 199, 250, 0.14);
+            background-color: #2e3742;
+            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
         }
 
         &:hover svg {
             fill: ${DarkPrimary};
+        }
+
+        &:active {
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;
@@ -1301,14 +1814,16 @@ const Body = styled.div`
     overflow-x: hidden;
     overflow-y: overlay;
     overscroll-behavior: contain;
-    background: linear-gradient(180deg, rgba(241, 244, 248, 0.9), rgba(248, 250, 253, 0)), #f8fafd;
+    background: linear-gradient(180deg, rgba(241, 244, 248, 0.34), rgba(248, 250, 253, 0.16)),
+        rgba(248, 250, 253, 0.12);
     flex-grow: 1;
     flex-shrink: 1;
     word-break: break-word;
     transition: background ${MotionStandard};
 
     @media (prefers-color-scheme: dark) {
-        background: linear-gradient(180deg, rgba(36, 42, 49, 0.74), rgba(27, 32, 38, 0)), #15191d;
+        background: linear-gradient(180deg, rgba(36, 42, 49, 0.65), rgba(27, 32, 38, 0.35)),
+            rgba(21, 25, 29, 0.35);
     }
 `;
 
@@ -1325,8 +1840,8 @@ const SourceOption = styled(Dropdown)`
     background-color: #d3e3fd;
     border-color: transparent;
     border-radius: 999px;
-    min-height: 40px;
-    padding: 0 12px;
+    min-height: 36px;
+    padding: 0 11px;
     outline: none;
     transition: background-color ${MotionFast}, color ${MotionFast};
 
@@ -1340,6 +1855,49 @@ const SourceOption = styled(Dropdown)`
         max-width: min(320px, calc(100vw - 32px));
         text-align: left;
         text-align-last: left;
+    }
+`;
+
+const ResizeHandle = styled.div`
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    cursor: nwse-resize;
+    touch-action: none;
+    background: radial-gradient(circle at 70% 70%, rgba(11, 87, 208, 0.24), rgba(11, 87, 208, 0));
+    opacity: 0.72;
+    transition: opacity ${MotionFast}, transform ${MotionSnappy};
+
+    &:after {
+        content: "";
+        position: absolute;
+        right: 5px;
+        bottom: 5px;
+        width: 9px;
+        height: 9px;
+        border-right: 2px solid rgba(11, 87, 208, 0.55);
+        border-bottom: 2px solid rgba(11, 87, 208, 0.55);
+        border-radius: 1px;
+    }
+
+    &:hover {
+        opacity: 1;
+        transform: scale(1.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        background: radial-gradient(
+            circle at 70% 70%,
+            rgba(168, 199, 250, 0.24),
+            rgba(168, 199, 250, 0)
+        );
+
+        &:after {
+            border-color: rgba(168, 199, 250, 0.62);
+        }
     }
 `;
 
@@ -1389,13 +1947,41 @@ const TranslatorOptionDescription = styled.span`
 `;
 
 const Highlight = styled.div`
-    height: 100%;
-    background: ${ColorPrimary};
-    opacity: 0.3;
+    --et-guide-slide-offset: ${(props) => (props.$position === "left" ? "-10px" : "10px")};
+    background: rgba(211, 227, 253, 0.34);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
     position: fixed;
-    top: 0;
+    top: ${SlideOverMargin}px;
+    bottom: ${SlideOverMargin}px;
     z-index: ${MaxZIndex};
     pointer-events: none;
+    border-radius: ${PanelRadius};
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    box-shadow: 0 18px 48px rgba(30, 47, 72, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.58);
+    transform-origin: ${(props) => (props.$position === "left" ? "left center" : "right center")};
+    animation: et-dock-guide-enter 180ms cubic-bezier(0.2, 0, 0, 1) both;
+    will-change: opacity, transform, filter;
+
+    @keyframes et-dock-guide-enter {
+        from {
+            opacity: 0;
+            transform: translateX(var(--et-guide-slide-offset)) scaleX(0.975);
+            filter: blur(10px) saturate(0.92);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateX(0) scaleX(1);
+            filter: blur(0) saturate(1);
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        background: rgba(31, 59, 104, 0.34);
+        border-color: rgba(255, 255, 255, 0.12);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
 `;
 
 /**

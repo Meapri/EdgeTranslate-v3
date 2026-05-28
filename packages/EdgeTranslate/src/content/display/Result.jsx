@@ -560,11 +560,16 @@ const DarkOnSurfaceVariant = "#bdc1c6";
 const DarkSurfaceContainer = "#20262d";
 const DarkSurfaceContainerHigh = "#242a31";
 const DarkOutline = "#3d4651";
-const MotionFast = "120ms cubic-bezier(0.2, 0, 0, 1)";
-const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
+const MotionStandard = "280ms cubic-bezier(0.25, 1, 0.5, 1)";
 const Gray = "#5f6368";
 const SurfaceContainer = "#f1f4f8";
 const OutlineVariant = "#e1e3e1";
+const GlassBorder = "rgba(255, 255, 255, 0.72)";
+const GlassSurface =
+    "radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.92), transparent 42%), linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.46))";
+const GlassSurfaceMuted =
+    "radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.72), transparent 42%), linear-gradient(145deg, rgba(241, 244, 248, 0.7), rgba(241, 244, 248, 0.38))";
 const BlockContentDrawerHeight = 150; // drawer height for blocks
 
 /**
@@ -579,26 +584,30 @@ export const Block = styled.div`
     align-items: center;
     padding: ${BlockPadding};
     margin: 0 0 ${BlockMargin};
-    background-color: #fff;
+    background: ${GlassSurface};
     --drawer-handle-surface: #fff;
     --drawer-handle-fade: rgba(255, 255, 255, 0.44);
     --drawer-handle-hover-fade: rgba(211, 227, 253, 0.72);
-    border: 1px solid ${OutlineVariant};
-    border-radius: 8px;
+    border: 1px solid ${GlassBorder};
+    border-radius: 18px;
     line-height: 1.45;
     letter-spacing: 0;
-    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.08);
+    box-shadow: 0 10px 26px rgba(30, 47, 72, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.86),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.26);
+    backdrop-filter: blur(22px) saturate(178%);
+    -webkit-backdrop-filter: blur(22px) saturate(178%);
     transition: background-color ${MotionStandard}, border-color ${MotionStandard},
-        box-shadow ${MotionStandard}, color ${MotionStandard};
+        box-shadow ${MotionStandard}, color ${MotionStandard}, filter ${MotionStandard};
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background-color: ${DarkSurfaceContainer};
+        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.08), transparent 42%),
+            linear-gradient(145deg, rgba(32, 38, 45, 0.72), rgba(27, 32, 38, 0.48));
         --drawer-handle-surface: ${DarkSurfaceContainer};
         --drawer-handle-fade: rgba(32, 38, 45, 0.52);
         --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
         border-color: ${DarkOutline};
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
 `;
 
@@ -606,14 +615,15 @@ const Source = styled(Block)`
     font-weight: normal;
     white-space: pre-wrap;
     color: #5f6368;
-    background: ${SurfaceContainer};
+    background: ${GlassSurfaceMuted};
     --drawer-handle-surface: ${SurfaceContainer};
     --drawer-handle-fade: rgba(241, 244, 248, 0.5);
     --drawer-handle-hover-fade: rgba(211, 227, 253, 0.7);
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurfaceVariant};
-        background: ${DarkSurfaceContainerHigh};
+        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.06), transparent 42%),
+            linear-gradient(145deg, rgba(36, 42, 49, 0.7), rgba(27, 32, 38, 0.42));
         --drawer-handle-surface: ${DarkSurfaceContainerHigh};
         --drawer-handle-fade: rgba(36, 42, 49, 0.56);
         --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
@@ -625,20 +635,20 @@ const Target = styled(Block)`
     white-space: pre-wrap;
     color: #202124;
     font-size: 16px;
-    background: #ffffff;
+    background: ${GlassSurface};
     --drawer-handle-surface: #ffffff;
     --drawer-handle-fade: rgba(255, 255, 255, 0.44);
     position: relative;
     overflow: hidden;
-    border-color: ${(props) => (props.$isStreaming ? "rgba(11, 87, 208, 0.32)" : OutlineVariant)};
+    border-color: ${GlassBorder};
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background: ${DarkSurfaceContainer};
+        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.08), transparent 42%),
+            linear-gradient(145deg, rgba(32, 38, 45, 0.72), rgba(27, 32, 38, 0.48));
         --drawer-handle-surface: ${DarkSurfaceContainer};
         --drawer-handle-fade: rgba(32, 38, 45, 0.52);
-        border-color: ${(props) =>
-            props.$isStreaming ? "rgba(168, 199, 250, 0.38)" : DarkOutline};
+        border-color: ${DarkOutline};
     }
 `;
 
@@ -711,18 +721,36 @@ const StyledEditIcon = styled(EditIcon)`
     display: block;
     overflow: visible;
     border-radius: 999px;
-    transition: fill ${MotionFast}, background-color ${MotionFast};
+    background-color: #f3f4f9;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+        background-color 0.2s, box-shadow 0.2s;
+    transform: scale(1);
     &:hover {
         fill: ${LightPrimary};
-        background: rgba(11, 87, 208, 0.08);
+        background-color: #e8f0fe;
+        transform: scale(1.12);
+        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
+    }
+
+    &:active {
+        transform: scale(0.92);
+        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
     }
 
     @media (prefers-color-scheme: dark) {
         fill: ${DarkOnSurfaceVariant};
+        background-color: #242a31;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 
         &:hover {
             fill: ${DarkPrimary};
-            background: rgba(168, 199, 250, 0.14);
+            background-color: #2e3742;
+            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
+        }
+
+        &:active {
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;
@@ -738,18 +766,36 @@ const StyledEditDoneIcon = styled(EditDoneIcon)`
     display: block;
     overflow: visible;
     border-radius: 999px;
-    transition: fill ${MotionFast}, background-color ${MotionFast};
+    background-color: #f3f4f9;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+        background-color 0.2s, box-shadow 0.2s;
+    transform: scale(1);
     &:hover {
         fill: ${LightPrimary};
-        background: rgba(11, 87, 208, 0.08);
+        background-color: #e8f0fe;
+        transform: scale(1.12);
+        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
+    }
+
+    &:active {
+        transform: scale(0.92);
+        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
     }
 
     @media (prefers-color-scheme: dark) {
         fill: ${DarkOnSurfaceVariant};
+        background-color: #242a31;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 
         &:hover {
             fill: ${DarkPrimary};
-            background: rgba(168, 199, 250, 0.14);
+            background-color: #2e3742;
+            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
+        }
+
+        &:active {
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;
@@ -775,18 +821,36 @@ const StyledCopyIcon = styled(CopyIcon)`
     display: block;
     overflow: visible;
     border-radius: 999px;
-    transition: fill ${MotionFast}, background-color ${MotionFast};
+    background-color: #f3f4f9;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+        background-color 0.2s, box-shadow 0.2s;
+    transform: scale(1);
     &:hover {
         fill: ${LightPrimary};
-        background: rgba(11, 87, 208, 0.08);
+        background-color: #e8f0fe;
+        transform: scale(1.12);
+        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
+    }
+
+    &:active {
+        transform: scale(0.92);
+        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
     }
 
     @media (prefers-color-scheme: dark) {
         fill: ${DarkOnSurfaceVariant};
+        background-color: #242a31;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 
         &:hover {
             fill: ${DarkPrimary};
-            background: rgba(168, 199, 250, 0.14);
+            background-color: #2e3742;
+            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
+        }
+
+        &:active {
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;
@@ -801,28 +865,69 @@ const StyledPronounceIcon = styled(PronounceIcon)`
     display: block;
     overflow: visible;
     border-radius: 999px;
-    transition: fill ${MotionFast}, background-color ${MotionFast};
+    background-color: #f3f4f9;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+        background-color 0.2s, box-shadow 0.2s;
+
     ${(props) =>
         props.theme.textDirection === "ltr"
             ? `
                 margin-right: 0;
+                transform: scale(1);
             `
             : `
                 margin-left: 0;
-                transform: rotate(180deg);
+                transform: scale(1) rotate(180deg);
             `}
 
     &:hover {
         fill: ${LightPrimary} !important;
-        background: rgba(11, 87, 208, 0.08);
+        background-color: #e8f0fe;
+        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
+        ${(props) =>
+            props.theme.textDirection === "ltr"
+                ? `
+                    transform: scale(1.12);
+                `
+                : `
+                    transform: scale(1.12) rotate(180deg);
+                `}
+    }
+
+    &:active {
+        ${(props) =>
+            props.theme.textDirection === "ltr"
+                ? `
+                    transform: scale(0.92);
+                `
+                : `
+                    transform: scale(0.92) rotate(180deg);
+                `}
+        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
     }
 
     @media (prefers-color-scheme: dark) {
         fill: ${DarkPrimary};
+        background-color: #242a31;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 
         &:hover {
             fill: ${DarkPrimary} !important;
-            background: rgba(168, 199, 250, 0.14);
+            background-color: #2e3742;
+            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
+            ${(props) =>
+                props.theme.textDirection === "ltr"
+                    ? `
+                        transform: scale(1.12);
+                    `
+                    : `
+                        transform: scale(1.12) rotate(180deg);
+                    `}
+        }
+
+        &:active {
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;
@@ -838,7 +943,11 @@ const StyledPronounceLoadingIcon = styled(PronounceLoadingIcon)`
     overflow: visible;
     cursor: pointer;
     border-radius: 999px;
-    transition: fill ${MotionFast}, background-color ${MotionFast};
+    background-color: #f3f4f9;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+        background-color 0.2s, box-shadow 0.2s;
+    transform: scale(1);
 
     circle {
         fill: none;
@@ -848,15 +957,24 @@ const StyledPronounceLoadingIcon = styled(PronounceLoadingIcon)`
 
     &:hover {
         fill: ${LightPrimary} !important;
-        background: rgba(11, 87, 208, 0.08);
+        background-color: #e8f0fe;
+        transform: scale(1.12);
+        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
 
         circle {
             stroke: ${LightPrimary} !important;
         }
     }
 
+    &:active {
+        transform: scale(0.92);
+        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
+    }
+
     @media (prefers-color-scheme: dark) {
         fill: ${DarkPrimary};
+        background-color: #242a31;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 
         circle {
             stroke: ${DarkPrimary} !important;
@@ -864,11 +982,17 @@ const StyledPronounceLoadingIcon = styled(PronounceLoadingIcon)`
 
         &:hover {
             fill: ${DarkPrimary} !important;
-            background: rgba(168, 199, 250, 0.14);
+            background-color: #2e3742;
+            transform: scale(1.12);
+            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
 
             circle {
                 stroke: ${DarkPrimary} !important;
             }
+        }
+
+        &:active {
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;

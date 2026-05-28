@@ -159,9 +159,11 @@ class TranslatorManager {
                 if (this.getMode() === "geminiNano") return Promise.resolve("auto");
                 return localTranslator.detect(text);
             },
-            async translate(text, from, to) {
+            async translate(text, from, to, options) {
                 if (this.getMode() !== "geminiNano") {
-                    return localTranslator.translate(text, from, to);
+                    return options
+                        ? localTranslator.translate(text, from, to, options)
+                        : localTranslator.translate(text, from, to);
                 }
                 return manager.translateWithGeminiNanoPrompt(text, from, to);
             },
@@ -223,11 +225,13 @@ class TranslatorManager {
                 if (this.getMode() === "geminiNano") return Promise.resolve("auto");
                 return localTranslator.detect(text);
             },
-            async translate(text, from, to) {
+            async translate(text, from, to, options) {
                 if (this.getMode() === "geminiNano") {
                     return manager.translateWithGeminiNanoPrompt(text, from, to);
                 }
-                return localTranslator.translate(text, from, to);
+                return options
+                    ? localTranslator.translate(text, from, to, options)
+                    : localTranslator.translate(text, from, to);
             },
             pronounce(...args) {
                 return localTranslator.pronounce(...args);
@@ -1049,6 +1053,14 @@ class TranslatorManager {
         this.translationCache.set(key, result, this.cacheOptions.translateTtlMs);
     }
 
+    makeQuietTranslateCacheProfile(engine = "", textRole = "", translationProfile = "") {
+        const parts = [];
+        if (engine) parts.push(`engine:${engine}`);
+        if (translationProfile) parts.push(translationProfile);
+        else if (textRole === "caption") parts.push("caption");
+        return parts.join("|");
+    }
+
     /**
      * Register service providers.
      *
@@ -1077,7 +1089,11 @@ class TranslatorManager {
             const engine = (params && params.engine) || "";
             const textRole = this.normalizeTextRole(params && params.textRole);
             const translationProfile = (params && params.translationProfile) || "";
-            const cacheProfile = translationProfile || (textRole === "caption" ? "caption" : "");
+            const cacheProfile = this.makeQuietTranslateCacheProfile(
+                engine,
+                textRole,
+                translationProfile
+            );
             const translatorId =
                 engine === "geminiNano" || engine === "chromeBuiltin"
                     ? "GeminiNano"
@@ -1085,22 +1101,60 @@ class TranslatorManager {
             const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
             this.currentChromeBuiltinTabId =
                 sender && sender.tab ? sender.tab.id : previousChromeBuiltinTabId;
+            // Streaming progress plumbing: when the caller provides a streamId, we forward each
+            // SSE chunk as a "translation_stream_progress" event so the content script can apply
+            // segments to the DOM as they generate. Throttled to keep channel chatter modest.
+            const streamId = params && params.streamId;
+            const targetTabId = sender && sender.tab ? sender.tab.id : -1;
+            let onProgress;
+            if (streamId && targetTabId !== -1) {
+                let lastEmitAt = 0;
+                let lastEmittedLen = 0;
+                const channel = this.channel;
+                onProgress = (accumulatedText) => {
+                    const now = Date.now();
+                    // Throttle: at most every 80ms OR every +120 chars, whichever comes first.
+                    const enoughTime = now - lastEmitAt >= 80;
+                    const enoughChars = accumulatedText.length - lastEmittedLen >= 120;
+                    if (!enoughTime && !enoughChars) return;
+                    lastEmitAt = now;
+                    lastEmittedLen = accumulatedText.length;
+                    try {
+                        channel.emitToTabs(targetTabId, "translation_stream_progress", {
+                            streamId,
+                            text: accumulatedText,
+                        });
+                    } catch {
+                        /* emit best-effort */
+                    }
+                };
+            }
             try {
                 // cache first
                 let result = this.getTranslationFromCache(text, sl, tl, translatorId, cacheProfile);
                 if (!result) {
-                    const key = this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
-                    if (this.inflightTranslate.has(key)) {
+                    // Streaming is per-request; do not share an inflight promise that lacks onProgress.
+                    const key = onProgress
+                        ? null
+                        : this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
+                    if (key && this.inflightTranslate.has(key)) {
                         result = await this.inflightTranslate.get(key);
                     } else {
+                        const translatorOptions = {
+                            textRole,
+                            translationProfile,
+                            ...(onProgress ? { onProgress } : {}),
+                        };
                         const promise = (async () => {
                             if (engine === "geminiNano" || engine === "chromeBuiltin") {
                                 return await this.translateWithGeminiNanoPrompt(text, sl, tl);
                             }
-                            return await this.TRANSLATORS[translatorId].translate(text, sl, tl, {
-                                textRole,
-                                translationProfile,
-                            });
+                            return await this.TRANSLATORS[translatorId].translate(
+                                text,
+                                sl,
+                                tl,
+                                translatorOptions
+                            );
                         })()
                             .then((res) => {
                                 if (res)
@@ -1114,8 +1168,10 @@ class TranslatorManager {
                                     );
                                 return res;
                             })
-                            .finally(() => this.inflightTranslate.delete(key));
-                        this.inflightTranslate.set(key, promise);
+                            .finally(() => {
+                                if (key) this.inflightTranslate.delete(key);
+                            });
+                        if (key) this.inflightTranslate.set(key, promise);
                         result = await promise;
                     }
                 }

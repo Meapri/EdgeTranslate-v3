@@ -19,7 +19,7 @@ describe("LocalTranslator multilingual quality prompts", () => {
                 "Translate faithfully and naturally",
                 "Keep the same text form",
                 "Do not summarize, explain, or add information",
-                "Use the customary writing system of natural Korean",
+                "Use the target language's customary writing system.",
                 "For Han-script source text",
                 "complete semantic units",
                 "Never create mixed-script words by combining source-script characters",
@@ -212,7 +212,7 @@ describe("LocalTranslator multilingual quality prompts", () => {
         const prompt = body.contents[0].parts[0].text;
         expect(prompt).toContain("Translate the user's text");
         expect(prompt).not.toContain("word or short term");
-        expect(prompt).toContain("Use the customary writing system of natural Korean");
+        expect(prompt).toContain("Use the target language's customary writing system.");
         expect(prompt).toContain(
             "Never create mixed-script words by combining source-script characters"
         );

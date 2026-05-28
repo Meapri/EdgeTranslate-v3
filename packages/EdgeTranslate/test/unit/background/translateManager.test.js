@@ -69,7 +69,7 @@ describe("TranslatorManager selection role wrapping", () => {
         expect(withBreaks).toContain("첫 줄\n둘째 줄");
     });
 
-    test("wraps role metadata only for local AI selection translation", () => {
+    test("keeps selection translation separate from page role markers", () => {
         const manager = Object.create(TranslatorManager.prototype);
         manager.HYBRID_TRANSLATOR_CONFIG = {
             selections: {
@@ -77,8 +77,8 @@ describe("TranslatorManager selection role wrapping", () => {
             },
         };
 
-        expect(manager.shouldWrapSelectionForRole("LocalTranslate", "title")).toBe(true);
-        expect(manager.shouldWrapSelectionForRole("HybridTranslate", "title")).toBe(true);
+        expect(manager.shouldWrapSelectionForRole("LocalTranslate", "title")).toBe(false);
+        expect(manager.shouldWrapSelectionForRole("HybridTranslate", "title")).toBe(false);
         expect(manager.shouldWrapSelectionForRole("BingTranslate", "title")).toBe(false);
         expect(manager.shouldWrapSelectionForRole("LocalTranslate", "text")).toBe(false);
         expect(
@@ -87,14 +87,14 @@ describe("TranslatorManager selection role wrapping", () => {
                 { role: "date", text: "2025年07月03日（木）" },
                 { role: "paragraph", text: "Body text" },
             ])
-        ).toBe(true);
+        ).toBe(false);
         expect(
             manager.shouldWrapSelectionForRole("HybridTranslate", "text", [
                 { role: "title", text: "Notice title" },
                 { role: "date", text: "2025年07月03日（木）" },
                 { role: "paragraph", text: "Body text" },
             ])
-        ).toBe(true);
+        ).toBe(false);
         expect(manager.buildRoleSegmentText("Notice title", "title")).toBe(
             "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>\nNotice title"
         );
@@ -134,13 +134,26 @@ describe("TranslatorManager selection role wrapping", () => {
             manager.unwrapRoleSegmentResult(
                 {
                     originalText: "wrapped",
+                    mainMeaning: "[[1:r]]\n감사합니다",
+                },
+                "ありがとう"
+            )
+        ).toMatchObject({
+            originalText: "ありがとう",
+            mainMeaning: "감사합니다",
+            translatedText: "감사합니다",
+        });
+        expect(
+            manager.unwrapRoleSegmentResult(
+                {
+                    originalText: "wrapped",
                     mainMeaning: [
                         "<<<EDGE_TRANSLATE_SEGMENT_1 role=title>>>",
                         "회원 계정 무단 로그인 발생 보고 및 포켓몬센터 온라인 안전 이용 안내",
                         "<<<EDGE_TRANSLATE_SEGMENT_2 role=date>>>",
-                        "2025년 7월 3일(목)",
+                        "[[2:d]]2025년 7월 3일(목)",
                         "<<<EDGE_TRANSLATE_SEGMENT_3 role=paragraph>>>",
-                        "평소 포켓몬센터 온라인을 이용해 주셔서 감사합니다.",
+                        "[[3:p]]\n평소 포켓몬센터 온라인을 이용해 주셔서 감사합니다.",
                     ].join("\n"),
                 },
                 "原文",
@@ -294,9 +307,71 @@ describe("TranslatorManager on-device bridge injection", () => {
     });
 });
 
+describe("TranslatorManager quiet AI translation routing", () => {
+    test("passes page translation options through the LocalTranslate proxy", async () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        const localTranslator = {
+            useConfig: jest.fn(),
+            supportedLanguages: jest.fn(),
+            detect: jest.fn(),
+            translate: jest.fn().mockResolvedValue({
+                originalText: "Hello",
+                mainMeaning: "안녕하세요",
+                translatedText: "안녕하세요",
+            }),
+            pronounce: jest.fn(),
+            stopPronounce: jest.fn(),
+        };
+        const proxy = manager.createLocalTranslatorProxy(localTranslator, {
+            enabled: true,
+            mode: "openaiCompatible",
+        });
+        const options = { textRole: "paragraph", translationProfile: "page" };
+
+        await expect(proxy.translate("Hello", "en", "ko", options)).resolves.toMatchObject({
+            mainMeaning: "안녕하세요",
+        });
+
+        expect(localTranslator.translate).toHaveBeenCalledWith("Hello", "en", "ko", options);
+    });
+
+    test("keeps quiet translation cache entries separate by AI engine", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.cacheOptions = { maxKeyTextLength: 200 };
+        manager.HYBRID_TRANSLATOR_CONFIG = {
+            selections: {
+                mainMeaning: "LocalTranslate",
+            },
+        };
+
+        const googleProfile = manager.makeQuietTranslateCacheProfile(
+            "googleAiStudio",
+            "paragraph",
+            "page"
+        );
+        const compatibleProfile = manager.makeQuietTranslateCacheProfile(
+            "openaiCompatible",
+            "paragraph",
+            "page"
+        );
+
+        expect(
+            manager.makeTranslateKey("Hello", "en", "ko", "LocalTranslate", googleProfile)
+        ).not.toBe(
+            manager.makeTranslateKey("Hello", "en", "ko", "LocalTranslate", compatibleProfile)
+        );
+    });
+});
+
 describe("TranslatorManager Gemini Nano prompt routing", () => {
     const originalLanguageModel = global.LanguageModel;
     const originalChrome = global.chrome;
+
+    beforeEach(() => {
+        global.LanguageModel = originalLanguageModel;
+        global.chrome = undefined;
+        jest.clearAllMocks();
+    });
 
     afterEach(() => {
         global.LanguageModel = originalLanguageModel;

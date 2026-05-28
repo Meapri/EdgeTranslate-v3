@@ -236,6 +236,32 @@ describe("LocalTranslator", () => {
         expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
     });
 
+    test("reads OpenAI-compatible text-style completion responses", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ text: "[[1:p]]\n페이지 번역 결과입니다.", finish_reason: "stop" }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:5000/v1",
+            openaiCompatibleModel: "Hy-MT2-1.8B",
+        });
+        const result = await translator.translate(
+            "[[1:p]]\nPage translation source.",
+            "en",
+            "ko",
+            { translationProfile: "page" }
+        );
+
+        expect(result.mainMeaning).toBe("[[1:p]]\n페이지 번역 결과입니다.");
+    });
+
     test("uses ultra-light Google AI Studio prompts for realtime captions", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,

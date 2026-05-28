@@ -5,8 +5,7 @@ import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import styled, { css } from "styled-components";
 import ArrowDownIcon from "./icons/arrow-down.svg";
 
-const MotionFast = "120ms cubic-bezier(0.2, 0, 0, 1)";
-const MotionStandard = "180ms cubic-bezier(0.2, 0, 0, 1)";
+const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 
 /**
  *
@@ -109,7 +108,9 @@ const Menu = styled.ul`
     list-style: none;
     font-size: 14px;
     text-align: left;
-    background-color: #fff;
+    background-color: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
     border: 1px solid #e1e3e1;
     border-radius: 8px;
     padding: 6px;
@@ -119,22 +120,22 @@ const Menu = styled.ul`
     z-index: 6;
     float: left;
     box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
-    animation: et-dropdown-enter ${MotionStandard} both;
+    animation: et-dropdown-enter 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 
     @keyframes et-dropdown-enter {
         from {
             opacity: 0;
-            transform: translateY(-4px);
+            transform: translateY(-8px) scale(0.97);
         }
 
         to {
             opacity: 1;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
         }
     }
 
     @media (prefers-color-scheme: dark) {
-        background-color: #20262d;
+        background-color: rgba(32, 38, 45, 0.9);
         border-color: #3d4651;
         box-shadow: 0 16px 34px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.3);
     }
@@ -243,7 +244,7 @@ const Item = styled.li`
     display: flex;
     align-items: stretch;
     min-width: 0;
-    min-height: 40px;
+    min-height: 44px;
     padding: 8px 12px;
     clear: both;
     font-weight: 600;
@@ -255,14 +256,17 @@ const Item = styled.li`
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    -webkit-transition: color ${MotionFast}, background-color ${MotionFast};
-    transition: color ${MotionFast}, background-color ${MotionFast};
-    transition: color ${MotionFast}, background-color ${MotionFast};
-    transition-property: color, background-color;
-    transition-duration: 120ms, 120ms;
-    transition-timing-function: cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1);
-    transition-delay: 0s, 0s;
+    transition: color ${MotionFast}, background-color ${MotionFast},
+        transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform: scale(1);
     ${(props) => (props.active ? ActiveStyle : InActiveStyle)}
+
+    &:hover {
+        transform: scale(1.01);
+    }
+    &:active {
+        transform: scale(0.98);
+    }
 `;
 /**
  * STYLE FOR THE COMPONENT END

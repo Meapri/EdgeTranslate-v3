@@ -38,7 +38,6 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     <!-- viewer.mjs is dynamically loaded by et-viewer-init.mjs after extension setup. -->
     <script src="edge-viewer-controls.js" type="module"></script>
-    <script src="../content/banner_controller.js"></script>
     <script src="../content/select/select.js"></script>
     <script src="../content/display/display.js"></script>
   </head>
@@ -349,18 +348,6 @@ See https://github.com/adobe-type-tools/cmap-resources
                 </span>
               </div>
               <div id="toolbarViewerRight" class="toolbarHorizontalGroup">
-                <div class="toolbarButtonWithContainer et-pdf-translate-control">
-                  <button
-                    id="edgeTranslatePdfPageTranslateButton"
-                    class="toolbarButton"
-                    type="button"
-                    tabindex="0"
-                    title="Translate PDF"
-                    aria-label="Translate PDF"
-                  >
-                    <span>Translate PDF</span>
-                  </button>
-                </div>
                 <div id="etTheme" class="toolbarButtonWithContainer et-theme-control">
                   <button id="etThemeToggle" class="toolbarButton" type="button" tabindex="0" aria-pressed="false" aria-expanded="false" aria-haspopup="true" aria-controls="etThemeMenu" title="Theme" aria-label="Theme">
                     <span class="icon-sun" aria-hidden="true">

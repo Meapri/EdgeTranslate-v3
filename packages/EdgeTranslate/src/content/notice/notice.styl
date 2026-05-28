@@ -1,13 +1,24 @@
-material-primary = #0b57d0;
-material-on-primary-container = #041e49;
-material-on-surface = #1f1f1f;
-material-muted = #5f6368;
-material-outline = #e1e3e1;
-material-surface = #ffffff;
-material-background = #f8fafd;
-material-container = #f1f4f8;
-material-hover = rgba(11, 87, 208, 0.08);
+@import '../display/library/notifier/notifier.styl';
 
+// ────────────────────────────────────────────
+// Design Tokens (Material You)
+// ────────────────────────────────────────────
+m3-primary = #0b57d0
+m3-on-surface = #1f1f1f
+m3-on-surface-variant = #5f6368
+m3-outline-variant = #dde6ef
+m3-surface = #ffffff
+m3-bg = #f8fafd
+m3-surface-container = #f1f4f8
+m3-hover = rgba(11, 87, 208, 0.08)
+m3-on-primary-container = #041e49
+
+motion-fast = 180ms cubic-bezier(0.25, 1, 0.5, 1)
+motion-standard = 280ms cubic-bezier(0.25, 1, 0.5, 1)
+
+// ────────────────────────────────────────────
+// Base
+// ────────────────────────────────────────────
 html,
 body {
 	width: 100%;
@@ -15,9 +26,10 @@ body {
 	padding: 0;
 	margin: 0;
 	background:
-		radial-gradient(circle at 18% 0, rgba(211, 227, 253, 0.7), transparent 28rem),
-		material-background;
-	color: material-on-surface;
+		radial-gradient(circle at 0% 0%, rgba(211, 227, 253, 0.7), transparent 35rem),
+		radial-gradient(circle at 100% 100%, rgba(232, 240, 254, 0.6), transparent 35rem),
+		m3-bg;
+	color: m3-on-surface;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
 		Cantarell, "Helvetica Neue", Arial, sans-serif;
 	-webkit-font-smoothing: antialiased;
@@ -31,17 +43,27 @@ body {
 	box-sizing: border-box;
 }
 
+// ────────────────────────────────────────────
+// Floating Glass Container
+// ────────────────────────────────────────────
 #notice {
 	width: 100%;
 	max-width: 920px;
 	margin: 0 auto;
 	padding: 0 0 28px;
-	background: material-surface;
-	border-radius: 8px;
-	box-shadow: 0 12px 30px rgba(60, 64, 67, 0.12), 0 3px 8px rgba(60, 64, 67, 0.08);
+	background: rgba(255, 255, 255, 0.55);
+	backdrop-filter: blur(24px) saturate(180%);
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	border: 1px solid rgba(255, 255, 255, 0.65);
+	border-radius: 24px;
+	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.02);
 	overflow: hidden;
+	transition: background-color motion-standard, border-color motion-standard, box-shadow motion-standard;
 }
 
+// ────────────────────────────────────────────
+// Header
+// ────────────────────────────────────────────
 header {
 	min-height: 72px;
 	padding: 16px 28px;
@@ -49,11 +71,13 @@ header {
 	display: flex;
 	align-items: center;
 	gap: 14px;
-	background: linear-gradient(180deg, #fff, material-background);
-	border-bottom: 1px solid material-outline;
-	color: material-on-surface;
+	background: rgba(255, 255, 255, 0.5);
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+	color: m3-on-surface;
 	font-size: 24px;
-	font-weight: 700;
+	font-weight: 600;
 	letter-spacing: 0;
 }
 
@@ -68,9 +92,12 @@ header img {
 	display: none;
 }
 
+// ────────────────────────────────────────────
+// Content
+// ────────────────────────────────────────────
 h1 {
 	margin: 28px 32px 12px;
-	color: material-on-surface;
+	color: m3-on-surface;
 	font-size: 20px;
 	font-weight: 700;
 	letter-spacing: 0;
@@ -80,7 +107,7 @@ h1 {
 ol,
 ul {
 	box-sizing: border-box;
-	color: material-on-surface;
+	color: m3-on-surface;
 	font-size: 15px;
 	line-height: 1.65;
 }
@@ -88,15 +115,15 @@ ul {
 ol {
 	margin: 0 32px 18px;
 	padding: 16px 20px 16px 42px;
-	background: material-surface;
-	border: 1px solid material-outline;
-	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.6);
+	border: 1px solid m3-outline-variant;
+	border-radius: 12px;
 }
 
 ul {
 	margin: 8px 0 0;
 	padding: 10px 12px 10px 30px;
-	background: material-container;
+	background: m3-surface-container;
 	border-radius: 8px;
 }
 
@@ -105,39 +132,52 @@ li {
 }
 
 a {
-	color: material-primary;
+	color: m3-primary;
 	border-radius: 6px;
 	font-weight: 600;
 	text-decoration: none;
 	overflow-wrap: anywhere;
+	transition: background-color motion-fast, color motion-fast;
 }
 
 a:hover {
-	background: material-hover;
+	background: m3-hover;
 	text-decoration: underline;
 }
 
 b {
-	color: material-on-primary-container;
+	color: m3-on-primary-container;
 	font-weight: 700;
 }
 
+// ────────────────────────────────────────────
+// Dark Mode
+// ────────────────────────────────────────────
 @media (prefers-color-scheme: dark) {
 	html,
 	body {
-		background: #15191d;
+		background:
+			radial-gradient(circle at 0% 0%, rgba(21, 32, 43, 0.9), transparent 35rem),
+			radial-gradient(circle at 100% 100%, rgba(31, 59, 104, 0.52), transparent 35rem),
+			#15191d;
 		color: #e8eaed;
+		color-scheme: dark;
 	}
 
 	#notice {
-		background: #1b2026;
-		box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45), 0 3px 10px rgba(0, 0, 0, 0.34);
+		background: rgba(27, 32, 38, 0.55);
+		border-color: rgba(255, 255, 255, 0.08);
+		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28), 0 4px 12px rgba(0, 0, 0, 0.18);
 	}
 
 	header {
-		background: #20262d;
-		border-bottom-color: #3d4651;
+		background: rgba(32, 38, 45, 0.5);
+		border-bottom-color: rgba(255, 255, 255, 0.06);
 		color: #e8eaed;
+	}
+
+	header img {
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.42);
 	}
 
 	h1,
@@ -147,7 +187,7 @@ b {
 	}
 
 	ol {
-		background: #1b2026;
+		background: rgba(27, 32, 38, 0.6);
 		border-color: #3d4651;
 	}
 
@@ -159,11 +199,18 @@ b {
 		color: #a8c7fa;
 	}
 
+	a:hover {
+		background: rgba(168, 199, 250, 0.14);
+	}
+
 	b {
 		color: #d3e3fd;
 	}
 }
 
+// ────────────────────────────────────────────
+// Responsive
+// ────────────────────────────────────────────
 @media (max-width: 640px) {
 	body {
 		padding: 0;
@@ -173,6 +220,7 @@ b {
 		min-height: 100vh;
 		border-radius: 0;
 		box-shadow: none;
+		border: 0;
 	}
 
 	header {

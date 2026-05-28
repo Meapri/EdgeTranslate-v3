@@ -1,9 +1,9 @@
 @import '../display/library/notifier/notifier.styl';
 
-image-size = 40px;
-menu-width = 132px;
-motion-fast = 120ms cubic-bezier(0.2, 0, 0, 1);
-motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
+image-size = 42px;
+menu-width = 154px;
+motion-fast = 160ms cubic-bezier(0.2, 0, 0, 1);
+motion-standard = 220ms cubic-bezier(0.2, 0, 0, 1);
 
 /*
  * 划词翻译按钮样式
@@ -19,31 +19,37 @@ motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
     padding: 0 !important;
     margin: 0 !important;
     position: fixed !important;
-    box-shadow: 0 2px 6px rgba(60, 64, 67, .16), 0 8px 20px rgba(60, 64, 67, .12) !important;
+    box-shadow: 0 12px 28px rgba(30, 47, 72, 0.16), 0 3px 10px rgba(30, 47, 72, 0.08), inset 0 1px 0 rgba(255, 255, 255, .82) !important;
     cursor: pointer !important;
-    border-radius: 999px !important;
+    border-radius: 22px !important;
     z-index: 2147483647 !important;
     box-sizing: content-box !important;
     overflow: hidden !important;
-    border: 1px solid rgba(255, 255, 255, .82) !important;
-    transition: box-shadow motion-standard, transform motion-standard, filter motion-standard !important; // set transtition effect when hover occurs
-    animation: fade-in 180ms cubic-bezier(0.2, 0, 0, 1) !important; // set fade-in animation on selection icon
+    border: 1px solid rgba(255, 255, 255, .76) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: box-shadow motion-standard, transform motion-standard, border-color motion-fast !important;
+    animation: selection-toolbar-enter 160ms cubic-bezier(0.2, 0, 0, 1) !important;
 
     &:hover {
-        box-shadow: 0 6px 14px rgba(60, 64, 67, .22), 0 0 0 4px rgba(11, 87, 208, .10) !important;
-        transform: scale(1.03) !important;
-        filter: saturate(1.08) !important;
+        box-shadow: 0 15px 32px rgba(30, 47, 72, 0.18), 0 0 0 4px rgba(26, 115, 232, 0.08), inset 0 1px 0 rgba(255, 255, 255, .9) !important;
+        transform: translateY(-1px) scale(1.006) !important;
+        border-color: rgba(211, 227, 253, .92) !important;
     }
 
-    @keyframes fade-in {
+    &:active {
+        transform: translateY(0) scale(0.985) !important;
+    }
+
+    @keyframes selection-toolbar-enter {
         0% {
             opacity: 0;
-            transform: scale(.96);
+            transform: translateY(5px) scale(0.98);
         }
 
         100% {
             opacity: 1;
-            transform: scale(1);
+            transform: translateY(0) scale(1);
         }
     }
 
@@ -51,7 +57,8 @@ motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
         transition-duration: 1ms !important;
         animation-duration: 1ms !important;
 
-        &:hover {
+        &:hover,
+        &:active {
             transform: none !important;
         }
     }

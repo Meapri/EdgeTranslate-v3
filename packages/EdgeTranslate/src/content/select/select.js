@@ -29,7 +29,7 @@ if (translationButtonContainer.contentDocument === null) {
 }
 document.documentElement.removeChild(iframeContainer);
 translationButtonContainer.id = "edge-translate-button";
-translationButtonContainer.style.backgroundColor = "white"; // programatically set style to compatible with the extension 'Dark Reader'
+translationButtonContainer.style.backgroundColor = "transparent"; // programatically set style to compatible with the extension 'Dark Reader'
 
 /**
  * When the user clicks the translation button, the translationButtonContainer will be mounted at document.documentElement and the load event will be triggered.
@@ -39,104 +39,213 @@ function renderButton() {
     if (parent.dataset.edgeTranslateRendered === "true") return;
     parent.dataset.edgeTranslateRendered = "true";
 
+    const style = parent.ownerDocument.createElement("style");
+    style.textContent = `
+        :host, html, body {
+            background: transparent !important;
+        }
+
+        .edge-selection-menu {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            width: 100%;
+            height: 42px;
+            padding: 4px;
+            margin: 0;
+            border-radius: 22px;
+            box-sizing: border-box;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.72);
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 253, 0.9));
+            color: #202124;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-size: 11.5px;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: 0;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+        }
+
+        .edge-selection-action {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 32px;
+            flex: 1 1 0;
+            min-width: 0;
+            padding: 0 8px 0 5px;
+            border: 0;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.58);
+            color: #0b57d0;
+            cursor: pointer;
+            font: inherit;
+            white-space: nowrap;
+            outline: none;
+            overflow: hidden;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.46);
+            transition:
+                transform 160ms cubic-bezier(0.2, 0, 0, 1),
+                background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+                color 160ms cubic-bezier(0.2, 0, 0, 1),
+                box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .edge-selection-action::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.46), transparent 58%);
+            pointer-events: none;
+        }
+
+        .edge-selection-action:hover {
+            transform: translateY(-1px) scale(1.012);
+            background: rgba(211, 227, 253, 0.72);
+            box-shadow: 0 7px 18px rgba(11, 87, 208, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.62);
+        }
+
+        .edge-selection-action:active {
+            transform: scale(0.965);
+        }
+
+        .edge-selection-action--precise {
+            background:
+                radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.34), transparent 42%),
+                linear-gradient(145deg, #0b57d0, #1557b0);
+            color: #ffffff;
+            box-shadow: 0 8px 20px rgba(11, 87, 208, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        }
+
+        .edge-selection-action--precise:hover {
+            background:
+                radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.4), transparent 42%),
+                linear-gradient(145deg, #1557b0, #0842a0);
+            box-shadow: 0 10px 22px rgba(11, 87, 208, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+        }
+
+        .edge-selection-icon {
+            position: relative;
+            display: inline-grid;
+            place-items: center;
+            width: 20px;
+            height: 20px;
+            flex: 0 0 20px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.7);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.58);
+        }
+
+        .edge-selection-action--precise .edge-selection-icon {
+            background: rgba(255, 255, 255, 0.18);
+            color: #fff;
+        }
+
+        .edge-selection-icon img,
+        .edge-selection-icon svg {
+            width: 12px;
+            height: 12px;
+            display: block;
+        }
+
+        .edge-selection-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .edge-selection-menu {
+                border-color: rgba(255, 255, 255, 0.1);
+                background:
+                    linear-gradient(180deg, rgba(42, 48, 56, 0.98), rgba(22, 27, 32, 0.94));
+                color: #e8eaed;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            }
+
+            .edge-selection-action {
+                background: rgba(36, 42, 49, 0.72);
+                color: #a8c7fa;
+                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+            }
+
+            .edge-selection-action:hover {
+                background: rgba(31, 59, 104, 0.58);
+                box-shadow: 0 7px 18px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(168, 199, 250, 0.22);
+            }
+
+            .edge-selection-icon {
+                background: rgba(255, 255, 255, 0.08);
+                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .edge-selection-action {
+                transition-duration: 1ms !important;
+            }
+
+            .edge-selection-action:hover,
+            .edge-selection-action:active {
+                transform: none !important;
+            }
+        }
+    `;
+    parent.appendChild(style);
+
     const makeIcon = () => {
         const iconWrap = document.createElement("span");
+        iconWrap.className = "edge-selection-icon";
         const buttonImage = document.createElement("img");
         buttonImage.src = ImageData;
         Object.assign(buttonImage.style, {
-            width: "17px",
-            height: "17px",
-            minWidth: 0,
-            maxWidth: "17px",
-            minHeight: 0,
-            maxHeight: "17px",
             padding: 0,
             border: 0,
             margin: 0,
             verticalAlign: 0, // fix the style problem in some websites
             filter: "none", // https://github.com/EdgeTranslate/EdgeTranslate/projects/2#card-58817626
         });
-        Object.assign(iconWrap.style, {
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "22px",
-            height: "22px",
-            borderRadius: "999px",
-            background: "rgba(255, 255, 255, .72)",
-            boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, .5)",
-            flex: "0 0 auto",
-        });
         iconWrap.appendChild(buttonImage);
         return iconWrap;
     };
 
     const menu = document.createElement("div");
-    Object.assign(menu.style, {
-        display: "flex",
-        alignItems: "center",
-        gap: "4px",
-        height: "38px",
-        minWidth: "128px",
-        padding: "0 5px",
-        margin: 0,
-        borderRadius: "20px",
-        boxSizing: "border-box",
-        overflow: "hidden",
-        border: "1px solid rgba(68, 71, 70, .12)",
-        background: "linear-gradient(180deg, #fbfcff 0%, #f4f7fb 100%)",
-        color: "#1f1f1f",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif",
-        fontSize: "12px",
-        fontWeight: "600",
-        lineHeight: "1",
-        letterSpacing: 0,
-        boxShadow: "0 2px 6px rgba(60, 64, 67, .12)",
-    });
+    menu.className = "edge-selection-menu";
+
+    const makePreciseIcon = () => {
+        const icon = document.createElement("span");
+        icon.className = "edge-selection-icon";
+        icon.innerHTML = `
+            <svg viewBox="0 0 24 24" style="fill: currentColor;">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.54-7.49-7.49H7.5c.28 0 .5-.22.5-.5s-.22-.5-.5-.5H5.51c.49-3.95 3.54-7 7.49-7.49v1.99c0 .28.22.5.5.5s.5-.22.5-.5V5.51c3.95.49 7 3.54 7.49 7.49h-1.99c-.28 0-.5.22-.5.5s.22.5.5.5h1.99c-.49 3.95-3.54 7-7.49 7.49v-1.99c0-.28-.22-.5-.5-.5s-.5.22-.5.5v1.99zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+            </svg>
+        `;
+        return icon;
+    };
 
     const makeActionButton = (label, title, profile) => {
         const button = document.createElement("button");
         const isNormal = profile === "normal";
-        Object.assign(button.style, {
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "4px",
-            height: "30px",
-            minWidth: isNormal ? "68px" : "46px",
-            padding: isNormal ? "0 8px 0 4px" : "0 10px",
-            border: "none",
-            borderRadius: "16px",
-            background: isNormal ? "#d3e3fd" : "transparent",
-            color: isNormal ? "#041e49" : "#444746",
-            cursor: "pointer",
-            font: "inherit",
-            whiteSpace: "nowrap",
-            outline: "none",
-            transition:
-                "background 140ms cubic-bezier(.2,0,0,1), box-shadow 140ms cubic-bezier(.2,0,0,1), transform 140ms cubic-bezier(.2,0,0,1)",
-            WebkitTapHighlightColor: "transparent",
-        });
+        button.className = `edge-selection-action ${
+            isNormal ? "edge-selection-action--normal" : "edge-selection-action--precise"
+        }`;
         button.title = title;
         if (isNormal) button.appendChild(makeIcon());
-        button.appendChild(document.createTextNode(label));
-        button.addEventListener("mouseenter", () => {
-            button.style.background = isNormal ? "#c2d7f2" : "rgba(68, 71, 70, .08)";
-            button.style.boxShadow = isNormal ? "0 1px 2px rgba(60, 64, 67, .18)" : "none";
-        });
-        button.addEventListener("mouseleave", () => {
-            button.style.background = isNormal ? "#d3e3fd" : "transparent";
-            button.style.boxShadow = "none";
-            button.style.transform = "translateY(0)";
-        });
+        else button.appendChild(makePreciseIcon());
+        const labelEl = document.createElement("span");
+        labelEl.className = "edge-selection-label";
+        labelEl.textContent = label;
+        button.appendChild(labelEl);
         button.addEventListener("mousedown", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            button.style.transform = "translateY(1px)";
             if (event.button === 0) translateSubmit(profile);
-        });
-        button.addEventListener("mouseup", () => {
-            button.style.transform = "translateY(0)";
         });
         button.addEventListener("contextmenu", (event) => event.preventDefault());
         return button;

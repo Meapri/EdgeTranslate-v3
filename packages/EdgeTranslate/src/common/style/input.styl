@@ -1,133 +1,254 @@
-color-primary = #0b57d0;
-color-primary-container = #d3e3fd;
-color-outline = #747775;
-color-outline-variant = #e1e3e1;
-color-surface-container-highest = #dde6ef;
-motion-fast = 120ms cubic-bezier(0.2, 0, 0, 1);
-motion-standard = 180ms cubic-bezier(0.2, 0, 0, 1);
+// ────────────────────────────────────────────
+// Material 3 Expressive design tokens
+// Single source of truth for the entire extension
+// ────────────────────────────────────────────
 
-scale = 1.3;
+// Primary
+color-primary = #0b57d0
+color-primary-dark = #a8c7fa
+color-primary-hover = #0842a0
+color-on-primary = #ffffff
+color-on-primary-dark = #0b1f3a
+color-primary-container = #d3e3fd
+color-primary-container-dark = #1f3b68
+color-secondary = #0f6d58
+color-secondary-container = #cce8dd
+color-tertiary = #8b5000
+color-tertiary-container = #ffddb4
+
+// Surface
+color-surface = #ffffff
+color-surface-dark = #1b2026
+color-surface-container = #f1f4f8
+color-surface-container-low = #f8fafd
+color-surface-container-high = #e9eef6
+color-surface-container-dark = #242a31
+color-surface-container-low-dark = #15191d
+color-surface-container-high-dark = #2d343d
+color-on-surface = #1f1f1f
+color-on-surface-dark = #e8eaed
+color-on-surface-variant = #5f6368
+color-on-surface-variant-dark = #bdc1c6
+
+// Outline
+color-outline = #747775
+color-outline-dark = #9aa0a6
+color-outline-variant = #dde6ef
+color-outline-variant-dark = #3d4651
+
+// Background (ambient mesh)
+color-bg-light = #f8fafd
+color-bg-dark = #15191d
+
+// Error & Status
+color-error = #b3261e
+color-error-dark = #f2b8b5
+
+// Motion curves
+motion-micro = 120ms cubic-bezier(0.2, 0, 0, 1)
+motion-fast = 180ms cubic-bezier(0.25, 1, 0.5, 1)
+motion-standard = 280ms cubic-bezier(0.25, 1, 0.5, 1)
+motion-emphasized = 380ms cubic-bezier(0.2, 0.8, 0.2, 1)
+motion-spring = 420ms cubic-bezier(0.34, 1.56, 0.64, 1)
+motion-spring-strong = 520ms cubic-bezier(0.2, 1.4, 0.2, 1)
+
+// Elevation shadows
+elevation-1 = 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)
+elevation-2 = 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04)
+elevation-3 = 0 12px 40px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.03)
+elevation-floating = 0 18px 44px rgba(30, 47, 72, 0.16), 0 4px 12px rgba(30, 47, 72, 0.08)
+
+// Glassmorphism
+glass-bg-light = rgba(255, 255, 255, 0.76)
+glass-bg-dark = rgba(30, 36, 44, 0.72)
+glass-border-light = rgba(255, 255, 255, 0.82)
+glass-border-dark = rgba(255, 255, 255, 0.08)
+glass-blur = blur(24px) saturate(180%)
+
+// Radii
+radius-s = 8px
+radius-m = 12px
+radius-l = 16px
+radius-xl = 20px
+radius-xxl = 24px
+radius-pill = 999px
+
+font-stack = Roboto, "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif
+
+app-background-light = linear-gradient(135deg, #f8fafd 0%, #eef4ff 42%, #f7fbf7 100%)
+app-background-dark = linear-gradient(135deg, #15191d 0%, #1a2431 46%, #15211d 100%)
+
+focus-ring-light = 0 0 0 4px rgba(11, 87, 208, .16)
+focus-ring-dark = 0 0 0 4px rgba(168, 199, 250, .2)
+
+
+// ────────────────────────────────────────────
+// Radio Button
+// ────────────────────────────────────────────
+scale = 1.3
 .radio
-    position: relative;
-    width: (16px * scale);
-    height: (16px * scale);
-    background-clip: border-box;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    margin: -.15px 8px 0 0;
-    vertical-align: text-bottom;
-    border-radius: 50%;
-    background-color: #fff;
-    border: (1px * scale) solid color-outline;
+    position: relative
+    width: (16px * scale)
+    height: (16px * scale)
+    background-clip: border-box
+    -webkit-appearance: none
+    -moz-appearance: none
+    appearance: none
+    margin: -.15px 8px 0 0
+    vertical-align: text-bottom
+    border-radius: 50%
+    background-color: color-surface
+    border: (1px * scale) solid color-outline
+    cursor: pointer
+    transition: background-color motion-fast, border-color motion-fast, box-shadow motion-fast, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)
     &:before
-        content: '';
-        display: block;
-        height: 0;
-        width: 0;
-        -webkit-transition: width motion-standard, height motion-standard;
+        content: ''
+        display: block
+        height: 0
+        width: 0
         transition: width motion-standard, height motion-standard
     &:disabled
         opacity: .65
+        cursor: not-allowed
     &:checked
-        border: (1px * scale) solid color-primary;
-        background-color: #fff;
+        border: (1px * scale) solid color-primary
+        background-color: color-surface
+        animation: android17-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards
         &:before
-            height: (8px * scale);
-            width: (8px * scale);
-            border-radius: 50%;
-            margin: (3px * scale) 0 0 (3px * scale);
+            height: (8px * scale)
+            width: (8px * scale)
+            border-radius: 50%
+            margin: (3px * scale) 0 0 (3px * scale)
             background-color: color-primary
+    &:active
+        transform: scale(0.92)
     &:focus
-        outline: none;
-        box-shadow: 0 0 0 4px rgba(11, 87, 208, .16);
+        outline: none
+        box-shadow: focus-ring-light
 
 
+// ────────────────────────────────────────────
+// Checkbox
+// ────────────────────────────────────────────
 .checkbox
-    position: relative;
-    width: (16px * scale);
-    height: (16px * scale);
-    background-clip: border-box;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    margin: -.15px 8px 0 0;
-    vertical-align: text-bottom;
-    border-radius: 4px;
-    -webkit-transition: background-color motion-fast, border-color motion-fast, box-shadow motion-fast;
-    transition: background-color motion-fast, border-color motion-fast, box-shadow motion-fast;
-    background-color: #fff;
-    border: 2px solid color-outline;
+    position: relative
+    width: (16px * scale)
+    height: (16px * scale)
+    background-clip: border-box
+    -webkit-appearance: none
+    -moz-appearance: none
+    appearance: none
+    margin: -.15px 8px 0 0
+    vertical-align: text-bottom
+    border-radius: 6px
+    transition: background-color motion-fast, border-color motion-fast, box-shadow motion-fast, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)
+    background-color: color-surface
+    border: 2px solid color-outline
+    cursor: pointer
     &:checked
-        background-color: color-primary;
-        border-color: color-primary;
+        background-color: color-primary
+        border-color: color-primary
+        animation: android17-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards
         &:after
-            content: '';
-            display: block;
-            height: (4px * scale);
-            width: (7px * scale);
-            border: 0 solid #fff;
-            border-width: 0 0 2px 2px;
-            -webkit-transform: rotate(-45deg);
-            transform: rotate(-45deg);
-            position: absolute;
-            top: (3px * scale);
-            left: (3px * scale);
+            content: ''
+            display: block
+            height: (4px * scale)
+            width: (7px * scale)
+            border: 0 solid #fff
+            border-width: 0 0 2px 2px
+            transform: rotate(-45deg)
+            position: absolute
+            top: (3px * scale)
+            left: (3px * scale)
+    &:active
+        transform: scale(0.92)
     &:disabled
         opacity: .65
+        cursor: not-allowed
     &:focus
-        outline: none;
-        box-shadow: 0 0 0 4px rgba(11, 87, 208, .16)
+        outline: none
+        box-shadow: focus-ring-light
 
+
+// ────────────────────────────────────────────
+// Switch Toggle (Material You M3)
+// ────────────────────────────────────────────
 .switch
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    position: relative;
-    width: 52px;
-    height: 32px;
-    border: 2px solid color-outline;
-    outline: 0;
-    border-radius: 999px;
-    box-sizing: border-box;
-    background: color-surface-container-highest;
-    &:before
+    -webkit-appearance: none
+    -moz-appearance: none
+    appearance: none
+    position: relative
+    width: 52px
+    height: 32px
+    border: 2px solid color-outline
+    outline: 0
+    border-radius: radius-pill
+    box-sizing: border-box
+    background-color: color-surface-container
+    cursor: pointer
+    transition: background-color motion-standard, border-color motion-standard, box-shadow motion-fast, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)
     &:after
-        content: " ";
-        position: absolute;
-        top: 0;
-        left: 0;
-        border-radius: 999px;
-        -webkit-transition: -webkit-transform motion-standard, background-color motion-fast;
-        transition: -webkit-transform motion-standard, background-color motion-fast;
-        transition: transform motion-standard, background-color motion-fast;
-        transition: transform motion-standard, -webkit-transform motion-standard, background-color motion-fast;
-    &:before
-        width: 48px;
-        height: 28px;
-        background-color: color-surface-container-highest;
-    &:after
-        width: 16px;
-        height: 16px;
-        top: 6px;
-        left: 6px;
-        background-color: #fff;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.28);
-    &:checked
-        border-color: color-primary;
-        background-color: color-primary-container;
-        &:before
-            -webkit-transform: scale(0);
-            transform: scale(0);
+        content: " "
+        position: absolute
+        width: 16px
+        height: 16px
+        top: 6px
+        left: 6px
+        border-radius: 50%
+        background-color: color-outline
+        transition: transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1), width 200ms cubic-bezier(0.2, 0.8, 0.2, 1), height 200ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color motion-standard
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15)
+    &:hover
+        background-color: color-surface-container-high
         &:after
-            width: 24px;
-            height: 24px;
-            top: 2px;
-            left: 2px;
-            background-color: color-primary;
-            -webkit-transform: translateX(20px);
-            transform: translateX(20px);
-        &:focus
-            outline: 0;
+            background-color: color-on-surface-variant
+    &:checked
+        border-color: color-primary
+        background-color: color-primary
+        &:after
+            width: 24px
+            height: 24px
+            top: 2px
+            left: 2px
+            background-color: color-on-primary
+            transform: translateX(20px)
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18)
+    &:active
+        transform: scale(0.92)
+    &:focus
+        box-shadow: focus-ring-light
     &:disabled
-        opacity: .65;
+        opacity: .5
+        cursor: not-allowed
+
+
+// ────────────────────────────────────────────
+// Spring Pop Keyframe (shared)
+// ────────────────────────────────────────────
+@keyframes android17-pop
+    0%
+        transform: scale(0.85)
+    60%
+        transform: scale(1.08)
+    100%
+        transform: scale(1)
+
+@keyframes expressive-enter
+    0%
+        opacity: 0
+        transform: translateY(12px) scale(.96)
+        filter: saturate(.86)
+    60%
+        opacity: 1
+        transform: translateY(-1px) scale(1.01)
+        filter: saturate(1.04)
+    100%
+        opacity: 1
+        transform: translateY(0) scale(1)
+        filter: saturate(1)
+
+@keyframes expressive-press-ripple
+    0%
+        box-shadow: inset 0 0 0 0 rgba(11, 87, 208, .18)
+    100%
+        box-shadow: inset 0 0 0 999px rgba(11, 87, 208, 0)

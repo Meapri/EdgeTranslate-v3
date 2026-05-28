@@ -60,9 +60,6 @@ class BannerController {
         this._domCompletedTranslationEntries = 0;
         this._domBatchFailureCount = 0;
         this._domTranslationSessionId = 0;
-        this._domApplySequence = 0;
-        this._domNextApplySequence = 0;
-        this._domPendingApplies = new Map();
         this._domTokenUsage = {
             inputTokens: 0,
             outputTokens: 0,
@@ -79,6 +76,7 @@ class BannerController {
         this._onDeviceBridgeRequestId = 0;
         this._onDeviceBridgePending = new Map();
         this._domOriginalTextByElement = new WeakMap();
+        this._domDuplicateEntries = new Map();
         this._domOriginalTooltip = null;
         this._domOriginalTooltipTarget = null;
         this._domOriginalTooltipHandlers = null;
@@ -149,6 +147,7 @@ class BannerController {
         this._captionBatchDelayMs = 120;
         this._captionBatchMaxSize = 6;
         this._captionDebugEventId = 0;
+        this._domPageDebugEventId = 0;
         this.handleRealtimeCaptionOverlayPointerMove =
             this.handleRealtimeCaptionOverlayPointerMove.bind(this);
         this.handleRealtimeCaptionOverlayPointerUp =
@@ -272,6 +271,12 @@ class BannerController {
             this._domPageTranslateOptions.sl
         );
         this._domPageRootElements = this.getDomPageTranslationRoots();
+        this.logDomPageDebug("start", {
+            source: this._domResolvedSourceLanguage,
+            target: this._domPageTranslateOptions.tl,
+            mode: "batch",
+            maxConcurrent: this._domMaxConcurrentTranslations,
+        });
         this.showDomPageBanner();
         this.startDomFallback();
         this.startFullPageBatchTranslation();
@@ -480,6 +485,68 @@ class BannerController {
                 documentElement.appendChild(node);
             }
             node.textContent = JSON.stringify(events.slice(-120));
+        } catch {
+            // DOM mirroring is diagnostic-only.
+        }
+    }
+
+    isDomPageDebugEnabled() {
+        try {
+            return (
+                localStorage.getItem("edgeTranslate.domPageDebug") === "1" ||
+                window.__edgeTranslateDomPageDebug === true
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    logDomPageDebug(event, detail = {}) {
+        const debugEnabled = this.isDomPageDebugEnabled();
+        // The in-memory ring buffer is cheap; the DOM mirror + console log are not.
+        // Skip both entirely when debug is off to avoid burning cycles on the hot path.
+        try {
+            const buffer = (window.__edgeTranslateDomPageDebugEvents =
+                window.__edgeTranslateDomPageDebugEvents || []);
+            const payload = {
+                id: ++this._domPageDebugEventId,
+                event,
+                at: Date.now(),
+                engine: this._domPageTranslateOptions?.engine || "",
+                active: this._domActiveTranslations,
+                queued: this._domTranslationQueue?.length || 0,
+                completed: this._domCompletedTranslationEntries,
+                total: this._domTotalTranslationEntries,
+                ...detail,
+            };
+            buffer.push(payload);
+            if (buffer.length > 500) buffer.splice(0, buffer.length - 500);
+            if (debugEnabled) {
+                this.mirrorDomPageDebugEvents(buffer);
+                try {
+                    console.log("[ET][DomPage]", event, payload);
+                } catch {
+                    // Console may be unavailable in test-like contexts.
+                }
+            }
+        } catch {
+            // Debug storage is best-effort.
+        }
+    }
+
+    mirrorDomPageDebugEvents(events) {
+        try {
+            const documentElement = document?.documentElement;
+            if (!documentElement) return;
+            let node = document.getElementById("edge-translate-dom-page-debug-log");
+            if (!node) {
+                node = document.createElement("script");
+                node.id = "edge-translate-dom-page-debug-log";
+                node.type = "application/json";
+                node.dataset.edgeTranslateDebug = "dom-page";
+                documentElement.appendChild(node);
+            }
+            node.textContent = JSON.stringify(events.slice(-160));
         } catch {
             // DOM mirroring is diagnostic-only.
         }
@@ -2344,9 +2411,10 @@ class BannerController {
                 .join(" ")
                 .toLowerCase();
             const normalized = signature.replace(/[_\s]+/g, "-");
+            // Comment / thread sections are intentionally allowed through — users want
+            // discussion translated alongside the article. Only widgets that are clearly UI
+            // chrome (auth forms, popups, ads, editor inputs) stay excluded.
             if (
-                /(^|-)comments?($|-)/.test(normalized) ||
-                /(^|-)threads?($|-)/.test(normalized) ||
                 /(^|-)newsletter($|-)/.test(normalized) ||
                 /(^|-)quill($|-)/.test(normalized) ||
                 /(^|-)login($|-)/.test(normalized) ||
@@ -2386,12 +2454,15 @@ class BannerController {
     }
     collectDomPageTextNodes(roots) {
         const nodes = [];
+        const targetLang = this._domPageTranslateOptions?.tl || "";
         for (const root of roots || []) {
             if (!root) continue;
             const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
             let node;
             while ((node = walker.nextNode())) {
-                if (this.isMeaningfulDomPageTextNode(node)) nodes.push(node);
+                if (!this.isMeaningfulDomPageTextNode(node)) continue;
+                if (this.isDomPageTextAlreadyInTargetLanguage(node.nodeValue, targetLang)) continue;
+                nodes.push(node);
             }
         }
         return nodes;
@@ -2399,16 +2470,41 @@ class BannerController {
 
     enqueueDomPageTextTreeForMutation(node, enqueue) {
         if (!node) return;
+        const targetLang = this._domPageTranslateOptions?.tl || "";
         if (node.nodeType === Node.TEXT_NODE) {
-            if (this.isMeaningfulDomPageTextNode(node)) enqueue(node);
+            if (!this.isMeaningfulDomPageTextNode(node)) return;
+            if (this.isDomPageTextAlreadyInTargetLanguage(node.nodeValue, targetLang)) return;
+            enqueue(node);
             return;
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return;
         const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
         let textNode;
         while ((textNode = walker.nextNode())) {
-            if (this.isMeaningfulDomPageTextNode(textNode)) enqueue(textNode);
+            if (!this.isMeaningfulDomPageTextNode(textNode)) continue;
+            if (this.isDomPageTextAlreadyInTargetLanguage(textNode.nodeValue, targetLang)) continue;
+            enqueue(textNode);
         }
+    }
+
+    /**
+     * Returns true when text is already mostly in the target language and can be skipped.
+     * Uses two cached regexes and two .match() calls — no per-character loop.
+     * Latin-script targets are not detected (English shares the alphabet with many others).
+     */
+    isDomPageTextAlreadyInTargetLanguage(text, targetLang) {
+        const value = String(text || "");
+        if (value.length < 4) return false;
+        const lang = String(targetLang || "")
+            .toLowerCase()
+            .split(/[-_]/)[0];
+        const pattern = BannerController._targetLangPatterns?.[lang];
+        if (!pattern) return false;
+        const letters = value.match(pattern.letter);
+        if (!letters || letters.length < 4) return false;
+        const targets = value.match(pattern.target);
+        if (!targets) return false;
+        return targets.length / letters.length >= 0.8;
     }
 
     async ensureOnDeviceBridge() {
@@ -2534,52 +2630,135 @@ class BannerController {
         }
     }
 
-    async translateWithDomPageEngine(text, from, to) {
-        return await this.channel.request("translate_text_quiet", {
+    async translateWithDomPageEngine(text, from, to, streamId = "") {
+        const payload = {
             text,
             sl: from,
             tl: to,
             translatorId: "LocalTranslate",
             engine: this._domPageTranslateOptions.engine,
             translationProfile: "page",
-        });
+        };
+        if (streamId) payload.streamId = streamId;
+        return await this.channel.request("translate_text_quiet", payload);
     }
 
     getDomPageTranslationGroupOptions() {
+        // Cap groups at the per-engine batch ceiling so context-translation requests fit a single round-trip
+        // (and, for openaiCompatible, fit a single local LLM slot).
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible") return { maxChars: 2400 };
         return { maxChars: 12000 };
     }
 
     getReadableBlockReplacementOptions() {
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible") return { maxChars: 2400 };
         return { maxChars: 12000 };
     }
 
     getDomPageBatchOptions() {
-        if (
-            this._domPageTranslateOptions.engine === "openai" ||
-            this._domPageTranslateOptions.engine === "openaiCompatible"
-        ) {
-            if (this._domBatchFailureCount >= 3) return { maxChars: 1800, maxItems: 1 };
-            if (this._domBatchFailureCount >= 2) return { maxChars: 4000, maxItems: 6 };
-            if (this._domBatchFailureCount >= 1) return { maxChars: 7000, maxItems: 32 };
-            return { maxChars: 12000, maxItems: 64 };
+        const engine = this._domPageTranslateOptions.engine;
+        const failures = this._domBatchFailureCount;
+        // Universal principle: LLM generation latency is roughly linear in output tokens, so
+        // smaller batches respond noticeably faster. Combined with appropriate concurrency,
+        // total throughput stays the same while the user sees results much sooner.
+        if (engine === "openaiCompatible") {
+            // Local LLM: still slot-constrained (≤4k n_ctx) but smaller batches → faster per-response.
+            if (failures >= 3) return { maxChars: 500, maxItems: 1 };
+            if (failures >= 2) return { maxChars: 800, maxItems: 3 };
+            if (failures >= 1) return { maxChars: 1200, maxItems: 6 };
+            return { maxChars: 1500, maxItems: 10 };
         }
-        if (this._domBatchFailureCount >= 3) return { maxChars: 1800, maxItems: 1 };
-        if (this._domBatchFailureCount >= 2) return { maxChars: 4000, maxItems: 6 };
-        if (this._domBatchFailureCount >= 1) return { maxChars: 7000, maxItems: 32 };
-        return { maxChars: 12000, maxItems: 64 };
+        // Cloud providers (googleAiStudio, openai) and any other engine: same recipe.
+        if (failures >= 3) return { maxChars: 1500, maxItems: 1 };
+        if (failures >= 2) return { maxChars: 2500, maxItems: 8 };
+        if (failures >= 1) return { maxChars: 3500, maxItems: 16 };
+        return { maxChars: 4500, maxItems: 24 };
     }
 
+    /**
+     * Tiny first batch so the user sees the first translation appear within ~0.5–1s.
+     * Applied uniformly across providers; remaining content uses the normal batch options.
+     */
     getDomPageLeadBatchOptions() {
-        return null;
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible") {
+            // Local model: keep tiny so the first response shows up before the model warms up.
+            return { maxChars: 400, maxItems: 2, maxEntries: 2 };
+        }
+        // Cloud (Gemini / OpenAI / others): ~800 chars ≈ ~0.5s first response.
+        return { maxChars: 800, maxItems: 4, maxEntries: 4 };
+    }
+
+    /**
+     * Sort entries in-place so viewport-visible content translates first. Cheap: a single
+     * batched layout read (the browser coalesces consecutive getBoundingClientRect calls).
+     * No-op for short pages where the overhead would outweigh the win.
+     *
+     * Tiers: 0=visible, 1=just-below, 2=above, 3=far. Document order preserved within a tier.
+     */
+    prioritizeDomPageEntriesByViewport(entries) {
+        if (!entries || entries.length < 20) return;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+        const tiers = new Int8Array(entries.length);
+        for (let i = 0; i < entries.length; i++) {
+            const el = entries[i]?.group?.nodes?.[0]?.parentElement;
+            if (!el || typeof el.getBoundingClientRect !== "function") {
+                tiers[i] = 4;
+                continue;
+            }
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) {
+                tiers[i] = 4;
+            } else if (rect.bottom > 0 && rect.top < viewportHeight) {
+                tiers[i] = 0;
+            } else if (rect.top >= viewportHeight && rect.top < viewportHeight * 2) {
+                tiers[i] = 1;
+            } else if (rect.bottom <= 0 && rect.bottom >= -viewportHeight) {
+                tiers[i] = 2;
+            } else {
+                tiers[i] = 3;
+            }
+        }
+        // Stable sort by tier (preserve document order within a tier).
+        const indices = entries.map((_, i) => i);
+        indices.sort((a, b) => tiers[a] - tiers[b] || a - b);
+        const sorted = indices.map((i) => entries[i]);
+        for (let i = 0; i < entries.length; i++) entries[i] = sorted[i];
     }
 
     getDomPageMaxConcurrentTranslations() {
         const engine = this._domPageTranslateOptions.engine;
-        if (this._domBatchFailureCount >= 3) return 6;
-        if (this._domBatchFailureCount >= 1) return 12;
-        if (engine === "openai" || engine === "openaiCompatible") return 16;
-        if (engine === "googleAiStudio") return 32;
-        return 8;
+        const failures = this._domBatchFailureCount;
+        // openaiCompatible is hard-capped by the local server's `--parallel` slot count
+        // (typically 8). Going beyond that just queues at the server.
+        if (engine === "openaiCompatible") {
+            if (failures >= 3) return 2;
+            if (failures >= 2) return 4;
+            if (failures >= 1) return 6;
+            return 8;
+        }
+        if (engine === "googleAiStudio") {
+            // Gemini Flash supports 1000+ RPM on tier 2+; we can fill more slots before any
+            // rate-limit response shows up. Tier-1 will 429 → automatic backoff handles it.
+            if (failures >= 3) return 16;
+            if (failures >= 2) return 32;
+            if (failures >= 1) return 48;
+            return 64;
+        }
+        if (engine === "openai") {
+            // OpenAI tier-2+ accounts handle this easily; tier-1 will get throttled and back off automatically.
+            if (failures >= 3) return 8;
+            if (failures >= 2) return 16;
+            if (failures >= 1) return 24;
+            return 32;
+        }
+        // Default / unknown engine: assume mid-tier API, same recipe as openai.
+        if (failures >= 3) return 8;
+        if (failures >= 2) return 16;
+        if (failures >= 1) return 24;
+        return 32;
     }
 
     recordDomPageBatchFailure() {
@@ -2596,7 +2775,7 @@ class BannerController {
     }
 
     /**
-     * Circuit breaker: pause translation for 30s when too many consecutive failures.
+     * Circuit breaker: pause translation for 15s when too many consecutive failures.
      * Prevents burning API tokens on persistent errors (e.g., invalid key, rate limit).
      */
     triggerDomPageCircuitBreaker() {
@@ -2609,7 +2788,7 @@ class BannerController {
             this.updateDomPageBannerStatus();
             this.flushDomTranslationQueue();
             this.scheduleDomPageCoverageScan();
-        }, 30000);
+        }, 15000);
     }
 
     shouldUseDomPageRoleSegment() {
@@ -2661,11 +2840,7 @@ class BannerController {
             /\d{1,4}\s*\r?\n?\s*\d{2}:\d{2}:\d{2}[,.]?\d{3}\s*-->/i.test(translated);
         if (!sourceHasSubtitleCue && translatedHasSubtitleCue) return true;
 
-        if (
-            /<<<EDGE_TRANSLATE_SEGMENT_/i.test(
-                translated
-            )
-        ) {
+        if (/<<<EDGE_TRANSLATE_SEGMENT_/i.test(translated)) {
             return true;
         }
 
@@ -2716,9 +2891,7 @@ class BannerController {
         this._domPendingTextNodes = new WeakSet();
         this._domFailedTextNodes = new WeakSet();
         this._domOriginalTextByElement = new WeakMap();
-        this._domApplySequence = 0;
-        this._domNextApplySequence = 0;
-        this._domPendingApplies = new Map();
+        this._domDuplicateEntries = new Map();
         if (this._domIncrementalScanTimer) {
             clearTimeout(this._domIncrementalScanTimer);
             this._domIncrementalScanTimer = null;
@@ -2730,7 +2903,18 @@ class BannerController {
         }
     }
 
-    createDomPageTranslationEntry(group, options = {}) {
+    /**
+     * Build a translation entry for a group, following Google Page Translate's strategy:
+     * walk the block's DOM, wrap each text node in a <t i="N"> tag, and send the HTML to the
+     * model. The model translates only the text inside each <t> tag and preserves all
+     * surrounding HTML structure (bolds, links, italics, etc.). On reply we parse the HTML
+     * back and apply each translated text to its original text node — keeping the entire
+     * inline structure of the original DOM intact.
+     *
+     * For blocks containing functional non-text inline content we cannot rebuild (images,
+     * iframes, code, form controls), we degrade to per-text-node group translation.
+     */
+    createDomPageTranslationEntry(group) {
         const { tl } = this._domPageTranslateOptions;
         const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
         const sessionId =
@@ -2738,32 +2922,26 @@ class BannerController {
                 ? group.sessionId
                 : this._domTranslationSessionId;
         if (group && group.sessionId === undefined) group.sessionId = sessionId;
-        const forceContext = options.forceContext || group?.forceDomPageContext;
-        const readableBlockReplacement = forceContext
-            ? null
-            : createReadableBlockReplacement(
-                  group,
-                  this.getReadableBlockReplacementOptions(options)
-              );
-        const sourceText = readableBlockReplacement
-            ? readableBlockReplacement.sourceText
-            : group.sourceText;
-        const role = readableBlockReplacement
-            ? readableBlockReplacement.role || group.role
-            : group.role;
-        const cacheMode = readableBlockReplacement ? "readable-block" : "context";
+        const block = group?.block || group?.nodes?.[0]?.parentElement || null;
+        const role = group?.role || "text";
+        const wrapped = this.isHtmlWrapEligible(block)
+            ? this.serializeBlockForHtmlWrap(block)
+            : null;
+        const sourceText = wrapped ? wrapped.html : group?.sourceText || "";
+        const sourceTextForCache = wrapped ? wrapped.plainText : sourceText;
         const cacheKey = [
             this._domPageTranslateOptions.engine,
             this._domPageTranslateOptions.model || "",
-            cacheMode,
             role,
             sl,
             tl,
-            fnv1a32(sourceText),
+            fnv1a32(sourceTextForCache),
         ].join("|");
         return {
             group,
-            readableBlockReplacement,
+            block: wrapped ? block : null,
+            wrappedNodes: wrapped ? wrapped.nodes : null,
+            wrappedPlainText: wrapped ? wrapped.plainText : "",
             role,
             sourceText,
             cacheKey,
@@ -2771,53 +2949,203 @@ class BannerController {
         };
     }
 
-    assignDomPageApplySequence(entry) {
-        if (!entry || entry.applySequence !== undefined) return entry;
-        const group = entry.group;
-        if (group && group.applySequence !== undefined) {
-            entry.applySequence = group.applySequence;
-            return entry;
+    /**
+     * Eligible when the block exists, has at least one text node, and contains no functional
+     * content we'd irrevocably destroy by re-rendering (images, buttons, code, embeds, forms).
+     */
+    isHtmlWrapEligible(block) {
+        if (!block || !block.querySelector || block.nodeType !== Node.ELEMENT_NODE) return false;
+        if (
+            block.querySelector(
+                "img,button,canvas,code,embed,iframe,input,kbd,math,object,picture,pre,samp,script,select,style,svg,textarea,video,audio"
+            )
+        ) {
+            return false;
         }
-        entry.applySequence = this._domApplySequence;
-        if (group) group.applySequence = entry.applySequence;
-        this._domApplySequence += 1;
-        return entry;
+        return Boolean(block.textContent && block.textContent.trim());
+    }
+
+    /**
+     * Walk the block's children and emit a compact HTML string in which every meaningful
+     * text node is wrapped in <t i="N"> ... </t>. Returns:
+     *   - html: the string to send to the model
+     *   - nodes: a Map<number, TextNode> for back-applying translations
+     *   - plainText: stripped text (for cache keys and the suspicious-output check)
+     */
+    serializeBlockForHtmlWrap(block) {
+        const nodes = new Map();
+        const plainParts = [];
+        let nextId = 0;
+        const buf = [];
+        const ALLOWED_INLINE_TAGS = new Set([
+            "a",
+            "abbr",
+            "b",
+            "bdi",
+            "bdo",
+            "cite",
+            "del",
+            "dfn",
+            "em",
+            "i",
+            "ins",
+            "mark",
+            "q",
+            "s",
+            "small",
+            "span",
+            "strong",
+            "sub",
+            "sup",
+            "time",
+            "u",
+            "wbr",
+            "br",
+            "p",
+            "div",
+            "ul",
+            "ol",
+            "li",
+        ]);
+        const walk = (node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                const raw = String(node.nodeValue || "");
+                if (!raw.trim()) {
+                    if (raw) buf.push(this.escapeHtmlForWrap(raw));
+                    return;
+                }
+                const id = ++nextId;
+                nodes.set(id, node);
+                plainParts.push(raw);
+                buf.push(`<t i="${id}">`);
+                buf.push(this.escapeHtmlForWrap(raw));
+                buf.push("</t>");
+                return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            const tag = node.tagName.toLowerCase();
+            if (!ALLOWED_INLINE_TAGS.has(tag)) {
+                // Unknown / structural element — render its text content but skip the tag itself
+                // so the prompt stays focused on translatable language.
+                for (const child of node.childNodes) walk(child);
+                return;
+            }
+            if (tag === "br") {
+                buf.push("<br>");
+                return;
+            }
+            buf.push(`<${tag}>`);
+            for (const child of node.childNodes) walk(child);
+            buf.push(`</${tag}>`);
+        };
+        for (const child of block.childNodes) walk(child);
+        return {
+            html: buf.join(""),
+            nodes,
+            plainText: this.normalizeBlockText(plainParts.join(" ")),
+        };
+    }
+
+    escapeHtmlForWrap(text) {
+        return String(text)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    /**
+     * Parse the model's response HTML and return a Map<number, string> of translated text
+     * keyed by the i="N" attribute. Robust to extra whitespace, missing closing tags, and
+     * partial matches — every successfully parsed <t i="N">…</t> still gets applied.
+     */
+    parseHtmlWrapResponse(translatedHtml) {
+        const result = new Map();
+        if (!translatedHtml) return result;
+        // Regex first (forgiving on whitespace/quotes). DOMParser would also work but is
+        // heavier and stricter; the regex covers the typical model outputs cleanly.
+        const re = /<t\s+i=["']?(\d+)["']?\s*>([\s\S]*?)<\/t\s*>/gi;
+        let m;
+        while ((m = re.exec(translatedHtml)) !== null) {
+            const id = Number(m[1]);
+            if (!Number.isFinite(id)) continue;
+            // Strip any nested HTML tags the model may have introduced, keep visible text.
+            const text = m[2].replace(/<[^>]+>/g, "");
+            result.set(id, this.decodeHtmlEntities(text).trim());
+        }
+        return result;
+    }
+
+    decodeHtmlEntities(text) {
+        return String(text)
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+    }
+
+    normalizeBlockText(value) {
+        return String(value || "").replace(/\s+/g, " ").trim();
     }
 
     queueDomPageEntryApply(entry, translated) {
         if (!this.isDomPageEntryCurrentSession(entry)) return;
-        this.assignDomPageApplySequence(entry);
-        this._domPendingApplies.set(entry.applySequence, {
-            entry,
-            translated,
-            skipped: false,
-        });
-        this.flushDomPageOrderedApplies();
+        if (!this.isDomPageEntryStillCurrent(entry)) {
+            this.releaseDomPageEntryPending(entry);
+            return;
+        }
+        if (this.applyDomPageTranslatedEntry(entry, translated)) {
+            this.cacheDomPageTranslation(entry.cacheKey, translated);
+            this.markDomPageEntryApplied(entry);
+            this.fanOutDomPageDuplicates(entry, translated);
+        } else {
+            this.releaseDomPageEntryPending(entry);
+        }
+    }
+
+    /**
+     * Apply a primary's translation to all queued duplicates that share its cacheKey.
+     * Duplicates are not counted in completion totals (they piggyback on the primary's slot).
+     */
+    fanOutDomPageDuplicates(primary, translated) {
+        const bucket = primary && this._domDuplicateEntries?.get(primary.cacheKey);
+        if (!bucket || !bucket.length) return;
+        this._domDuplicateEntries.delete(primary.cacheKey);
+        for (const dup of bucket) {
+            if (!this.isDomPageEntryCurrentSession(dup)) continue;
+            if (!this.isDomPageEntryStillCurrent(dup)) {
+                this.releaseDomPageEntryPending(dup);
+                continue;
+            }
+            // Re-validate per duplicate: group.nodes differ, so split/segment checks must rerun.
+            const rejection = this.getDomPageEntryRejectionReason(dup, translated);
+            if (rejection) {
+                this.releaseDomPageEntryPending(dup);
+                continue;
+            }
+            if (this.applyDomPageTranslatedEntry(dup, translated)) {
+                this.markDomPageEntryApplied(dup);
+            } else {
+                this.releaseDomPageEntryPending(dup);
+            }
+        }
     }
 
     canQueueDomPageEntryTranslation(entry, translated) {
         return !this.getDomPageEntryRejectionReason(entry, translated);
     }
 
+    /**
+     * Only check whether the translation is genuinely garbage. Per-line / per-marker validation
+     * is gone: HTML-wrap apply handles partial matches gracefully on its own.
+     *
+     * For wrapped entries we compare against the wrapped plainText (visible text only) since
+     * sourceText is the full HTML payload including <t> tags.
+     */
     getDomPageEntryRejectionReason(entry, translated) {
-        if (!this.canUseDomPageTranslation(entry.sourceText, translated)) {
+        const source = entry.wrappedPlainText || entry.sourceText;
+        if (!this.canUseDomPageTranslation(source, translated)) {
             return "suspicious-output";
-        }
-        const replacement = entry.readableBlockReplacement;
-        if (replacement?.inlineLinks?.length) {
-            return this.createDomPageInlineLinkFragment(translated, replacement.inlineLinks)
-                ? ""
-                : "inline-link-placeholder";
-        }
-        if (!replacement) {
-            const group = entry.group;
-            const parts = splitTranslatedContext(translated, group.nodes.length);
-            if (!parts) return "line-count";
-            return parts.some((part, index) =>
-                this.isSuspiciousDomPageTranslation(group.texts[index], part)
-            )
-                ? "suspicious-line"
-                : "";
         }
         return "";
     }
@@ -2841,34 +3169,7 @@ class BannerController {
 
     skipDomPageEntryApply(entry) {
         if (!this.isDomPageEntryCurrentSession(entry)) return;
-        this.assignDomPageApplySequence(entry);
         this.releaseDomPageEntryPending(entry);
-        this._domPendingApplies.set(entry.applySequence, {
-            entry,
-            translated: "",
-            skipped: true,
-        });
-        this.flushDomPageOrderedApplies();
-    }
-
-    flushDomPageOrderedApplies() {
-        while (this._domPendingApplies.has(this._domNextApplySequence)) {
-            const item = this._domPendingApplies.get(this._domNextApplySequence);
-            this._domPendingApplies.delete(this._domNextApplySequence);
-            this._domNextApplySequence += 1;
-            if (!this.isDomPageEntryCurrentSession(item.entry)) continue;
-            if (item.skipped) continue;
-            if (!this.isDomPageEntryStillCurrent(item.entry)) {
-                this.releaseDomPageEntryPending(item.entry);
-                continue;
-            }
-            if (this.applyDomPageTranslatedEntry(item.entry, item.translated)) {
-                this.cacheDomPageTranslation(item.entry.cacheKey, item.translated);
-                this.markDomPageEntryApplied(item.entry);
-            } else {
-                this.releaseDomPageEntryPending(item.entry);
-            }
-        }
     }
 
     cacheDomPageTranslation(cacheKey, translated) {
@@ -2923,6 +3224,7 @@ class BannerController {
         if (!entry || !entry.group) return false;
         const reason = options.reason || "";
         if (this.shouldUsePlainDomPageNodeFallback(entry, reason)) {
+            // Fallback grows total by group.nodes.length internally; no extra accounting needed here.
             return this.fallbackDomPageEntryToPlainNodes(entry);
         }
         if (!this.shouldRetryDomPageEntryTranslation(entry, attempt, reason)) {
@@ -2933,6 +3235,9 @@ class BannerController {
         if (entry.readableBlockReplacement) {
             entry.group.forceDomPageContext = true;
         }
+        // At this point we're retrying a real network/API error (validation failures returned false above).
+        // Bump total by 1 so the completion counter stays balanced when this retry eventually finishes.
+        this._domTotalTranslationEntries += 1;
         this.enqueueDomPageGroupTranslation(entry.group, attempt + 1, {
             front: true,
             ...options,
@@ -2942,20 +3247,18 @@ class BannerController {
 
     shouldRetryDomPageEntryTranslation(entry, attempt, reason = "") {
         if (!entry || attempt >= 1) return false;
+        // Content-validation retries are useless at temperature=0: the model returns the same output
+        // on the same input. Skip them — let the caller fall back to per-node translation (for local
+        // LLMs via shouldUsePlainDomPageNodeFallback) or leave the source intact.
+        // Only network/API errors (reason "") benefit from a retry.
+        if (reason) return false;
         const role = entry.role || entry.group?.role || "text";
         const sourceLength = String(entry.sourceText || "").trim().length;
         const contentRoles = ["paragraph", "list-item", "caption", "table-header"];
         if (entry.readableBlockReplacement) return true;
-        if (reason === "line-count") {
-            if (role === "title" || role === "date") return sourceLength >= 8;
-            return contentRoles.includes(role) && sourceLength >= 80;
-        }
         if (role === "title" || role === "date") return sourceLength >= 8;
-        if (contentRoles.includes(role)) {
-            return sourceLength >= 40;
-        }
-        if (reason === "suspicious-output" && sourceLength >= 120) return true;
-        return false;
+        if (contentRoles.includes(role)) return sourceLength >= 40;
+        return sourceLength >= 120;
     }
 
     markDomPageEntryFailed(entry) {
@@ -2971,61 +3274,88 @@ class BannerController {
 
     applyDomPageTranslatedEntry(entry, translated) {
         if (!translated) return false;
-        const { group, readableBlockReplacement } = entry;
-        if (!this.canUseDomPageTranslation(entry.sourceText, translated)) return false;
-
-        if (readableBlockReplacement) {
-            const block = readableBlockReplacement.block;
-            if (block && block.isConnected) {
-                if (
-                    !this.applyDomPageReadableBlockReplacement(readableBlockReplacement, translated)
-                ) {
-                    return false;
-                }
+        // HTML-wrap path (Google-style): parse <t i="N">…</t> wrappers from the response and
+        // apply each translation to its original text node. Inline structure (bolds, links,
+        // italics) stays intact because we only mutate text-node values, never the DOM tree.
+        if (entry.block && entry.block.isConnected && entry.wrappedNodes?.size) {
+            const idMap = this.parseHtmlWrapResponse(translated);
+            const block = entry.block;
+            const wrappedNodes = entry.wrappedNodes;
+            // Pre-compute which nodes have a matching translation so we can decide before fading
+            // whether the apply will produce any visible change.
+            const pendingUpdates = [];
+            for (const [id, node] of wrappedNodes) {
+                const text = idMap.get(id);
+                if (text == null || !node.parentElement) continue;
+                pendingUpdates.push({
+                    node,
+                    text: this.preserveDomTextNodeBoundaryWhitespace(node, text),
+                });
+            }
+            if (pendingUpdates.length > 0) {
+                this.registerDomOriginalText(block, entry.wrappedPlainText || entry.sourceText);
+                this.fadeInDomPageBlock(block, () => {
+                    for (const { node, text } of pendingUpdates) {
+                        node.nodeValue = text;
+                        this._translatedSet.add(node);
+                        this._domPendingTextNodes.delete(node);
+                    }
+                });
                 this._translatedBlocks.add(block);
                 return true;
             }
-            return false;
+            // Parsing produced zero matches — model probably stripped the tags. Fall through to
+            // a wholesale plain-text replacement so the block still gets translated.
+            const sanitized = this.sanitizeDomPageTranslatedText(translated)
+                .replace(/<\/?t\s*[^>]*>/gi, "");
+            if (!sanitized) return false;
+            this.registerDomOriginalText(block, entry.wrappedPlainText || entry.sourceText);
+            this.fadeInDomPageBlock(block, () => {
+                block.textContent = sanitized;
+                for (const node of wrappedNodes.values()) {
+                    this._domPendingTextNodes.delete(node);
+                    this._translatedSet.add(node);
+                }
+            });
+            this._translatedBlocks.add(block);
+            return true;
         }
-
-        const translatedParts = splitTranslatedContext(translated, group.nodes.length);
-        if (!translatedParts) return false;
-        if (
-            translatedParts.some((part, index) =>
-                this.isSuspiciousDomPageTranslation(group.texts[index], part)
-            )
-        ) {
-            return false;
+        // Block not eligible for HTML wrap (functional inline content). Translate per text node
+        // using the group's nodes and the existing line-split helper.
+        const group = entry.group;
+        if (!group?.nodes?.length) return false;
+        const parts = splitTranslatedContext(translated, group.nodes.length);
+        if (!parts) {
+            const target = group.nodes.find((n) => n.parentElement);
+            if (!target) return false;
+            target.nodeValue = this.sanitizeDomPageTranslatedText(translated);
+            for (const node of group.nodes) {
+                if (node !== target && node.parentElement) node.nodeValue = "";
+            }
+            return true;
         }
-
         group.nodes.forEach((node, index) => {
-            if (translatedParts[index] && node.parentElement) {
-                this.applyWithFadeIn(node, translatedParts[index], "text", group.texts[index]);
+            if (parts[index] && node.parentElement) {
+                this.applyWithFadeIn(node, parts[index], "text", group.texts[index]);
             }
         });
         return true;
     }
 
-    applyDomPageReadableBlockReplacement(readableBlockReplacement, translated) {
+    applyDomPageReadableBlockReplacement(readableBlockReplacement, translated, preparedFragment) {
         const block = readableBlockReplacement && readableBlockReplacement.block;
         if (!block) return false;
         if (readableBlockReplacement.inlineLinks && readableBlockReplacement.inlineLinks.length) {
-            const fragment = this.createDomPageInlineLinkFragment(
-                translated,
-                readableBlockReplacement.inlineLinks
-            );
+            const fragment =
+                preparedFragment ||
+                this.createDomPageInlineLinkFragment(
+                    translated,
+                    readableBlockReplacement.inlineLinks
+                );
             if (!fragment) return false;
             this.registerDomOriginalText(block, readableBlockReplacement.sourceText);
-            this.ensureDomFadeStyle();
-            block.style.opacity = "0";
-            block.classList.add("et-fade-in");
-            block.replaceChildren(fragment);
-            requestAnimationFrame(() => {
-                block.style.opacity = "1";
-                setTimeout(() => {
-                    block.classList.remove("et-fade-in");
-                    block.style.removeProperty("opacity");
-                }, 300);
+            this.fadeInDomPageBlock(block, () => {
+                block.replaceChildren(fragment);
             });
             return true;
         }
@@ -3112,20 +3442,13 @@ class BannerController {
             return;
         }
         if (this.isPdfViewerTextLayerElement(el)) {
+            this.ensureDomPageStyle();
             el.classList.add("et-dom-pdf-translated-text");
         }
         this.registerDomOriginalText(el, originalText);
-        this.ensureDomFadeStyle();
-        el.style.opacity = "0";
-        el.classList.add("et-fade-in");
-        if (type === "block") node.textContent = translated;
-        else node.nodeValue = translated;
-        requestAnimationFrame(() => {
-            el.style.opacity = "1";
-            setTimeout(() => {
-                el.classList.remove("et-fade-in");
-                el.style.removeProperty("opacity");
-            }, 300);
+        this.fadeInDomPageBlock(el, () => {
+            if (type === "block") node.textContent = translated;
+            else node.nodeValue = translated;
         });
     }
 
@@ -3139,11 +3462,13 @@ class BannerController {
         const pairs = this.buildDomOriginalDisplayPairs(translated, originalText);
         const fragment = document.createDocumentFragment();
         const spans = [];
+        const isPdfLayer = this.isPdfViewerTextLayerElement(parent);
+        this.ensureDomPageStyle();
         pairs.forEach((pair, index) => {
             if (index > 0) fragment.appendChild(document.createTextNode(pair.separator || " "));
             const span = document.createElement("span");
             span.className = "et-dom-translated-text";
-            if (this.isPdfViewerTextLayerElement(parent)) {
+            if (isPdfLayer) {
                 span.classList.add("et-dom-pdf-translated-text");
             }
             const isFirst = index === 0;
@@ -3158,24 +3483,14 @@ class BannerController {
         });
 
         if (!spans.length) {
-            node.nodeValue = this.preserveDomTextNodeBoundaryWhitespace(node, translated);
+            this.fadeInDomPageBlock(parent, () => {
+                node.nodeValue = this.preserveDomTextNodeBoundaryWhitespace(node, translated);
+            });
             return;
         }
 
-        this.ensureDomFadeStyle();
-        spans.forEach((span) => {
-            span.style.opacity = "0";
-            span.classList.add("et-fade-in");
-        });
-        parent.replaceChild(fragment, node);
-        requestAnimationFrame(() => {
-            spans.forEach((span) => {
-                span.style.opacity = "1";
-                setTimeout(() => {
-                    span.classList.remove("et-fade-in");
-                    span.style.removeProperty("opacity");
-                }, 300);
-            });
+        this.fadeInDomPageBlock(parent, () => {
+            parent.replaceChild(fragment, node);
         });
     }
 
@@ -3201,12 +3516,11 @@ class BannerController {
         );
     }
 
-    ensureDomFadeStyle() {
-        if (this._domFadeStyleInjected) return;
-        this._domFadeStyleInjected = true;
+    ensureDomPageStyle() {
+        if (this._domPageStyleInjected) return;
+        this._domPageStyleInjected = true;
         const style = document.createElement("style");
         style.textContent = `
-            .et-fade-in{transition:opacity .1s ease-in;}
             .textLayer .et-dom-pdf-translated-text {
                 color: #202124 !important;
                 background: rgba(255,255,255,.86) !important;
@@ -3217,6 +3531,90 @@ class BannerController {
             }
         `;
         document.head.appendChild(style);
+    }
+
+    /**
+     * Material 3 Expressive entrance for a translated block.
+     *
+     * Hides the block, mutates DOM while invisible, then fades + slides + settles back into
+     * place using M3 motion tokens:
+     *   • Opacity: 280ms with Emphasized Decelerate `cubic-bezier(.05,.7,.1,1)` (smooth, no overshoot)
+     *   • Transform (translateY + scale): 380ms with a soft spring `cubic-bezier(.2,1.18,.32,1)`
+     *     for the subtle "쫀쫀" springiness that defines Expressive motion.
+     *
+     * Respects `prefers-reduced-motion: reduce` — falls back to an instant swap.
+     * Uses `translate3d` to force a compositor layer so dozens of paragraphs can animate
+     * simultaneously without main-thread cost.
+     */
+    fadeInDomPageBlock(block, mutateFn) {
+        let ran = false;
+        const runMutate = () => {
+            if (ran) return;
+            ran = true;
+            try {
+                mutateFn();
+            } catch {
+                /* mutation may fail if the block detaches mid-flight */
+            }
+        };
+        if (!block || !block.style || !block.isConnected) {
+            runMutate();
+            return;
+        }
+        // Respect the OS-level reduce-motion preference.
+        let reduceMotion = false;
+        try {
+            reduceMotion =
+                typeof window.matchMedia === "function" &&
+                window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        } catch {
+            /* matchMedia may be unavailable in non-browser contexts */
+        }
+        if (reduceMotion) {
+            runMutate();
+            return;
+        }
+        const prevTransition = block.style.transition;
+        const prevOpacity = block.style.opacity;
+        const prevTransform = block.style.transform;
+        const prevWillChange = block.style.willChange;
+
+        // Promote to a compositor layer up-front so the first frame doesn't pop.
+        block.style.willChange = "opacity, transform";
+        block.style.transition = "none";
+        block.style.opacity = "0";
+        block.style.transform = "translate3d(0, 6px, 0) scale(0.985)";
+        // Synchronous reflow guarantees the "hidden" state is committed before we mutate text.
+        void block.offsetWidth;
+        runMutate();
+        if (typeof requestAnimationFrame !== "function") {
+            block.style.removeProperty("opacity");
+            block.style.removeProperty("transform");
+            block.style.removeProperty("transition");
+            block.style.removeProperty("will-change");
+            return;
+        }
+        requestAnimationFrame(() => {
+            if (!block.isConnected) return;
+            // M3 Expressive: opacity uses Emphasized Decelerate; transform uses a soft spring.
+            block.style.transition = [
+                "opacity 280ms cubic-bezier(0.05, 0.7, 0.1, 1)",
+                "transform 380ms cubic-bezier(0.2, 1.18, 0.32, 1)",
+            ].join(", ");
+            block.style.opacity = "1";
+            block.style.transform = "translate3d(0, 0, 0) scale(1)";
+            setTimeout(() => {
+                if (!block.isConnected) return;
+                if (prevTransition) block.style.transition = prevTransition;
+                else block.style.removeProperty("transition");
+                if (prevOpacity) block.style.opacity = prevOpacity;
+                else block.style.removeProperty("opacity");
+                if (prevTransform) block.style.transform = prevTransform;
+                else block.style.removeProperty("transform");
+                if (prevWillChange) block.style.willChange = prevWillChange;
+                else block.style.removeProperty("will-change");
+            }, 420);
+        });
     }
 
     buildDomOriginalDisplayPairs(translated, originalText) {
@@ -4262,62 +4660,149 @@ class BannerController {
         this.movePage("top", visible ? this._domPageBannerHeight : 0, true);
     }
 
+    /**
+     * Schedule a banner repaint. Called from many spots (every entry completion);
+     * coalesces multiple updates in the same JS turn into a single rAF flush.
+     */
     updateDomPageBannerStatus(state, message) {
-        const host =
-            this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
-        if (!host || !host.shadowRoot) return;
-        const bar = host.shadowRoot.querySelector("[data-role='bar']");
-        const engine = host.shadowRoot.querySelector("[data-role='engine']");
-        const model = host.shadowRoot.querySelector("[data-role='model']");
-        const status = host.shadowRoot.querySelector("[data-role='status']");
-        const progressFill = host.shadowRoot.querySelector("[data-role='progress-fill']");
-        const progressMeta = host.shadowRoot.querySelector("[data-role='progress-meta']");
-        const tokenMeta = host.shadowRoot.querySelector("[data-role='token-meta']");
-        if (!bar || !status) return;
-        const meta = this.getDomPageTranslatorMeta();
-        const label = meta.label;
-        if (engine) {
-            engine.innerHTML = `${meta.logo}<span data-role="engine-label">${label}</span>`;
-        }
-        if (model) {
-            model.textContent = meta.model || "";
-            model.hidden = !meta.model;
-        }
         if (state === "error") {
-            bar.dataset.state = "error";
-            status.textContent = message
-                ? `Translation failed: ${String(message).slice(0, 120)}`
-                : "Translation failed";
-            if (progressFill) progressFill.style.width = "100%";
-            if (progressMeta) progressMeta.textContent = "Error";
-            if (tokenMeta) {
-                const tokenText = this.getDomPageTokenUsageText();
-                tokenMeta.textContent = tokenText;
-                tokenMeta.style.display = tokenText ? "inline-flex" : "none";
-            }
+            // Errors are explicit user-visible state changes; paint immediately.
+            this._domBannerPendingError = { message: message || "" };
+            this.flushDomPageBannerStatus();
             return;
         }
-        const tokenText = this.getDomPageTokenUsageText();
-        if (tokenMeta) {
-            tokenMeta.textContent = tokenText;
-            tokenMeta.title = tokenText ? `API token usage: ${tokenText}` : "";
-            tokenMeta.style.display = tokenText ? "inline-flex" : "none";
+        if (this._domBannerRafScheduled) return;
+        this._domBannerRafScheduled = true;
+        const run = () => {
+            this._domBannerRafScheduled = false;
+            this.flushDomPageBannerStatus();
+        };
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+        else setTimeout(run, 16);
+    }
+
+    getDomPageBannerRefs() {
+        if (this._domBannerRefs && this._domBannerRefs.host?.isConnected) {
+            return this._domBannerRefs;
         }
+        const host =
+            this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
+        if (!host || !host.shadowRoot) return null;
+        const root = host.shadowRoot;
+        const refs = {
+            host,
+            bar: root.querySelector("[data-role='bar']"),
+            engine: root.querySelector("[data-role='engine']"),
+            model: root.querySelector("[data-role='model']"),
+            status: root.querySelector("[data-role='status']"),
+            progressFill: root.querySelector("[data-role='progress-fill']"),
+            progressMeta: root.querySelector("[data-role='progress-meta']"),
+            tokenMeta: root.querySelector("[data-role='token-meta']"),
+        };
+        if (!refs.bar || !refs.status) return null;
+        this._domBannerRefs = refs;
+        // Initialize last-rendered snapshot so the first flush always paints.
+        this._domBannerLastRendered = {};
+        this._domBannerEngineRendered = "";
+        return refs;
+    }
+
+    flushDomPageBannerStatus() {
+        const refs = this.getDomPageBannerRefs();
+        if (!refs) return;
+        const meta = this.getDomPageTranslatorMeta();
+        // Engine label and model name don't change mid-session — write once.
+        const engineKey = `${meta.label}|${meta.logo}|${meta.model || ""}`;
+        if (engineKey !== this._domBannerEngineRendered) {
+            this._domBannerEngineRendered = engineKey;
+            if (refs.engine) {
+                refs.engine.innerHTML = `${meta.logo}<span data-role="engine-label">${meta.label}</span>`;
+            }
+            if (refs.model) {
+                refs.model.textContent = meta.model || "";
+                refs.model.hidden = !meta.model;
+            }
+        }
+        const tokenText = this.getDomPageTokenUsageText();
+        const last = this._domBannerLastRendered;
+        if (this._domBannerPendingError) {
+            const message = this._domBannerPendingError.message;
+            this._domBannerPendingError = null;
+            const statusText = message
+                ? `Translation failed: ${String(message).slice(0, 120)}`
+                : "Translation failed";
+            if (last.state !== "error") {
+                refs.bar.dataset.state = "error";
+                last.state = "error";
+            }
+            if (last.statusText !== statusText) {
+                refs.status.textContent = statusText;
+                last.statusText = statusText;
+            }
+            if (refs.progressFill && last.fillWidth !== "100%") {
+                refs.progressFill.style.width = "100%";
+                last.fillWidth = "100%";
+            }
+            if (refs.progressMeta && last.percentText !== "Error") {
+                refs.progressMeta.textContent = "Error";
+                last.percentText = "Error";
+            }
+            this.applyTokenMetaText(refs.tokenMeta, tokenText, last);
+            return;
+        }
+        this.applyTokenMetaText(refs.tokenMeta, tokenText, last);
         const total = this._domTotalTranslationEntries;
         if (!total) {
-            bar.dataset.state = "starting";
-            status.textContent = "Preparing page text";
-            if (progressFill) progressFill.style.width = "";
-            if (progressMeta) progressMeta.textContent = "";
+            if (last.state !== "starting") {
+                refs.bar.dataset.state = "starting";
+                last.state = "starting";
+            }
+            const startingText = "Preparing page text";
+            if (last.statusText !== startingText) {
+                refs.status.textContent = startingText;
+                last.statusText = startingText;
+            }
+            if (refs.progressFill && last.fillWidth !== "") {
+                refs.progressFill.style.width = "";
+                last.fillWidth = "";
+            }
+            if (refs.progressMeta && last.percentText !== "") {
+                refs.progressMeta.textContent = "";
+                last.percentText = "";
+            }
             return;
         }
         const completed = Math.min(this._domCompletedTranslationEntries, total);
         const percent = Math.round((completed / total) * 100);
-        bar.dataset.state = completed >= total ? "complete" : "running";
-        status.textContent =
+        const nextState = completed >= total ? "complete" : "running";
+        if (last.state !== nextState) {
+            refs.bar.dataset.state = nextState;
+            last.state = nextState;
+        }
+        const nextStatus =
             completed >= total ? "Translation complete" : `${completed} of ${total} translated`;
-        if (progressFill) progressFill.style.width = `${percent}%`;
-        if (progressMeta) progressMeta.textContent = `${percent}%`;
+        if (last.statusText !== nextStatus) {
+            refs.status.textContent = nextStatus;
+            last.statusText = nextStatus;
+        }
+        const nextFill = `${percent}%`;
+        if (refs.progressFill && last.fillWidth !== nextFill) {
+            refs.progressFill.style.width = nextFill;
+            last.fillWidth = nextFill;
+        }
+        if (refs.progressMeta && last.percentText !== nextFill) {
+            refs.progressMeta.textContent = nextFill;
+            last.percentText = nextFill;
+        }
+    }
+
+    applyTokenMetaText(tokenMeta, tokenText, last) {
+        if (!tokenMeta) return;
+        if (last.tokenText === tokenText) return;
+        last.tokenText = tokenText;
+        tokenMeta.textContent = tokenText;
+        tokenMeta.title = tokenText ? `API token usage: ${tokenText}` : "";
+        tokenMeta.style.display = tokenText ? "inline-flex" : "none";
     }
 
     markDomPageTranslationEntriesCompleted(count = 1) {
@@ -4354,6 +4839,9 @@ class BannerController {
         if (host) host.remove();
         this.destroyDomOriginalTooltip();
         this._domPageBanner = null;
+        this._domBannerRefs = null;
+        this._domBannerLastRendered = null;
+        this._domBannerEngineRendered = "";
         this._domTranslationCache.clear();
         this._domTotalTranslationEntries = 0;
         this._domCompletedTranslationEntries = 0;
@@ -4614,9 +5102,7 @@ class BannerController {
             return;
         }
         if (this.getDomPageBatchOptions()) {
-            const entries = groups.map((group) =>
-                this.assignDomPageApplySequence(this.createDomPageTranslationEntry(group))
-            );
+            const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
             const uncachedEntries = [];
             entries.forEach((entry) => {
                 const cached = this._domTranslationCache.get(entry.cacheKey);
@@ -4626,18 +5112,45 @@ class BannerController {
                 }
                 uncachedEntries.push(entry);
             });
-            const batches = this.buildDomPageTranslationBatches(uncachedEntries);
+            // Deduplicate: same sourceText (cacheKey) → translate once, fan out to siblings.
+            // Only run on larger pages where duplicates are likely (small pages: pure overhead).
+            let primaries = uncachedEntries;
+            if (uncachedEntries.length >= 30) {
+                primaries = [];
+                const duplicateBuckets = new Map();
+                for (const entry of uncachedEntries) {
+                    if (!entry.cacheKey) {
+                        primaries.push(entry);
+                        continue;
+                    }
+                    if (!duplicateBuckets.has(entry.cacheKey)) {
+                        duplicateBuckets.set(entry.cacheKey, []);
+                        primaries.push(entry);
+                    } else {
+                        duplicateBuckets.get(entry.cacheKey).push(entry);
+                    }
+                }
+                this._domDuplicateEntries = duplicateBuckets;
+            } else {
+                this._domDuplicateEntries.clear();
+            }
+            // Sort by viewport proximity so visible content translates first.
+            this.prioritizeDomPageEntriesByViewport(primaries);
+            const batches = this.buildDomPageTranslationBatches(primaries);
             this._domTotalTranslationEntries += batches.length;
             this.updateDomPageBannerStatus();
+            this.logDomPageDebug("batch-mode", {
+                groups: groups.length,
+                batches: batches.length,
+                entries: uncachedEntries.length,
+            });
             batches.forEach((batch) => this.enqueueDomPageBatchTranslation(batch));
             return;
         }
         this._domTotalTranslationEntries += groups.length;
         this.updateDomPageBannerStatus();
         groups.forEach((group) => {
-            const entry = this.assignDomPageApplySequence(
-                this.createDomPageTranslationEntry(group)
-            );
+            const entry = this.createDomPageTranslationEntry(group);
             this.enqueueDomPageGroupTranslation(entry.group);
         });
     }
@@ -4650,12 +5163,47 @@ class BannerController {
                 return;
             }
             this._domActiveTranslations += 1;
+            // Subscribe to streaming progress for this batch: apply each completed segment to the
+            // DOM the moment it lands so the user sees text appear progressively. Falls back to
+            // the standard "wait then apply" path if the channel doesn't emit (e.g. cache hit).
+            const streamId = `et-stream-${Date.now().toString(36)}-${Math.random()
+                .toString(36)
+                .slice(2, 8)}`;
+            const appliedSegmentIndices = new Set();
+            const streamHandler = (event) => {
+                if (!event || event.streamId !== streamId) return;
+                this.applyStreamedBatchSegments(entries, event.text, appliedSegmentIndices);
+            };
+            try {
+                this.channel.on("translation_stream_progress", streamHandler);
+            } catch {
+                /* channel may not expose .on in some test contexts */
+            }
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
                 const batchedSourceText = buildSegmentedTranslationText(entries);
-                const result = await this.translateWithDomPageEngine(batchedSourceText, sl, tl);
+                const startedAt = Date.now();
+                this.logDomPageDebug("batch-request:start", {
+                    entries: entries.length,
+                    chars: batchedSourceText.length,
+                });
+                const result = await this.translateWithDomPageEngine(
+                    batchedSourceText,
+                    sl,
+                    tl,
+                    streamId
+                );
                 this.recordDomPageTokenUsage(result);
+                this.logDomPageDebug("batch-request:response", {
+                    entries: entries.length,
+                    durationMs: Date.now() - startedAt,
+                    failed: Boolean(result && result.translationFailed),
+                    translatedChars: String(
+                        (result && (result.mainMeaning || result.translatedText)) || ""
+                    ).length,
+                    error: result && result.translationFailed ? result.errorMsg || "" : "",
+                });
                 if (result && result.translationFailed) {
                     throw new Error(result.errorMsg || "Page translation request failed.");
                 }
@@ -4686,6 +5234,10 @@ class BannerController {
                 let rejectedEntryCount = 0;
                 entries.forEach((entry, index) => {
                     const part = translatedParts[index];
+                    // If the streaming handler already applied this entry mid-stream, skip; the
+                    // final response is just confirmation. (preparedParts/Fragment are cleared
+                    // on each new validation, so we use the translated-set check instead.)
+                    if (appliedSegmentIndices.has(index)) return;
                     const rejectionReason = this.getDomPageEntryRejectionReason(entry, part);
                     if (!rejectionReason) {
                         this.queueDomPageEntryApply(entry, part);
@@ -4705,6 +5257,8 @@ class BannerController {
                 this.recordDomPageBatchFailure();
                 if (entries.length > 1 && this._domBatchFailureCount < 5) {
                     const mid = Math.ceil(entries.length / 2);
+                    // 1 batch became 2 sub-batches; reserve a slot for the extra unit.
+                    this._domTotalTranslationEntries += 1;
                     this.enqueueDomPageBatchTranslation(entries.slice(mid), { front: true });
                     this.enqueueDomPageBatchTranslation(entries.slice(0, mid), { front: true });
                 } else {
@@ -4712,6 +5266,11 @@ class BannerController {
                 }
                 this.markDomPageTranslationEntriesCompleted();
             } finally {
+                try {
+                    this.channel.off("translation_stream_progress", streamHandler);
+                } catch {
+                    /* noop */
+                }
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
             }
@@ -4723,6 +5282,39 @@ class BannerController {
         this.flushDomTranslationQueue();
     }
 
+    /**
+     * Scan an in-flight streamed batch response for newly-completed [[n:r]] segments and apply
+     * each to the matching entry as soon as its closing boundary is visible in the buffer.
+     * A segment is "complete" when another marker (or stream end) appears after it.
+     */
+    applyStreamedBatchSegments(entries, accumulatedText, appliedSet) {
+        if (!entries?.length || !accumulatedText) return;
+        const markerRe = /\[\[(\d+):[a-z][a-z0-9-]*\]\]/g;
+        const matches = [];
+        let m;
+        while ((m = markerRe.exec(accumulatedText)) !== null) {
+            matches.push({ index: matches.length, at: m.index, length: m[0].length, n: Number(m[1]) });
+        }
+        // Only segments followed by ANOTHER marker are known-complete. The last marker's payload
+        // may still be in flight — leave it for the final response handler.
+        for (let i = 0; i < matches.length - 1; i++) {
+            const segNum = matches[i].n;
+            const entryIndex = segNum - 1;
+            if (entryIndex < 0 || entryIndex >= entries.length) continue;
+            if (appliedSet.has(entryIndex)) continue;
+            const entry = entries[entryIndex];
+            if (!entry) continue;
+            const start = matches[i].at + matches[i].length;
+            const end = matches[i + 1].at;
+            const part = accumulatedText.slice(start, end).trim();
+            if (!part) continue;
+            const rejectionReason = this.getDomPageEntryRejectionReason(entry, part);
+            if (rejectionReason) continue; // let the final handler retry / fallback
+            this.queueDomPageEntryApply(entry, part);
+            appliedSet.add(entryIndex);
+        }
+    }
+
     enqueueDomPageGroupTranslation(group, attempt = 0, options = {}) {
         const run = async () => {
             if (this._domCircuitBreakerActive) {
@@ -4731,9 +5323,7 @@ class BannerController {
                 return;
             }
             this._domActiveTranslations += 1;
-            const entry = this.assignDomPageApplySequence(
-                this.createDomPageTranslationEntry(group)
-            );
+            const entry = this.createDomPageTranslationEntry(group);
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
@@ -4826,6 +5416,10 @@ class BannerController {
     enqueueDomPageNodeTranslation(item) {
         const run = async () => {
             this._domActiveTranslations += 1;
+            const startedAt = Date.now();
+            this.logDomPageDebug("node-request:start", {
+                chars: String(item.text || "").length,
+            });
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
@@ -4834,11 +5428,25 @@ class BannerController {
                 if (!translated) {
                     const result = await this.translateWithDomPageEngine(item.text, sl, tl);
                     this.recordDomPageTokenUsage(result);
+                    this.logDomPageDebug("node-request:response", {
+                        chars: String(item.text || "").length,
+                        durationMs: Date.now() - startedAt,
+                        failed: Boolean(result && result.translationFailed),
+                        translatedChars: String(
+                            (result && (result.mainMeaning || result.translatedText)) || ""
+                        ).length,
+                        error: result && result.translationFailed ? result.errorMsg || "" : "",
+                    });
                     if (result && result.translationFailed) {
                         throw new Error(result.errorMsg || "Page translation request failed.");
                     }
                     translated = result.mainMeaning || result.translatedText;
                     if (!this.canUseDomPageTranslation(item.text, translated)) {
+                        this.logDomPageDebug("node-request:rejected", {
+                            reason: "suspicious-output",
+                            chars: String(item.text || "").length,
+                            translatedPreview: String(translated || "").slice(0, 120),
+                        });
                         throw new Error("Suspicious page translation output rejected.");
                     }
                     this.cacheDomPageTranslation(cacheKey, translated);
@@ -4846,14 +5454,22 @@ class BannerController {
                 if (translated && item.node.parentElement === item.parent) {
                     this.applyWithFadeIn(item.node, translated, "text", item.text);
                     this._translatedSet.add(item.node);
+                    this.logDomPageDebug("node-apply:success", {
+                        chars: String(item.text || "").length,
+                    });
                 }
             } catch (error) {
                 this.updateDomPageBannerStatus(
                     "error",
                     error && error.message ? error.message : String(error || "")
                 );
+                this.logDomPageDebug("node-request:error", {
+                    chars: String(item.text || "").length,
+                    error: error && error.message ? error.message : String(error || ""),
+                });
                 this._translatedSet.delete(item.node);
             } finally {
+                this._domPendingTextNodes.delete(item.node);
                 this.markDomPageTranslationEntriesCompleted();
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
@@ -4879,6 +5495,29 @@ class BannerController {
         }
     }
 }
+
+// Precompiled patterns for target-language detection. Two regexes per language:
+//   letter: any letter (script-specific letters + Latin) — denominator
+//   target: just the target-script letters — numerator
+// Both are global so .match() returns the full match list for cheap counting.
+BannerController._targetLangPatterns = {
+    ko: { letter: /[\p{L}]/gu, target: /[가-힯ᄀ-ᇿ㄰-㆏]/g },
+    ja: { letter: /[\p{L}]/gu, target: /[぀-ゟ゠-ヿｦ-ﾟ]/g },
+    zh: { letter: /[\p{L}]/gu, target: /[㐀-䶿一-鿿豈-﫿]/g },
+    ru: { letter: /[\p{L}]/gu, target: /[Ѐ-ӿ]/g },
+    uk: { letter: /[\p{L}]/gu, target: /[Ѐ-ӿ]/g },
+    bg: { letter: /[\p{L}]/gu, target: /[Ѐ-ӿ]/g },
+    sr: { letter: /[\p{L}]/gu, target: /[Ѐ-ӿ]/g },
+    ar: { letter: /[\p{L}]/gu, target: /[؀-ۿݐ-ݿ]/g },
+    fa: { letter: /[\p{L}]/gu, target: /[؀-ۿݐ-ݿ]/g },
+    ur: { letter: /[\p{L}]/gu, target: /[؀-ۿݐ-ݿ]/g },
+    th: { letter: /[\p{L}]/gu, target: /[฀-๿]/g },
+    hi: { letter: /[\p{L}]/gu, target: /[ऀ-ॿ]/g },
+    mr: { letter: /[\p{L}]/gu, target: /[ऀ-ॿ]/g },
+    ne: { letter: /[\p{L}]/gu, target: /[ऀ-ॿ]/g },
+    he: { letter: /[\p{L}]/gu, target: /[֐-׿]/g },
+    yi: { letter: /[\p{L}]/gu, target: /[֐-׿]/g },
+};
 
 // Create the object.
 window.EdgeTranslateBannerController = new BannerController();

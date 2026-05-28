@@ -42,6 +42,7 @@ try {
  */
 let contextMenusInitialized = false;
 const REALTIME_CAPTION_MENU_ID = "toggle_realtime_caption_translate";
+const REALTIME_CAPTION_SETTINGS_MENU_ID = "open_realtime_caption_settings";
 
 function updateRealtimeCaptionContextMenu(checked) {
     try {
@@ -121,8 +122,16 @@ function setupContextMenus() {
             });
         }
 
+        // Submenu for Realtime Caption Translate
+        chrome.contextMenus.create({
+            id: "caption_group",
+            title: chrome.i18n.getMessage("RealtimeCaptionTranslate") || "Realtime Caption",
+            contexts: ["page", "action"],
+        });
+
         chrome.contextMenus.create({
             id: REALTIME_CAPTION_MENU_ID,
+            parentId: "caption_group",
             title: chrome.i18n.getMessage("ToggleRealtimeCaptionTranslate"),
             type: "checkbox",
             checked: false,
@@ -130,7 +139,26 @@ function setupContextMenus() {
         });
 
         chrome.contextMenus.create({
+            id: REALTIME_CAPTION_SETTINGS_MENU_ID,
+            parentId: "caption_group",
+            title:
+                chrome.i18n.getMessage("RealtimeCaptionSettings") ||
+                chrome.i18n.getMessage("Settings"),
+            contexts: ["page", "action"],
+        });
+
+        // Submenu for Blacklist management
+        chrome.contextMenus.create({
+            id: "blacklist_group",
+            title:
+                chrome.i18n.getMessage("AddUrlBlacklist")?.replace(/\s*현재\s*URL.*/i, "") ||
+                "Blacklist Management",
+            contexts: ["action"],
+        });
+
+        chrome.contextMenus.create({
             id: "add_url_blacklist",
+            parentId: "blacklist_group",
             title: chrome.i18n.getMessage("AddUrlBlacklist"),
             contexts: ["action"],
             enabled: false,
@@ -139,6 +167,7 @@ function setupContextMenus() {
 
         chrome.contextMenus.create({
             id: "add_domain_blacklist",
+            parentId: "blacklist_group",
             title: chrome.i18n.getMessage("AddDomainBlacklist"),
             contexts: ["action"],
             enabled: false,
@@ -147,6 +176,7 @@ function setupContextMenus() {
 
         chrome.contextMenus.create({
             id: "remove_url_blacklist",
+            parentId: "blacklist_group",
             title: chrome.i18n.getMessage("RemoveUrlBlacklist"),
             contexts: ["action"],
             enabled: false,
@@ -155,6 +185,7 @@ function setupContextMenus() {
 
         chrome.contextMenus.create({
             id: "remove_domain_blacklist",
+            parentId: "blacklist_group",
             title: chrome.i18n.getMessage("RemoveDomainBlacklist"),
             contexts: ["action"],
             enabled: false,
@@ -348,6 +379,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             channel.emitToTabs(tab.id, "set_realtime_caption_translate", { enabled });
             break;
         }
+        case REALTIME_CAPTION_SETTINGS_MENU_ID:
+            chrome.tabs.create({
+                url: chrome.runtime.getURL("options/options.html#captions"),
+            });
+            break;
         case "settings":
             chrome.runtime.openOptionsPage();
             break;

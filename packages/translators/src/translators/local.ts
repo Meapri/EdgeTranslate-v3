@@ -26,6 +26,12 @@ export type LocalTranslatorConfig = {
 export type LocalTranslationOptions = {
     textRole?: string;
     translationProfile?: string;
+    /**
+     * Called from each SSE chunk with the full accumulated text so far. The translator
+     * still returns the final aggregated result; this callback only enables progressive
+     * UI updates. When omitted, the request runs without streaming (legacy behavior).
+     */
+    onProgress?: (accumulatedText: string) => void;
 };
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -101,46 +107,46 @@ const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_NAMES));
 const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
     Object.keys(CHROME_TRANSLATOR_LANGUAGE_MAP)
 );
-const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_TIMEOUT_MS = 90000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_COMPATIBLE_MODEL = "gpt-oss-20b";
 const DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL = "auto";
 const DEFAULT_OPENAI_REASONING_EFFORT = "auto";
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-25-youtube-caption-natural-v3";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-28-balanced-v1";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 16;
 const AI_TRANSLATION_SYSTEM_PROMPT = [
-    "Translate as a high-fidelity translation engine: preserve meaning, tone, intent, nuance, register, rhythm, emotional progression, local context, and character voice while producing natural target-language prose.",
-    "Output only the translation, or only the exact JSON object when JSON is requested. Do not add notes, alternatives, labels, Markdown, or process narration.",
-    "Work zero-shot. Do not invent examples, do not add priming text, do not turn the task into a lesson, and do not mention your reasoning.",
-    "Separate structural metadata from human-language payload before translating. Preserve only structures that are present in the input: subtitle cue numbers, timestamps, cue order, block boundaries, line breaks, speaker labels, tags, escaped entities, markup, tables, keys, placeholders, code spans, URLs, file paths, commands, and formatting tokens. Never invent subtitle cues or timestamps.",
-    "Preserve numeric literals, dates, times, measurements, versions, ratings, prices, percentages, ranges, IDs, model names, product names, file names, and issue numbers exactly unless the target language has a required conventional format.",
-    "Preserve proper nouns by default: personal names, organizations, brands, services, places, titles, works, events, laws, standards, model names, technical terms, and account names. Use a standard established target-language form only when it is clearly conventional in context.",
-    "Do not phoneticize, respell, translate, explain, split, or normalize unfamiliar names, dates, numbers, brands, services, product names, model IDs, or technical identifiers. Keep official Latin-script names and casing as written unless the source already gives a localized form.",
-    "Translate only human-language payload. Resolve ambiguity conservatively from local context, keeping subtext, irony, politeness, technical precision, humor, vulgarity, fragments, interruptions, and intentional odd phrasing.",
-    "For webpage/page-translation segments, keep every segment marker exactly once, preserve segment order, translate each segment as part of the same article context, and never merge, drop, duplicate, or invent segments. Use neighboring segments for terminology, referents, tone, and named-entity consistency only.",
-    "For long webpage text, prefer polished complete sentences in the target language. Keep repeated names and domain terms consistent across the batch. Avoid mojibake, random glyphs, repeated syllables, source-language leftovers, prompt leakage, and half-translated fragments.",
-    "Keep inline-boundary spacing natural around links and emphasized text. Do not glue unrelated words across hyperlink boundaries unless the target language convention clearly requires it.",
-    "For webpage link placeholders like [[EDGE_TRANSLATE_LINK_1]]text[[/EDGE_TRANSLATE_LINK_1]], preserve the opening and closing placeholders exactly, translate the visible text naturally, and write the surrounding sentence as one fluent sentence.",
+    "You are a high-fidelity translation engine. Translate faithfully and naturally into the target language, preserving meaning, tone, register, nuance, and the original voice.",
+    "Output ONLY the translation — or only the exact JSON object when JSON is requested. No notes, no labels, no Markdown, no commentary.",
+    "Preserve every structural token exactly: line breaks, whitespace, placeholders, URLs, file paths, code spans, numbers, dates, IDs, and formatting markup. Never invent or drop them.",
+    "Preserve proper nouns and official names by default (people, brands, products, models, places, technical identifiers). Use a localized form only when it is clearly the established convention. Do not phoneticize, gloss, or split named entities; keep official Latin-script names and casing as written.",
+    "For long or batched text, keep terminology and named-entity choices consistent across the entire output. Avoid mojibake, repeated syllables, source-language leftovers, and prompt leakage.",
+    "For inline link placeholders shaped like [[EDGE_TRANSLATE_LINK_1]]…[[/EDGE_TRANSLATE_LINK_1]], copy both bracket tags exactly (keep the same number) and translate only the visible text between them as part of the surrounding sentence.",
 ].join(" ");
 
+// PAGE prompt: pages arrive as HTML where each text node is wrapped in <t i="N">…</t>,
+// possibly inside other inline tags (<strong>, <a>, <em>, …). The model must translate only
+// the text inside <t> wrappers and preserve every other tag and attribute exactly.
 const PAGE_TRANSLATION_SYSTEM_PROMPT = [
-    "Translate page segments only.",
-    "Keep every [[n:r]] marker once, same order.",
-    "Keep each segment's payload line count.",
-    "Preserve placeholders, URLs, code, numbers, IDs, link markers, and official names.",
-    "Output only the translation.",
+    "You translate web page segments. Each segment starts with a [[n:r]] marker on its own line, followed by HTML content.",
+    "Keep every [[n:r]] marker exactly once, in the original order, with the same number and role.",
+    'Inside each segment, translate ONLY the text between <t i="N"> and </t> tags. Keep every <t i="N">…</t> wrapper exactly, including its i="N" attribute and matching number. Do not merge, split, drop, reorder, or invent wrappers.',
+    "Preserve any other HTML tags (<strong>, <em>, <a>, <b>, <i>, <span>, …) exactly as written. Preserve URLs, code, numbers, IDs, and proper nouns.",
+    "Output only the [[n:r]] markers and their translated HTML segments. No Markdown wrapping, no commentary.",
 ].join(" ");
 
-const REALTIME_CAPTION_SYSTEM_PROMPT =
-    "You are a subtitle translator. Return only translated subtitles.";
+const REALTIME_CAPTION_SYSTEM_PROMPT = [
+    "You are a subtitle translator. Output only the translation in the target language, concise and natural.",
+    "Preserve cue numbers, timestamps, speaker labels, names, and numeric literals exactly as in the source.",
+].join(" ");
 
 const DICTIONARY_OUTPUT_INSTRUCTION = [
-    "Dictionary task: this input is a single word or short term. Return only one valid JSON object with this exact shape:",
+    "Dictionary task: the input is a single word or short term. Return one valid JSON object only, with this exact shape:",
     '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
-    "Use the target language for translation, meanings, definitions, and translated examples. Keep source examples in the source language. For ordinary dictionary terms, provide at least one detailedMeaning, one definition, and two examples whenever possible. If a field is truly not applicable, use an empty array rather than prose. Do not wrap the JSON in Markdown.",
+    "Write translation, meanings, definitions, and target examples in the target language; keep source examples in the source language.",
+    "For ordinary terms, provide at least one detailedMeaning, one definition, and two examples. Use an empty array when a field truly does not apply. No Markdown around the JSON.",
 ].join(" ");
 
 class RequestLimiter {
@@ -166,10 +172,53 @@ class RequestLimiter {
 
 const localRequestLimiter = new RequestLimiter(DEFAULT_MAX_CONCURRENT_REQUESTS);
 
+/**
+ * Read an SSE (text/event-stream) response body and call onEvent for each `data:` payload.
+ * Used by streaming paths in all three providers to surface partial output progressively.
+ */
+async function consumeSseStream(
+    response: Response,
+    onEvent: (data: string) => void
+): Promise<void> {
+    const reader = response.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const flushBlock = (block: string) => {
+        for (const line of block.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const payload = trimmed.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            onEvent(payload);
+        }
+    };
+    try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let sep;
+            while ((sep = buffer.indexOf("\n\n")) !== -1) {
+                flushBlock(buffer.slice(0, sep));
+                buffer = buffer.slice(sep + 2);
+            }
+        }
+        if (buffer.trim()) flushBlock(buffer);
+    } finally {
+        try {
+            reader.releaseLock();
+        } catch {
+            /* noop */
+        }
+    }
+}
+
 async function retryWithBackoff<T>(
     fn: () => Promise<T>,
     maxRetries = 2,
-    baseDelayMs = 1000
+    baseDelayMs = 500
 ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1001,56 +1050,10 @@ class LocalTranslator {
         if (this.isRealtimeCaptionTranslation(options)) {
             return this.buildRealtimeCaptionPrompt(text, from, to);
         }
-        const sourceLanguage = toLanguageName(from);
-        const targetLanguage = toLanguageName(to);
-        const scriptRule = getScriptConstraint(to);
-        const dictionaryInstruction = isDictionaryCandidate(text)
-            ? DICTIONARY_OUTPUT_INSTRUCTION
-            : "";
-        const hasPageSegments = hasPageTranslationSegments(text);
-        const hasInlineLinks = /\[\[EDGE_TRANSLATE_LINK_\d+]]/.test(text);
-        if (hasPageSegments) {
-            const pageParts = [
-                `Translate ${sourceLanguage} -> ${targetLanguage}.`,
-                scriptRule,
-                hasInlineLinks ? "Keep link markers; translate visible link text." : "",
-                "",
-                text,
-            ];
-            return pageParts.filter(Boolean).join("\n");
-        }
-        const parts = [
-            "Translate the user's text.",
-            "Translate faithfully and naturally into the target language as if the result were originally written in that language.",
-            "Preserve meaning, tone, intent, nuance, register, rhythm, emotional progression, and local context.",
-            "Keep the same text form: heading stays heading, label stays label, sentence stays sentence, and list stays list.",
-            "Do not summarize, explain, or add information.",
-            "Respect the original formatting, line breaks, segment markers, placeholders, URLs, code, and markup.",
-            "Use the target language's customary writing system.",
-            "Preserve proper nouns and official names by default: people, organizations, brands, services, product names, model names, titles, places, laws, events, account names, technical terms, and identifiers.",
-            "Use a localized or translated proper-name form only when it is clearly established by context or target-language convention. Otherwise keep the name intact, especially official Latin-script names and casing.",
-            "Do not split named entities into generic translated words. Do not explain names or append glosses.",
-            "For Han-script source text, translate complete semantic units. Do not partially translate compound nouns.",
-            "Never create mixed-script words by combining source-script characters with target-language characters.",
-            "Before finalizing, rewrite any remaining source-language fragment. Source-language text is forbidden in the output except for preserved URLs, code, IDs, and exact placeholders.",
-            "Silently scan the final answer for mixed-script words.",
-            `Source language: ${sourceLanguage}.`,
-            `Target language: ${targetLanguage}.`,
-            scriptRule,
-            dictionaryInstruction,
-            !hasPageSegments
-                ? "For selected or drag-translated text, treat the input as a self-contained selection. If it is a phrase or UI label, return a concise natural equivalent; if it is a sentence or paragraph, preserve voice, politeness, implied meaning, and technical precision without padding."
-                : "",
-            !hasPageSegments
-                ? "Do not over-translate proper nouns in selected text. Keep official product, app, model, repository, API, package, and company names intact unless a well-established localized form is clearly appropriate."
-                : "",
-            hasInlineLinks
-                ? "For inline link placeholders, preserve every [[EDGE_TRANSLATE_LINK_n]] and [[/EDGE_TRANSLATE_LINK_n]] marker exactly. Translate the whole sentence naturally around the link, keep spacing natural, and do not expose placeholder text to the reader."
-                : "",
-            "",
-            text,
-        ];
-        return parts.filter(Boolean).join("\n");
+        // All instructions, language directives, and the script rule live in the system prompt
+        // (see getTranslationSystemPrompt). The user message contains ONLY the text to translate
+        // so the model never confuses meta-instructions for content to render in the output.
+        return text;
     }
 
     private buildOpenAiPrompt(
@@ -1062,11 +1065,35 @@ class LocalTranslator {
         return this.buildGoogleAiStudioPrompt(text, from, to, options);
     }
 
-    private getTranslationSystemPrompt(text: string, options: LocalTranslationOptions = {}) {
+    private getTranslationSystemPrompt(
+        text: string,
+        from: string = "",
+        to: string = "",
+        options: LocalTranslationOptions = {}
+    ) {
         if (this.isRealtimeCaptionTranslation(options)) return REALTIME_CAPTION_SYSTEM_PROMPT;
-        return hasPageTranslationSegments(text)
+        const base = hasPageTranslationSegments(text)
             ? PAGE_TRANSLATION_SYSTEM_PROMPT
             : AI_TRANSLATION_SYSTEM_PROMPT;
+        // Append the per-request directives. Putting them in the system prompt (rather than the
+        // user message) keeps the user message a clean payload — the model can't echo these into
+        // its translation output.
+        const sourceLanguage = from ? toLanguageName(from) : "";
+        const targetLanguage = to ? toLanguageName(to) : "";
+        const scriptRule = to ? getScriptConstraint(to) : "";
+        const dictionaryInstruction =
+            !this.isRealtimeCaptionTranslation(options) && isDictionaryCandidate(text)
+                ? DICTIONARY_OUTPUT_INSTRUCTION
+                : "";
+        const dynamic = [
+            sourceLanguage ? `Source language: ${sourceLanguage}.` : "",
+            targetLanguage ? `Target language: ${targetLanguage}.` : "",
+            scriptRule,
+            dictionaryInstruction,
+        ]
+            .filter(Boolean)
+            .join(" ");
+        return dynamic ? `${base} ${dynamic}` : base;
     }
 
     private parseGoogleAiStudioResponse(payload: any) {
@@ -1174,7 +1201,9 @@ class LocalTranslator {
             return config;
         }
         if (inputLength && !this.shouldAvoidGoogleAiStudioOutputLimit()) {
-            config.maxOutputTokens = Math.max(512, Math.ceil(inputLength * 4));
+            // Translation output is roughly proportional to input length. Cap generously so large page batches
+            // (10k+ chars) don't get truncated and trigger retries — Gemini bills only for actual output tokens.
+            config.maxOutputTokens = Math.max(512, Math.ceil(inputLength * 2));
         }
         return config;
     }
@@ -1293,6 +1322,7 @@ class LocalTranslator {
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const model = encodeURIComponent(this.model);
+            const useStreaming = typeof options.onProgress === "function";
             const requestPayload = async (compatibilityMode: "minimal" | "bare") => {
                 const generationConfig = this.buildGoogleAiStudioGenerationConfig(
                     text.length,
@@ -1301,7 +1331,7 @@ class LocalTranslator {
                 );
                 const body: Record<string, any> = {
                     systemInstruction: {
-                        parts: [{ text: this.getTranslationSystemPrompt(text, options) }],
+                        parts: [{ text: this.getTranslationSystemPrompt(text, from, to, options) }],
                     },
                     contents: [
                         {
@@ -1315,21 +1345,36 @@ class LocalTranslator {
                     ],
                 };
                 if (generationConfig) body.generationConfig = generationConfig;
-                const response = await fetch(
-                    `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(
-                        this.apiKey
-                    )}`,
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify(body),
-                        signal: controller.signal,
+                const endpoint = useStreaming
+                    ? `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(
+                          this.apiKey
+                      )}`
+                    : `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(
+                          this.apiKey
+                      )}`;
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        ...(useStreaming ? { Accept: "text/event-stream" } : {}),
+                    },
+                    body: JSON.stringify(body),
+                    signal: controller.signal,
+                });
+                if (!useStreaming) {
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        const error: any = new Error(
+                            payload?.error?.message ||
+                                `Google AI Studio request failed with ${response.status}`
+                        );
+                        error.status = response.status;
+                        throw error;
                     }
-                );
-                const payload = await response.json().catch(() => ({}));
+                    return payload;
+                }
                 if (!response.ok) {
+                    const payload = await response.json().catch(() => ({}));
                     const error: any = new Error(
                         payload?.error?.message ||
                             `Google AI Studio request failed with ${response.status}`
@@ -1337,7 +1382,48 @@ class LocalTranslator {
                     error.status = response.status;
                     throw error;
                 }
-                return payload;
+                // Streaming SSE: each event is a partial candidate; assemble incrementally.
+                let accumulated = "";
+                let finishReason = "";
+                let usageMetadata: any = null;
+                let lastCandidate: any = null;
+                await consumeSseStream(response, (data) => {
+                    try {
+                        const json = JSON.parse(data);
+                        const candidate = json.candidates?.[0];
+                        if (candidate) {
+                            lastCandidate = candidate;
+                            const parts = candidate.content?.parts;
+                            if (Array.isArray(parts)) {
+                                for (const part of parts) {
+                                    if (typeof part?.text === "string" && part.text) {
+                                        accumulated += part.text;
+                                    }
+                                }
+                                try {
+                                    options.onProgress?.(accumulated);
+                                } catch {
+                                    /* noop */
+                                }
+                            }
+                            if (candidate.finishReason) finishReason = String(candidate.finishReason);
+                        }
+                        if (json.usageMetadata) usageMetadata = json.usageMetadata;
+                    } catch {
+                        /* skip malformed event */
+                    }
+                });
+                // Synthesize a payload object shaped like the non-streaming response so the
+                // downstream parsing code (parseGoogleAiStudioResponse, etc.) works unchanged.
+                const synthesizedCandidate = {
+                    ...(lastCandidate || {}),
+                    content: { parts: [{ text: accumulated }] },
+                    ...(finishReason ? { finishReason } : {}),
+                };
+                return {
+                    candidates: [synthesizedCandidate],
+                    ...(usageMetadata ? { usageMetadata } : {}),
+                };
             };
             let payload: any;
             let tokenUsage: TranslationTokenUsage | undefined;
@@ -1500,7 +1586,7 @@ class LocalTranslator {
                 messages: [
                     {
                         role: "system",
-                        content: this.getTranslationSystemPrompt(text, options),
+                        content: this.getTranslationSystemPrompt(text, from, to, options),
                     },
                     {
                         role: "user",
@@ -1519,22 +1605,66 @@ class LocalTranslator {
                         ? Math.max(96, text.length * 2)
                         : Math.max(
                               512 * Math.max(1, tokenMultiplier / 4),
-                              text.length * tokenMultiplier
+                              Math.ceil(text.length * (tokenMultiplier >= 8 ? 3 : 2))
                           )
                 ),
             });
+            // Streaming is incompatible with response_format JSON (used for dictionary entries).
+            const useStreaming =
+                typeof options.onProgress === "function" &&
+                !(isDictionaryCandidate(text) && !isRealtimeCaption);
             const requestPayload = async (includeReasoningEffort = true, tokenMultiplier = 4) => {
+                const headers: Record<string, string> = {
+                    Authorization: `Bearer ${this.openaiApiKey}`,
+                    "Content-Type": "application/json",
+                    ...(useStreaming ? { Accept: "text/event-stream" } : {}),
+                };
+                const body = buildBody(includeReasoningEffort, tokenMultiplier) as Record<
+                    string,
+                    unknown
+                >;
+                if (useStreaming) body.stream = true;
                 const response = await fetch(OPENAI_CHAT_COMPLETIONS_ENDPOINT, {
                     method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${this.openaiApiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(buildBody(includeReasoningEffort, tokenMultiplier)),
+                    headers,
+                    body: JSON.stringify(body),
                     signal: controller.signal,
                 });
-
-                const payload = await response.json().catch(() => ({}));
+                if (!useStreaming || !response.ok) {
+                    const payload = await response.json().catch(() => ({}));
+                    return { response, payload };
+                }
+                let accumulated = "";
+                let finishReason = "";
+                let usage: any = null;
+                await consumeSseStream(response, (data) => {
+                    try {
+                        const json = JSON.parse(data);
+                        const choice = json.choices?.[0];
+                        const delta = choice?.delta?.content ?? choice?.message?.content;
+                        if (delta) {
+                            accumulated += String(delta);
+                            try {
+                                options.onProgress?.(accumulated);
+                            } catch {
+                                /* noop */
+                            }
+                        }
+                        if (choice?.finish_reason) finishReason = String(choice.finish_reason);
+                        if (json.usage) usage = json.usage;
+                    } catch {
+                        /* skip malformed event */
+                    }
+                });
+                const payload = {
+                    choices: [
+                        {
+                            message: { content: accumulated },
+                            finish_reason: finishReason,
+                        },
+                    ],
+                    ...(usage ? { usage } : {}),
+                };
                 return { response, payload };
             };
 
@@ -1634,38 +1764,84 @@ class LocalTranslator {
                 messages: [
                     {
                         role: "system",
-                        content: this.getTranslationSystemPrompt(text, options),
+                        content: this.getTranslationSystemPrompt(text, from, to, options),
                     },
                     {
                         role: "user",
                         content: this.buildOpenAiPrompt(text, from, to, options),
                     },
                 ],
-                // Remove response_format JSON block for openaiCompatible to ensure high compatibility with local LLM servers (like llama-server)
-                // Also double the token multiplier to prevent translation truncation issues with smaller local models
+                // Remove response_format JSON block for openaiCompatible to ensure high compatibility with local LLM servers (like llama-server).
+                // Cap max_tokens to fit inside a typical local server slot (~4k n_ctx per slot when --parallel > 1).
                 max_tokens: isRealtimeCaption
-                    ? Math.max(128, Math.ceil(text.length * 3))
-                    : Math.max(
-                          1024 * Math.max(1, tokenMultiplier / 4),
-                          Math.ceil(text.length * tokenMultiplier * 2)
+                    ? Math.min(768, Math.max(128, Math.ceil(text.length * 2)))
+                    : Math.min(
+                          tokenMultiplier >= 8 ? 3072 : 1536,
+                          Math.max(
+                              384,
+                              Math.ceil(text.length * (tokenMultiplier >= 8 ? 2.5 : 1.5))
+                          )
                       ),
                 temperature: 0,
+                // llama.cpp / vLLM / TGI honor this; unknown servers ignore unknown fields.
+                // Enables KV-cache reuse for the (identical-across-requests) system prompt prefix,
+                // which makes prefill 5–10x cheaper on each concurrent request.
+                cache_prompt: true,
             });
+            const useStreaming = typeof options.onProgress === "function";
             const requestPayload = async (tokenMultiplier = 4) => {
                 const headers: Record<string, string> = {
                     "Content-Type": "application/json",
+                    ...(useStreaming ? { Accept: "text/event-stream" } : {}),
                 };
                 if (this.openaiCompatibleApiKey) {
                     headers.Authorization = `Bearer ${this.openaiCompatibleApiKey}`;
                 }
+                const body = buildBody(tokenMultiplier);
+                if (useStreaming) (body as Record<string, unknown>).stream = true;
                 const response = await fetch(this.openaiCompatibleEndpoint, {
                     method: "POST",
                     headers,
-                    body: JSON.stringify(buildBody(tokenMultiplier)),
+                    body: JSON.stringify(body),
                     signal: controller.signal,
                 });
-
-                const payload = await response.json().catch(() => ({}));
+                if (!useStreaming || !response.ok) {
+                    const payload = await response.json().catch(() => ({}));
+                    return { response, payload };
+                }
+                // Streaming path: parse SSE deltas, accumulate text, surface progress.
+                let accumulated = "";
+                let finishReason = "";
+                let usage: any = null;
+                await consumeSseStream(response, (data) => {
+                    try {
+                        const json = JSON.parse(data);
+                        const choice = json.choices?.[0];
+                        const delta = choice?.delta?.content ?? choice?.message?.content;
+                        if (delta) {
+                            accumulated += String(delta);
+                            try {
+                                options.onProgress?.(accumulated);
+                            } catch {
+                                /* ignore listener errors */
+                            }
+                        }
+                        if (choice?.finish_reason) finishReason = String(choice.finish_reason);
+                        if (json.usage) usage = json.usage;
+                    } catch {
+                        /* malformed SSE event — skip */
+                    }
+                });
+                // Synthesize a payload object compatible with the non-streaming code path below.
+                const payload = {
+                    choices: [
+                        {
+                            message: { content: accumulated },
+                            finish_reason: finishReason,
+                        },
+                    ],
+                    ...(usage ? { usage } : {}),
+                };
                 return { response, payload };
             };
 

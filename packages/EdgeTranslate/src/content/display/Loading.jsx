@@ -6,244 +6,180 @@ import { ContentWrapperCenterClassName } from "./Panel.jsx";
 
 export default function Loading() {
     const loadingElRef = useRef();
-    /**
-     * To align the loading animation align in the vertical center.
-     */
+
     useEffect(() => {
-        const wrapperElement = loadingElRef.current.parentElement.parentElement;
-        wrapperElement.classList.add(ContentWrapperCenterClassName);
+        const wrapperElement = loadingElRef.current?.parentElement?.parentElement;
+        wrapperElement?.classList.add(ContentWrapperCenterClassName);
         return () => {
-            wrapperElement.classList.remove(ContentWrapperCenterClassName);
+            wrapperElement?.classList.remove(ContentWrapperCenterClassName);
         };
     }, []);
+
     return (
-        <LoadingEffect ref={loadingElRef}>
-            <div class="lds-ellipsis">
-                <div>
-                    <div />
-                </div>
-                <div>
-                    <div />
-                </div>
-                <div>
-                    <div />
-                </div>
-                <div>
-                    <div />
-                </div>
-                <div>
-                    <div />
-                </div>
+        <LoadingEffect ref={loadingElRef} role="status" aria-live="polite" aria-label="Loading">
+            <div class="expressive-loader" aria-hidden="true">
+                <span class="expressive-loader__bead expressive-loader__bead--one" />
+                <span class="expressive-loader__bead expressive-loader__bead--two" />
+                <span class="expressive-loader__bead expressive-loader__bead--three" />
+                <span class="expressive-loader__bead expressive-loader__bead--four" />
+                <span class="expressive-loader__glide" />
             </div>
         </LoadingEffect>
     );
 }
 
 const LoadingEffect = styled.div`
+    --et-loader-primary: #0b57d0;
+    --et-loader-secondary: #146c43;
+    --et-loader-tertiary: #7a4d00;
+    --et-loader-surface: rgba(255, 255, 255, 0.72);
+    --et-loader-track: rgba(211, 227, 253, 0.58);
+
     width: 100%;
-    height: 100%;
+    min-height: 152px;
     display: flex;
+    align-items: center;
     justify-content: center;
-    justify-items: center;
+    padding: 28px 0;
 
-    @keyframes lds-ellipsis3 {
-        0%,
-        25% {
-            left: 32px;
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-
-        50% {
-            left: 32px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        75% {
-            left: 100px;
-        }
-
-        100% {
-            left: 168px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-    }
-
-    @keyframes lds-ellipsis3 {
-        0%,
-        25% {
-            left: 32px;
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-
-        50% {
-            left: 32px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        75% {
-            left: 100px;
-        }
-
-        100% {
-            left: 168px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-    }
-
-    @keyframes lds-ellipsis2 {
-        0% {
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        25%,
-        100% {
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-    }
-
-    @keyframes lds-ellipsis2 {
-        0% {
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        25%,
-        100% {
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-    }
-
-    @keyframes lds-ellipsis {
-        0% {
-            left: 32px;
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-
-        25% {
-            left: 32px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        50% {
-            left: 100px;
-        }
-
-        75% {
-            left: 168px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        100% {
-            left: 168px;
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-    }
-
-    @keyframes lds-ellipsis {
-        0% {
-            left: 32px;
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-
-        25% {
-            left: 32px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        50% {
-            left: 100px;
-        }
-
-        75% {
-            left: 168px;
-            -webkit-transform: scale(1);
-            transform: scale(1);
-        }
-
-        100% {
-            left: 168px;
-            -webkit-transform: scale(0);
-            transform: scale(0);
-        }
-    }
-
-    .lds-ellipsis {
-        height: 50%;
+    .expressive-loader {
+        width: 92px;
+        height: 46px;
         position: relative;
-        top: 0;
-        bottom: 0;
-        margin: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        border-radius: 999px;
+        background: radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.94), transparent 38%),
+            linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 253, 0.42));
+        box-shadow: 0 16px 38px rgba(30, 47, 72, 0.13), 0 4px 12px rgba(30, 47, 72, 0.07),
+            inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(18px) saturate(155%);
+        -webkit-backdrop-filter: blur(18px) saturate(155%);
+        animation: et-loader-arrive 180ms cubic-bezier(0.2, 0, 0, 1) both;
     }
 
-    .lds-ellipsis > div {
+    .expressive-loader:before {
+        content: "";
         position: absolute;
-        -webkit-transform: translate(-50%, -50%);
-        transform: translate(-50%, -50%);
-        width: 40px;
-        height: 40px;
+        inset: 7px 10px;
+        border-radius: 999px;
+        background: var(--et-loader-track);
+        opacity: 0.7;
     }
 
-    .lds-ellipsis div > div {
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
-        background: #f00;
+    .expressive-loader__bead {
+        position: relative;
+        z-index: 1;
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--et-loader-primary);
+        opacity: 0.46;
+        transform: scale(0.78);
+        animation: et-loader-bead 1080ms cubic-bezier(0.2, 0, 0, 1) infinite;
+    }
+
+    .expressive-loader__bead--two {
+        background: var(--et-loader-secondary);
+        animation-delay: 120ms;
+    }
+
+    .expressive-loader__bead--three {
+        background: var(--et-loader-tertiary);
+        animation-delay: 240ms;
+    }
+
+    .expressive-loader__bead--four {
+        background: var(--et-loader-primary);
+        animation-delay: 360ms;
+    }
+
+    .expressive-loader__glide {
         position: absolute;
-        top: 100px;
-        left: 32px;
-        -webkit-animation: lds-ellipsis 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        animation: lds-ellipsis 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
+        z-index: 2;
+        left: 18px;
+        top: 15px;
+        width: 24px;
+        height: 16px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--et-loader-primary), #4c8df6);
+        box-shadow: 0 4px 12px rgba(11, 87, 208, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+        animation: et-loader-glide 1080ms cubic-bezier(0.2, 0, 0, 1) infinite;
     }
 
-    .lds-ellipsis div:nth-child(1) div {
-        -webkit-animation: lds-ellipsis2 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        animation: lds-ellipsis2 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        background: rgba(11, 87, 208, 0.9);
+    @keyframes et-loader-arrive {
+        from {
+            opacity: 0;
+            transform: translateY(3px) scale(0.97);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
     }
 
-    .lds-ellipsis div:nth-child(2) div {
-        -webkit-animation-delay: -0.85s;
-        animation-delay: -0.85s;
-        background: rgba(20, 108, 67, 0.9);
+    @keyframes et-loader-bead {
+        0%,
+        100% {
+            opacity: 0.38;
+            transform: scale(0.72);
+        }
+
+        50% {
+            opacity: 0.82;
+            transform: scale(1);
+        }
     }
 
-    .lds-ellipsis div:nth-child(3) div {
-        -webkit-animation-delay: -0.425s;
-        animation-delay: -0.425s;
-        background: rgba(122, 77, 0, 0.82);
+    @keyframes et-loader-glide {
+        0%,
+        100% {
+            transform: translateX(0) scaleX(0.9);
+        }
+
+        45% {
+            transform: translateX(32px) scaleX(1.16);
+        }
+
+        56% {
+            transform: translateX(32px) scaleX(0.94);
+        }
     }
 
-    .lds-ellipsis div:nth-child(4) div {
-        -webkit-animation-delay: 0s;
-        animation-delay: 0s;
-        background: rgba(11, 87, 208, 0.72);
+    @media (prefers-color-scheme: dark) {
+        --et-loader-primary: #a8c7fa;
+        --et-loader-secondary: #81c995;
+        --et-loader-tertiary: #fdd663;
+        --et-loader-surface: rgba(32, 38, 45, 0.66);
+        --et-loader-track: rgba(31, 59, 104, 0.56);
+
+        .expressive-loader {
+            background: radial-gradient(
+                    circle at 30% 22%,
+                    rgba(255, 255, 255, 0.14),
+                    transparent 38%
+                ),
+                linear-gradient(145deg, rgba(35, 42, 50, 0.68), rgba(22, 27, 32, 0.34));
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42), 0 5px 14px rgba(0, 0, 0, 0.28),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+
+        .expressive-loader__glide {
+            background: linear-gradient(135deg, var(--et-loader-primary), #669df6);
+            box-shadow: 0 4px 12px rgba(168, 199, 250, 0.22),
+                inset 0 1px 0 rgba(255, 255, 255, 0.16);
+        }
     }
 
-    .lds-ellipsis div:nth-child(5) div {
-        -webkit-animation: lds-ellipsis3 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        animation: lds-ellipsis3 1.7s cubic-bezier(0, 0.5, 0.5, 1) infinite forwards;
-        background: rgba(11, 87, 208, 0.9);
-    }
-
-    .lds-ellipsis {
-        width: 200px !important;
-        height: 200px !important;
-        -webkit-transform: translate(-100px, -100px) scale(1) translate(100px, 100px);
-        transform: translate(-100px, -100px) scale(1) translate(100px, 100px);
+    @media (prefers-reduced-motion: reduce) {
+        .expressive-loader,
+        .expressive-loader__bead,
+        .expressive-loader__glide {
+            animation-duration: 1ms !important;
+            animation-iteration-count: 1 !important;
+        }
     }
 `;
