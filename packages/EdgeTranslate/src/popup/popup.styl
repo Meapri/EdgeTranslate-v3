@@ -84,17 +84,19 @@ body {
 }
 
 // ─── Layout Components ───────────────────────────────────────────────────────
+// .frame uses the M3 Expressive "Extra Large" shape (28px) and surface-container-low,
+// which the :root layer auto-adapts to dark mode via light-dark() + color-mix().
 .frame {
     position: relative;
     overflow: hidden;
     margin: 0;
-    padding: 18px;
-    border-radius: 24px;
-    background: linear-gradient(145deg, rgba(255, 255, 255, .84), rgba(255, 255, 255, .56));
+    padding: 20px;
+    border-radius: unquote('var(--md-sys-shape-corner-xl)')
+    background: unquote('var(--md-sys-color-surface-container-low)')
     backdrop-filter: blur(30px) saturate(185%);
     -webkit-backdrop-filter: blur(30px) saturate(185%);
-    border: 1px solid rgba(255, 255, 255, .82);
-    box-shadow: elevation-floating;
+    border: 1px solid unquote('var(--md-sys-color-outline-variant)')
+    box-shadow: unquote('var(--md-sys-elevation-1)')
     transition: background-color motion-standard, border-color motion-standard, box-shadow motion-standard;
     animation: expressive-enter motion-spring-strong both;
 }
@@ -205,28 +207,33 @@ select {
     background-size: 16px 16px;
 }
 
-// ─── CTA Button ──────────────────────────────────────────────────────────────
+// ─── CTA Button (M3 Expressive Filled) ─────────────────────────────────────
+// Pill-shape filled tonal button using --md-sys-color-primary. On :active the
+// shape morphs from full-pill toward the squircle "M shape" (Android 16~17
+// signature press), via simultaneous spring on transform + border-radius.
 #translateSubmit {
     min-width: 88px;
-    min-height: 44px;
-    padding: 0 20px;
-    color: color-on-primary;
-    background: linear-gradient(135deg, color-primary, #146c43);
+    min-height: 48px;
+    padding: 0 24px;
+    color: unquote('var(--md-sys-color-on-primary)')
+    background: unquote('var(--md-sys-color-primary)')
     border: 0;
-    border-radius: 999px;
-    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.18);
+    border-radius: unquote('var(--md-sys-shape-corner-full)')
+    box-shadow: unquote('var(--md-sys-elevation-1)')
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
+    letter-spacing: 0.1px;
     cursor: pointer;
-    transition: transform 200ms motion-spring, background-color motion-fast, box-shadow motion-fast, color motion-fast;
+    transition: unquote('transform 220ms var(--md-sys-motion-spring-fast-spatial), border-radius 220ms var(--md-sys-motion-spring-default-spatial), background-color 180ms var(--md-sys-motion-spring-default-effects), box-shadow 180ms var(--md-sys-motion-spring-default-effects)')
 
     &:hover {
-        background: linear-gradient(135deg, color-primary-hover, #0f6d58);
-        box-shadow: 0 2px 6px rgba(60, 64, 67, 0.2);
+        background: unquote('color-mix(in oklab, var(--md-sys-color-primary) 92%, white)')
+        box-shadow: unquote('var(--md-sys-elevation-2)')
     }
 
     &:active {
-        transform: scale(0.93);
+        transform: scale(0.94);
+        border-radius: unquote('var(--md-sys-shape-corner-md)')
     }
 }
 

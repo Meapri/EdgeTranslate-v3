@@ -3534,17 +3534,14 @@ class BannerController {
     }
 
     /**
-     * Material 3 Expressive entrance for a translated block.
+     * Subtle in-place fade for a translated block.
      *
-     * Hides the block, mutates DOM while invisible, then fades + slides + settles back into
-     * place using M3 motion tokens:
-     *   • Opacity: 280ms with Emphasized Decelerate `cubic-bezier(.05,.7,.1,1)` (smooth, no overshoot)
-     *   • Transform (translateY + scale): 380ms with a soft spring `cubic-bezier(.2,1.18,.32,1)`
-     *     for the subtle "쫀쫀" springiness that defines Expressive motion.
-     *
-     * Respects `prefers-reduced-motion: reduce` — falls back to an instant swap.
-     * Uses `translate3d` to force a compositor layer so dozens of paragraphs can animate
-     * simultaneously without main-thread cost.
+     * IMPORTANT: opacity-only — no transform, no translate, no scale. Translating each
+     * translated block (even by a few px) makes neighbouring content jitter while the
+     * animation runs, which users perceive as broken layout. Per M3 motion guidance,
+     * inline content that updates in place should use a plain Emphasized-Decelerate
+     * opacity fade. Spring + spatial entrance is reserved for elements that genuinely
+     * enter or leave the layout (dialogs, sheets, etc.).
      */
     fadeInDomPageBlock(block, mutateFn) {
         let ran = false;
@@ -3561,7 +3558,6 @@ class BannerController {
             runMutate();
             return;
         }
-        // Respect the OS-level reduce-motion preference.
         let reduceMotion = false;
         try {
             reduceMotion =
@@ -3576,49 +3572,34 @@ class BannerController {
         }
         const prevTransition = block.style.transition;
         const prevOpacity = block.style.opacity;
-        const prevTransform = block.style.transform;
         const prevWillChange = block.style.willChange;
 
-        // Promote to a compositor layer up-front so the first frame doesn't pop.
-        block.style.willChange = "opacity, transform";
+        block.style.willChange = "opacity";
         block.style.transition = "none";
         block.style.opacity = "0";
-        block.style.transform = "translate3d(0, 6px, 0) scale(0.985)";
-        // Synchronous reflow guarantees the "hidden" state is committed before we mutate text.
         void block.offsetWidth;
         runMutate();
         if (typeof requestAnimationFrame !== "function") {
             block.style.removeProperty("opacity");
-            block.style.removeProperty("transform");
             block.style.removeProperty("transition");
             block.style.removeProperty("will-change");
             return;
         }
         requestAnimationFrame(() => {
             if (!block.isConnected) return;
-            // M3 Expressive: opacity uses Emphasized Decelerate; transform uses a real spring
-            // via Chrome-native linear() easing for the signature "쫀쫀" Expressive feel.
             const m3Emphasized =
                 "linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)";
-            const m3Spring =
-                "linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)";
-            block.style.transition = [
-                `opacity 280ms ${m3Emphasized}`,
-                `transform 380ms ${m3Spring}`,
-            ].join(", ");
+            block.style.transition = `opacity 240ms ${m3Emphasized}`;
             block.style.opacity = "1";
-            block.style.transform = "translate3d(0, 0, 0) scale(1)";
             setTimeout(() => {
                 if (!block.isConnected) return;
                 if (prevTransition) block.style.transition = prevTransition;
                 else block.style.removeProperty("transition");
                 if (prevOpacity) block.style.opacity = prevOpacity;
                 else block.style.removeProperty("opacity");
-                if (prevTransform) block.style.transform = prevTransform;
-                else block.style.removeProperty("transform");
                 if (prevWillChange) block.style.willChange = prevWillChange;
                 else block.style.removeProperty("will-change");
-            }, 420);
+            }, 280);
         });
     }
 
