@@ -6,423 +6,357 @@
     src: url('~/iconfont.eot?t=1531409630632#iefix') format('embedded-opentype'), url('data:application/x-font-woff;charset=utf-8;base64,d09GRgABAAAAAAWIAAsAAAAACBQAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAABHU1VCAAABCAAAADMAAABCsP6z7U9TLzIAAAE8AAAARAAAAFZW7krlY21hcAAAAYAAAABvAAABsgqQ1FBnbHlmAAAB8AAAAX4AAAGUgi8mY2hlYWQAAANwAAAALwAAADYR+m+yaGhlYQAAA6AAAAAcAAAAJAfeA4ZobXR4AAADvAAAABMAAAAUE+kAAGxvY2EAAAPQAAAADAAAAAwBIAFUbWF4cAAAA9wAAAAeAAAAIAEUAF1uYW1lAAAD/AAAAUUAAAJtPlT+fXBvc3QAAAVEAAAAQwAAAGbAr9KWeJxjYGRgYOBikGPQYWB0cfMJYeBgYGGAAJAMY05meiJQDMoDyrGAaQ4gZoOIAgCKIwNPAHicY2Bk/s04gYGVgYOpk+kMAwNDP4RmfM1gxMjBwMDEwMrMgBUEpLmmMDgwVLz4wdzwv4EhhrmBoQEozAiSAwA25Q1peJzFkMEJgDAMRV9sLSKO4hAO5MmTi3TF4gje9LfxoBP4wwvJJ5AQoAeCmEUE2zCqVrnW/MDY/MiifmSgU+wllXyc1yXvXbtMcx61jprXDkv8Jvtv9VdTy8vT6ePsDzqxJKf6JTv6HcfpEG6lABmwAHicPY/PShtRGMW/c6/3TiZNZnT+JhNjMpkm18Y60Mm/hVSzKIWKYKGrQjc+gG7ddJFNoYsu+gyikZBNcWEpdVUopev4AkVfo1fHLno4HPjB+fg4JIju/vArXiGX1ukZvaDXRJAbaFmsjlj1U7YBPxZ+6FlcJSo2klbKnyNsSS/Ihv1OKA1pw8IaenE2VClTGPS32RayoA5Ua9Ebp73q8M8oVtTaB73LTuA3klV7e1O/errjZU23cFxynKrjfCpIIQqMLdkWDsPAFGZR6lNhR/5V4wlroFRV0d7bcrPmHHzsH9XboQlMJnBrTed8ZyVayf0+ClynaiyXC5WonDz2cHz7qOKW6p0byoWH4L9Yl/LVJgwTChq/bf1S71qsq7972NI/PWL/ehN2TQbZ+ZkfD3qj0OCxEY56g5hP/hJbbE7fsbPzdIEcaDzO+Y6m6fX4/58fuKByDkKqdkeGIhi1hx1+qfc41/uGkPjKOb7JJXyZATNm8Tkw5xbRPayfRwgAAHicY2BkYGAA4mtflz6J57f5ysDNwgAC13On3kPQ/x+yMDBLALkcDEwgUQB7Pgx8AHicY2BkYGBu+N/AEMPCAAJAkpEBFbACAEcLAm54nGNhYGBgfsnAwMKAwAAOmwD9AAAAAAAAdgCKAKoAynicY2BkYGBgZQgEYhBgAmIuIGRg+A/mMwAAES0BcgAAeJxlj01OwzAQhV/6B6QSqqhgh+QFYgEo/RGrblhUavdddN+mTpsqiSPHrdQDcB6OwAk4AtyAO/BIJ5s2lsffvHljTwDc4Acejt8t95E9XDI7cg0XuBeuU38QbpBfhJto41W4Rf1N2MczpsJtdGF5g9e4YvaEd2EPHXwI13CNT+E69S/hBvlbuIk7/Aq30PHqwj7mXle4jUcv9sdWL5xeqeVBxaHJIpM5v4KZXu+Sha3S6pxrW8QmU4OgX0lTnWlb3VPs10PnIhVZk6oJqzpJjMqt2erQBRvn8lGvF4kehCblWGP+tsYCjnEFhSUOjDFCGGSIyujoO1Vm9K+xQ8Jee1Y9zed0WxTU/3OFAQL0z1xTurLSeTpPgT1fG1J1dCtuy56UNJFezUkSskJe1rZUQuoBNmVXjhF6XNGJPyhnSP8ACVupuyAAAAHicY2BigAAuBuyAlZGJkZmRhZGVkY2BsUIkNz++IjMxL704A0hkAVkl+aX8YJGMUiA3P6M0MQ/CBxJQeQYGAIPOFckA') format('woff'), url('~/iconfont.ttf?t=1531409630632') format('truetype'), url('~/iconfont.svg?t=1531409630632#iconfont') format('svg');
 }
 
-material-on-surface = color-on-surface
-material-muted = color-on-surface-variant
-material-surface-variant-hover = color-surface-container-high
+// ════════════════════════════════════════════════════════════════════════
+// EdgeTranslate Popup — iOS 26 Liquid Glass
+//
+// Layout: a single Liquid Glass card hovers over an ambient mesh background.
+// All controls (input, translate button, swap, switches, language selects)
+// nest inside the card. Footer sits outside the card at the bottom.
+//
+// Implementation: pure modern CSS — light-dark() for theme, color-mix() for
+// tonal mixing, backdrop-filter for the glass, linear() springs for motion.
+// All tokens come from input.styl :root (--ios-* / --md-sys-*).
+// ════════════════════════════════════════════════════════════════════════
 
-// ─── Base Reset ──────────────────────────────────────────────────────────────
+// ─── Translate icon font glyphs (preserved) ─────────────────────────────
+.translate-icon
+    font-family: 'translateIcon' !important
+    font-size: 20px
+    font-style: normal
+    -webkit-font-smoothing: antialiased
+    -moz-osx-font-smoothing: grayscale
+
+.translate-icon-exchange::before
+    content: '\e8f8'
+
+.translate-icon-arrow-up,
+.translate-icon-arrow-down
+    position: relative
+.translate-icon-arrow-up::before,
+.translate-icon-arrow-down::before
+    content: ''
+    width: 20px
+    height: 20px
+    position: absolute
+    left: 50%
+    top: 50%
+    display: block
+    background-color: currentColor
+    transform: translate(-50%, -50%)
+.translate-icon-arrow-up::before
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E") center / 20px 20px no-repeat
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E") center / 20px 20px no-repeat
+.translate-icon-arrow-down::before
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 20px 20px no-repeat
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 20px 20px no-repeat
+
+// ─── Document / Body ────────────────────────────────────────────────────
 html,
 body,
 input,
 select,
 button,
-textarea {
+textarea
     font-family: unquote('var(--ios-font-stack)')
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    font-variant-ligatures: none;
-    font-weight: 400;
-    letter-spacing: -0.2px;
-}
+    -webkit-font-smoothing: antialiased
+    -moz-osx-font-smoothing: grayscale
+    font-variant-ligatures: none
+    font-weight: 400
+    letter-spacing: -0.2px
 
 html,
-body {
-    max-width: 460px;
-    min-width: 380px;
-    margin: 0;
-    overflow: hidden;
-    background: unquote('var(--ios-bg-grouped)')
+body
+    width: 100%
+    max-width: 460px
+    min-width: 380px
+    margin: 0
+    overflow: hidden
     color: unquote('var(--ios-label-primary)')
-}
+    background: unquote('var(--ios-bg-grouped)')
 
-body {
-    padding: 16px;
-    box-sizing: border-box;
-    animation: expressive-enter 380ms var(--md-sys-motion-spring-default, motion-spring) both;
-}
+body
+    position: relative
+    padding: 14px
+    box-sizing: border-box
+    animation: popup-enter 380ms motion-press-shape both
 
-// ─── Icon Font ───────────────────────────────────────────────────────────────
-.translate-icon {
-    font-family: 'translateIcon' !important;
-    font-size: 20px;
-    font-style: normal;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
+// Ambient mesh — three radial blobs that bleed colour through the glass.
+body::before
+    content: ''
+    position: fixed
+    inset: -40px
+    z-index: 0
+    pointer-events: none
+    background: unquote('radial-gradient(120% 80% at 0% 0%, color-mix(in oklab, var(--ios-system-blue) 18%, transparent) 0%, transparent 56%), radial-gradient(120% 80% at 100% 100%, color-mix(in oklab, var(--ios-system-teal) 14%, transparent) 0%, transparent 60%), radial-gradient(100% 100% at 100% 0%, color-mix(in oklab, var(--ios-system-purple) 12%, transparent) 0%, transparent 55%)')
 
-.translate-icon-exchange::before {
-    content: '\e8f8';
-}
-
-.translate-icon-arrow-up,
-.translate-icon-arrow-down {
-    position: relative;
-}
-
-.translate-icon-arrow-up::before,
-.translate-icon-arrow-down::before {
-    content: '';
-    width: 20px;
-    height: 20px;
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    display: block;
-    background-color: currentColor;
-    transform: translate(-50%, -50%);
-}
-
-.translate-icon-arrow-up::before {
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
-}
-
-.translate-icon-arrow-down::before {
-    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 20px 20px no-repeat;
-}
-
-// ─── Layout Components ───────────────────────────────────────────────────────
-// iOS 26: Liquid Glass card with continuous corners (28px), thin stroke,
-// inner highlight, drop shadow. Sits over the grouped-background body.
-.frame {
-    position: relative;
-    overflow: hidden;
-    margin: 0;
-    padding: 22px 18px 18px;
+// ─── Card (Liquid Glass) ────────────────────────────────────────────────
+.frame
+    position: relative
+    z-index: 1
+    overflow: hidden
+    padding: 18px
     border-radius: unquote('var(--ios-radius-2xl)')
     background: unquote('var(--ios-glass-thick)')
     backdrop-filter: unquote('var(--ios-glass-filter-thick)')
     -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thick)')
     border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.45), var(--ios-elev-2)')
-    transition: background-color motion-state-standard, border-color motion-state-standard, box-shadow motion-state-standard;
-    animation: expressive-enter motion-entrance-spatial both;
-}
+    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.04), var(--ios-elev-2)')
+    transition: background-color motion-state-standard, box-shadow motion-state-standard
 
-.frame::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(135deg, rgba(255, 255, 255, .64), rgba(255, 255, 255, 0) 44%), linear-gradient(315deg, rgba(211, 227, 253, .28), rgba(255, 255, 255, 0) 40%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(11, 87, 208, .07);
-}
+// Specular highlight overlay — gives the glass a subtle directional shine.
+.frame::before
+    content: ''
+    position: absolute
+    inset: 0
+    pointer-events: none
+    border-radius: inherit
+    background: unquote('linear-gradient(135deg, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0) 38%, rgba(255,255,255,0) 62%, rgba(255,255,255,0.06) 100%)')
 
-.frame > * {
-    position: relative;
-    z-index: 1;
-}
+.frame > *
+    position: relative
+    z-index: 1
 
-.row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 0 0 12px;
-    line-height: 1.4;
-}
+// ─── Layout primitives ─────────────────────────────────────────────────
+.row
+    display: flex
+    align-items: center
+    gap: 10px
+    margin: 0 0 12px
+    line-height: 1.3
 
-.col {
-    flex: 1 1 0;
-}
+.col,
+.column
+    flex: 1 1 0
+    min-width: 0
 
-.selection {
-    display: flex;
-    flex-direction: column;
-}
+.selection
+    display: flex
+    flex-direction: column
+    min-width: 0
 
-.multiple {
-    flex: 1 1 60%;
-    display: inline-block;
-}
+.multiple
+    flex: 1 1 60%
+    display: inline-block
 
-.select {
-    background-color: #fff;
-    appearance: none;
-}
+.option
+    line-height: 20px
 
-.option {
-    line-height: 20px;
-}
+i
+    max-height: 40px
 
-i {
-    max-height: 40px;
-}
-
-// ─── Form Controls (iOS 26) ─────────────────────────────────────────────────
-// iOS-style fields: subtle fill, pill shape, 17px label-large text, soft focus
-// ring in system blue. No hover scale, no inner highlight.
+// ─── Translate input + submit (sit side-by-side in the first row) ──────
 select,
-#translate_input {
-    width: 100%;
-    min-height: 50px;
-    box-sizing: border-box;
-    padding: 10px 18px;
+#translate_input
+    width: 100%
+    min-height: 50px
+    box-sizing: border-box
+    padding: 0 18px
     color: unquote('var(--ios-label-primary)')
     background-color: unquote('var(--ios-fill-tertiary)')
-    border: 0;
+    border: 0
     border-radius: unquote('var(--ios-radius-pill)')
-    box-shadow: none;
-    font-size: 15px;
-    font-weight: 500;
-    letter-spacing: -0.2px;
-    outline: none;
-    transition: background-color motion-state-standard, box-shadow motion-state-fast, color motion-state-fast;
+    font-size: 16px
+    font-weight: 500
+    letter-spacing: -0.3px
+    outline: none
+    transition: background-color motion-state-fast, box-shadow motion-state-fast
+    appearance: none
+    -webkit-appearance: none
+    -moz-appearance: none
 
-    &:hover {
-        background-color: unquote('var(--ios-fill-secondary)')
-    }
+select:hover,
+#translate_input:hover
+    background-color: unquote('var(--ios-fill-secondary)')
 
-    &:focus {
-        background-color: unquote('var(--ios-fill-secondary)')
-        box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 30%, transparent)')
-    }
-}
+select:focus-visible,
+#translate_input:focus-visible
+    background-color: unquote('var(--ios-fill-secondary)')
+    box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 30%, transparent)')
 
-#translate_input {
-    flex: 1 1 auto;
-    padding-left: 20px;
-    padding-right: 20px;
-    // M3E: focus uses focus ring + bg state, NOT scale. Scale is reserved for :active press.
-}
+#translate_input
+    flex: 1 1 auto
 
-select {
-    padding-left: 20px;
-    padding-right: 48px;
-    padding-inline-end: 48px;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 20px center;
-    background-size: 16px 16px;
-}
+select
+    cursor: pointer
+    padding-right: 40px
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    background-repeat: no-repeat
+    background-position: right 16px center
+    background-size: 14px 14px
 
-// ─── CTA Button (iOS 26 Filled) ────────────────────────────────────────────
-// Pill button with the iOS system blue, inner highlight, soft springy press.
-#translateSubmit {
-    min-width: 92px;
-    min-height: 50px;
-    padding: 0 24px;
-    color: white;
+// Translate submit — circular pill button with arrow glyph.
+#translateSubmit
+    flex: 0 0 auto
+    min-width: 78px
+    height: 50px
+    padding: 0 22px
+    color: white
     background: unquote('var(--ios-tint)')
-    border: 0;
+    border: 0
     border-radius: unquote('var(--ios-radius-pill)')
-    box-shadow: unquote('inset 0 -1px 0 rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.08)')
-    font-size: 17px;
-    font-weight: 600;
-    letter-spacing: -0.4px;
-    cursor: pointer;
-    transition: unquote('transform 220ms var(--md-sys-motion-spring-default-spatial), background-color 180ms var(--md-sys-motion-emphasized), filter 180ms var(--md-sys-motion-emphasized), box-shadow 220ms var(--md-sys-motion-spring-default-effects)')
+    box-shadow: unquote('inset 0 -1px 0 rgba(0,0,0,0.12), 0 2px 6px color-mix(in oklab, var(--ios-tint) 30%, transparent)')
+    font-size: 16px
+    font-weight: 600
+    letter-spacing: -0.3px
+    cursor: pointer
+    transition: transform 220ms motion-press-transform, filter motion-state-fast, box-shadow motion-state-fast
 
-    &:hover {
-        filter: brightness(1.06);
-    }
+#translateSubmit:hover
+    filter: brightness(1.06)
+    box-shadow: unquote('inset 0 -1px 0 rgba(0,0,0,0.12), 0 4px 10px color-mix(in oklab, var(--ios-tint) 36%, transparent)')
 
-    &:active {
-        transform: scale(0.96);
-        filter: brightness(0.92);
-    }
-}
+#translateSubmit:active
+    transform: scale(0.96)
+    filter: brightness(0.92)
 
-// ─── Exchange Button (iOS 26 circular glyph) ───────────────────────────────
-#exchange {
-    width: 44px;
-    height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+// Exchange — pill icon, system blue tinted fill.
+#exchange
+    flex: 0 0 auto
+    width: 44px
+    height: 44px
+    display: inline-flex
+    align-items: center
+    justify-content: center
     color: unquote('var(--ios-tint)')
-    background-color: unquote('var(--ios-fill-tertiary)')
+    background-color: unquote('color-mix(in oklab, var(--ios-tint) 12%, transparent)')
     border-radius: unquote('var(--ios-radius-pill)')
-    cursor: pointer;
-    transition: background-color motion-state-fast, color motion-state-fast, transform 200ms motion-press-transform;
+    cursor: pointer
+    transition: background-color motion-state-fast, transform 220ms motion-press-transform
 
-    &:hover {
-        background-color: unquote('var(--ios-fill-secondary)')
-    }
+#exchange:hover
+    background-color: unquote('color-mix(in oklab, var(--ios-tint) 20%, transparent)')
 
-    &:active {
-        transform: scale(0.92);
-    }
-}
+#exchange:active
+    transform: scale(0.94)
 
-// ─── Hint Message (iOS error label) ────────────────────────────────────────
-#hint_message {
-    display: none;
-    margin: 6px 4px 12px;
+// Hint message — small red text below input.
+#hint_message
+    display: none
+    margin: 0 4px 12px
     color: unquote('var(--ios-system-red)')
-    font-size: 13px;
-    letter-spacing: -0.2px;
-}
+    font-size: 13px
+    letter-spacing: -0.2px
 
-// ─── Settings Toggle Chevron ────────────────────────────────────────────────
-#setting-switch {
-    height: 30px;
-    justify-content: center;
-    margin: 4px 0 0;
-    cursor: pointer;
+// ─── Settings chevron + collapsible panel ──────────────────────────────
+#setting-switch
+    height: 28px
+    margin: 8px 0 0
+    justify-content: center
+    cursor: pointer
+    transition: opacity motion-state-fast
 
-    &:hover .set {
-        background-color: unquote('var(--ios-fill-secondary)')
-        color: unquote('var(--ios-tint)')
-    }
-}
+#setting-switch:hover
+    opacity: 0.7
 
-#arrow-up {
-    display: none;
-}
+#arrow-up
+    display: none
 
-.set {
-    width: 36px;
-    height: 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+.set
+    width: 32px
+    height: 26px
+    display: inline-flex
+    align-items: center
+    justify-content: center
     color: unquote('var(--ios-label-tertiary)')
-    background-color: unquote('var(--ios-fill-quaternary)')
     border-radius: unquote('var(--ios-radius-pill)')
-    line-height: 1;
-    transition: background-color motion-state-fast, color motion-state-fast, transform 200ms motion-press-transform;
+    line-height: 1
+    transition: color motion-state-fast, transform 200ms motion-press-transform
 
-    &:active {
-        transform: scale(0.92);
-    }
-}
+.set:active
+    transform: scale(0.92)
 
-.switch-label {
+.switch-label
     color: unquote('var(--ios-label-primary)')
-    font-size: 15px;
-    letter-spacing: -0.2px;
-    font-weight: 500;
-}
+    font-size: 15px
+    font-weight: 500
+    letter-spacing: -0.2px
 
-// ─── Settings Panel (iOS Liquid Glass card, distinct surface tier) ─────────
-#setting {
-    display: none;
-    margin: 14px 0 4px;
-    padding: 14px 16px;
-    background: unquote('var(--ios-glass-regular)')
-    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+#setting
+    display: none
+    margin: 14px 0 0
+    padding: 14px 16px
+    background: unquote('var(--ios-glass-thin)')
+    backdrop-filter: unquote('var(--ios-glass-filter-thin)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thin)')
     border: 0.5px solid unquote('var(--ios-glass-stroke)')
     border-radius: unquote('var(--ios-radius-xl)')
-    box-shadow: unquote('var(--ios-elev-1)')
-    transition: background-color motion-state-standard, border-color motion-state-standard;
 
-    .row:last-child {
-        margin-bottom: 0;
-    }
-}
+#setting .row:last-child
+    margin-bottom: 0
 
-// ─── iOS 26 Switch Toggle (override the M3 .switch from input.styl) ────────
-// Track: pill, gray when off / green when on. Thumb: white circle, soft shadow.
-.switch {
-    position: relative;
-    width: 51px;
-    height: 31px;
-    border: 0 !important;
+// ─── iOS-style switch toggle ───────────────────────────────────────────
+.switch
+    position: relative
+    width: 51px
+    height: 31px
+    border: 0 !important
     border-radius: unquote('var(--ios-radius-pill)')
     background-color: unquote('var(--ios-fill-primary)')
-    box-sizing: border-box;
-    transition: background-color motion-state-standard, transform 200ms motion-press-transform;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    cursor: pointer;
-    outline: none;
+    box-sizing: border-box
+    cursor: pointer
+    outline: none
+    appearance: none
+    -webkit-appearance: none
+    -moz-appearance: none
+    transition: background-color motion-state-standard, transform 200ms motion-press-transform
 
-    &:after {
-        content: " ";
-        position: absolute;
-        width: 27px;
-        height: 27px;
-        top: 2px;
-        left: 2px;
-        border-radius: 50%;
-        background-color: #ffffff;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.06);
-        transition: transform 300ms motion-press-transform, background-color motion-state-standard;
-    }
+.switch:after
+    content: " "
+    position: absolute
+    width: 27px
+    height: 27px
+    top: 2px
+    left: 2px
+    border-radius: 50%
+    background-color: #ffffff
+    box-shadow: 0 3px 8px rgba(0,0,0,0.16), 0 1px 2px rgba(0,0,0,0.06)
+    transition: transform 320ms motion-press-transform
 
-    &:checked {
-        background-color: unquote('var(--ios-system-green)')
-    }
-    &:checked:after {
-        transform: translateX(20px);
-    }
-    &:active {
-        transform: scale(0.97);
-    }
-    &:focus-visible {
-        box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 30%, transparent)')
-    }
-}
+.switch:checked
+    background-color: unquote('var(--ios-system-green)')
 
-// ─── iOS Radio / Checkbox (overrides M3) ───────────────────────────────────
-.radio,
-.checkbox {
-    background-color: unquote('var(--ios-fill-tertiary)') !important
-    border-color: unquote('var(--md-sys-color-outline)') !important
-    transition: background-color motion-state-fast, border-color motion-state-fast, transform 200ms motion-press-transform;
+.switch:checked:after
+    transform: translateX(20px)
 
-    &:checked {
-        background-color: unquote('var(--ios-tint)') !important
-        border-color: unquote('var(--ios-tint)') !important
-    }
-    &:active {
-        transform: scale(0.93);
-    }
-}
+.switch:active
+    transform: scale(0.97)
 
-// ─── Footer ─────────────────────────────────────────────────────────────────
-footer {
-    padding: 12px 4px 4px;
-    background: transparent;
-    border-top: none;
+.switch:focus-visible
+    box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 32%, transparent)')
+
+// ─── Footer ────────────────────────────────────────────────────────────
+footer
+    position: relative
+    z-index: 1
+    padding: 14px 4px 4px
+    text-align: center
     color: unquote('var(--ios-label-tertiary)')
-    text-align: center;
-    font-size: 12px;
-    letter-spacing: -0.1px;
-    transition: color motion-state-standard;
+    font-size: 12px
+    letter-spacing: -0.1px
 
-    a {
-        color: unquote('var(--ios-label-secondary)')
-        text-decoration: none;
-        font-weight: 500;
-    }
-    a:hover {
-        color: unquote('var(--ios-tint)')
-    }
-}
+footer a
+    color: unquote('var(--ios-label-secondary)')
+    text-decoration: none
+    font-weight: 500
+    transition: color motion-state-fast
 
-// Dark mode is handled natively via light-dark() inside the iOS 26 tokens
-// (see input.styl :root). No per-rule @media (prefers-color-scheme) duplication
-// needed — all surfaces and form controls flip palettes automatically when
-// the user's OS theme changes.
+footer a:hover
+    color: unquote('var(--ios-tint)')
 
-// ─── Reduced Motion ──────────────────────────────────────────────────────────
-@media (prefers-reduced-motion: reduce) {
+// ─── Motion ────────────────────────────────────────────────────────────
+@keyframes popup-enter
+    0%
+        opacity: 0
+        transform: translateY(6px) scale(0.985)
+    100%
+        opacity: 1
+        transform: translateY(0) scale(1)
+
+@media (prefers-reduced-motion: reduce)
+    body
+        animation: none
     *,
     *::before,
-    *::after {
-        animation-duration: 1ms;
-        animation-iteration-count: 1;
-        scroll-behavior: auto;
-        transition-duration: 1ms;
-    }
-}
-
-// ─── Keyframes ───────────────────────────────────────────────────────────────
-@keyframes android17-pop {
-    0% {
-        transform: scale(0.85);
-    }
-    60% {
-        transform: scale(1.08);
-    }
-    100% {
-        transform: scale(1);
-    }
-}
+    *::after
+        animation-duration: 1ms !important
+        transition-duration: 1ms !important
