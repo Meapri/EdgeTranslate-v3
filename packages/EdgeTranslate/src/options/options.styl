@@ -67,7 +67,7 @@ body:after
     backdrop-filter: blur(30px) saturate(170%)
     -webkit-backdrop-filter: blur(30px) saturate(170%)
     box-shadow: 0 22px 64px rgba(30, 47, 72, .16), 0 7px 20px rgba(30, 47, 72, .07), inset 0 1px 0 rgba(255, 255, 255, .88)
-    animation: expressive-enter 360ms cubic-bezier(.2, 0, 0, 1) both
+    animation: expressive-enter 360ms motion-emphasized both
 
 #option:before
     content: ''
@@ -132,7 +132,7 @@ header img
     backdrop-filter: blur(24px) saturate(170%)
     -webkit-backdrop-filter: blur(24px) saturate(170%)
     box-shadow: 0 10px 28px rgba(30, 47, 72, .1), inset 0 1px 0 rgba(255, 255, 255, .82)
-    animation: sidebar-fade 280ms cubic-bezier(.2, 0, 0, 1) both
+    animation: sidebar-fade 280ms motion-emphasized both
 
 .tab-content
     min-width: 0
@@ -142,7 +142,7 @@ header img
 
 .tab-pane.active
     display: block
-    animation: tab-fade-in 240ms cubic-bezier(.2, 0, 0, 1) both
+    animation: tab-fade-in 240ms motion-emphasized both
 
 .nav-tab
     position: relative
@@ -220,7 +220,7 @@ header img
     -webkit-backdrop-filter: blur(24px) saturate(165%)
     box-shadow: 0 12px 34px rgba(30, 47, 72, .1), 0 2px 8px rgba(30, 47, 72, .05), inset 0 1px 0 rgba(255, 255, 255, .88)
     transition: transform motion-standard, box-shadow motion-standard, border-color motion-fast, background-color motion-fast
-    animation: card-slide-in 300ms cubic-bezier(.2, 0, 0, 1) both
+    animation: card-slide-in 300ms motion-emphasized both
 
 .card-container:before
     content: ''
@@ -443,11 +443,11 @@ select:active
     transform: scale(.97)
 
 .switch:after
-    transition: transform 380ms cubic-bezier(.34, 1.56, .64, 1), width 200ms cubic-bezier(.2, .8, .2, 1), height 200ms cubic-bezier(.2, .8, .2, 1), background-color motion-standard
+    transition: transform 380ms motion-spring, width 200ms motion-emphasized, height 200ms motion-emphasized, background-color motion-standard
 
 .checkbox:checked,
 .radio:checked
-    animation: android17-pop 320ms cubic-bezier(.34, 1.56, .64, 1) forwards
+    animation: android17-pop 320ms motion-spring forwards
 
 .space
     display: none

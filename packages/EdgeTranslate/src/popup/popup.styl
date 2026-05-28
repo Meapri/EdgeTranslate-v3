@@ -38,6 +38,8 @@ body {
 body {
     padding: 12px;
     box-sizing: border-box;
+    // M3 Expressive entrance: gentle spring fade-up when the popup opens.
+    animation: expressive-enter 380ms var(--md-sys-motion-spring-default, motion-spring) both;
 }
 
 // ─── Icon Font ───────────────────────────────────────────────────────────────
@@ -331,13 +333,13 @@ select {
     box-sizing: border-box;
 
     &:after {
-        transition: transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1), width 200ms cubic-bezier(0.2, 0.8, 0.2, 1), height 200ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color motion-standard;
+        transition: transform 380ms motion-spring, width 200ms motion-emphasized, height 200ms motion-emphasized, background-color motion-standard;
     }
 }
 
 .checkbox:checked,
 .radio:checked {
-    animation: android17-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    animation: android17-pop 320ms motion-spring forwards;
 }
 
 // ─── Footer ─────────────────────────────────────────────────────────────────

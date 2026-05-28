@@ -7,7 +7,6 @@ import {
 import {
     buildContextTranslationGroups,
     buildSegmentedTranslationText,
-    createReadableBlockReplacement,
     splitSegmentedTranslationText,
     splitTranslatedContext,
 } from "./dom_page_translate_context.js";
@@ -738,7 +737,7 @@ class BannerController {
                 cursor: pointer;
                 opacity: 0;
                 pointer-events: none;
-                transition: opacity 200ms cubic-bezier(0.34, 1.8, 0.5, 1), background-color 200ms ease, color 200ms ease, transform 200ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                transition: opacity 200ms var(--m3-spring-fast), background-color 200ms ease, color 200ms ease, transform 200ms var(--m3-spring-fast);
                 padding: 0;
                 box-sizing: border-box;
                 z-index: 10000;
@@ -3047,10 +3046,7 @@ class BannerController {
     }
 
     escapeHtmlForWrap(text) {
-        return String(text)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
+        return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     /**
@@ -3080,12 +3076,14 @@ class BannerController {
             .replace(/&amp;/g, "&")
             .replace(/&lt;/g, "<")
             .replace(/&gt;/g, ">")
-            .replace(/&quot;/g, '"')
+            .replace(/&quot;/g, "\"")
             .replace(/&#39;/g, "'");
     }
 
     normalizeBlockText(value) {
-        return String(value || "").replace(/\s+/g, " ").trim();
+        return String(value || "")
+            .replace(/\s+/g, " ")
+            .trim();
     }
 
     queueDomPageEntryApply(entry, translated) {
@@ -3306,8 +3304,10 @@ class BannerController {
             }
             // Parsing produced zero matches — model probably stripped the tags. Fall through to
             // a wholesale plain-text replacement so the block still gets translated.
-            const sanitized = this.sanitizeDomPageTranslatedText(translated)
-                .replace(/<\/?t\s*[^>]*>/gi, "");
+            const sanitized = this.sanitizeDomPageTranslatedText(translated).replace(
+                /<\/?t\s*[^>]*>/gi,
+                ""
+            );
             if (!sanitized) return false;
             this.registerDomOriginalText(block, entry.wrappedPlainText || entry.sourceText);
             this.fadeInDomPageBlock(block, () => {
@@ -3596,10 +3596,15 @@ class BannerController {
         }
         requestAnimationFrame(() => {
             if (!block.isConnected) return;
-            // M3 Expressive: opacity uses Emphasized Decelerate; transform uses a soft spring.
+            // M3 Expressive: opacity uses Emphasized Decelerate; transform uses a real spring
+            // via Chrome-native linear() easing for the signature "쫀쫀" Expressive feel.
+            const m3Emphasized =
+                "linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)";
+            const m3Spring =
+                "linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)";
             block.style.transition = [
-                "opacity 280ms cubic-bezier(0.05, 0.7, 0.1, 1)",
-                "transform 380ms cubic-bezier(0.2, 1.18, 0.32, 1)",
+                `opacity 280ms ${m3Emphasized}`,
+                `transform 380ms ${m3Spring}`,
             ].join(", ");
             block.style.opacity = "1";
             block.style.transform = "translate3d(0, 0, 0) scale(1)";
@@ -4143,39 +4148,31 @@ class BannerController {
             const root = host.attachShadow({ mode: "open" });
             root.innerHTML = `
                 <style>
+                    /* M3 Expressive banner — Chrome-native primitives only:
+                       light-dark()  → auto theme without media-query duplication
+                       color-mix()   → derived tints
+                       linear()      → real spring physics for "쫀쫀" feel */
                     :host {
-                        color-scheme: light;
-                        --et-primary: #1A73E8;
-                        --et-primary-container: #E8F0FE;
-                        --et-on-primary-container: #174EA6;
-                        --et-surface: linear-gradient(135deg, rgba(244, 248, 255, 0.90), rgba(255, 255, 255, 0.85));
-                        --et-surface-container: rgba(26, 115, 232, 0.06);
-                        --et-outline: rgba(26, 115, 232, 0.12);
-                        --et-outline-variant: rgba(26, 115, 232, 0.06);
-                        --et-text: #1F1F1F;
-                        --et-muted: #5F6368;
-                        --et-success: #386A20;
-                        --et-error: #B3261E;
-                        --pulse-color: rgba(26, 115, 232, 0.20);
-                        --et-progress-track: rgba(26, 115, 232, 0.08);
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        :host {
-                            color-scheme: dark;
-                            --et-primary: #8AB4F8;
-                            --et-primary-container: #185ABC;
-                            --et-on-primary-container: #E8F0FE;
-                            --et-surface: linear-gradient(135deg, rgba(32, 33, 36, 0.90), rgba(20, 21, 24, 0.85));
-                            --et-surface-container: rgba(138, 180, 248, 0.06);
-                            --et-outline: rgba(138, 180, 248, 0.12);
-                            --et-outline-variant: rgba(138, 180, 248, 0.06);
-                            --et-text: #E8EAED;
-                            --et-muted: #9AA0A6;
-                            --et-success: #B2F195;
-                            --et-error: #F2B8B5;
-                            --pulse-color: rgba(138, 180, 248, 0.20);
-                            --et-progress-track: rgba(138, 180, 248, 0.08);
-                        }
+                        color-scheme: light dark;
+                        --et-primary: light-dark(#0b57d0, #a8c7fa);
+                        --et-on-primary: light-dark(#ffffff, #0b1f3a);
+                        --et-primary-container: light-dark(#d3e3fd, #1f3b68);
+                        --et-on-primary-container: light-dark(#001a41, #d3e3fd);
+                        --et-surface-base: light-dark(rgba(255, 255, 255, 0.86), rgba(28, 31, 36, 0.86));
+                        --et-surface: linear-gradient(135deg, var(--et-surface-base), var(--et-surface-base));
+                        --et-surface-container: color-mix(in oklab, var(--et-primary) 6%, transparent);
+                        --et-outline: color-mix(in oklab, var(--et-primary) 18%, transparent);
+                        --et-outline-variant: color-mix(in oklab, var(--et-primary) 8%, transparent);
+                        --et-text: light-dark(#1f1f1f, #e8eaed);
+                        --et-muted: light-dark(#5f6368, #bdc1c6);
+                        --et-success: light-dark(#386a20, #b2f195);
+                        --et-error: light-dark(#b3261e, #f2b8b5);
+                        --pulse-color: color-mix(in oklab, var(--et-primary) 24%, transparent);
+                        --et-progress-track: color-mix(in oklab, var(--et-primary) 10%, transparent);
+                        /* M3 Expressive linear() springs */
+                        --m3-spring-default: linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
+                        --m3-spring-fast: linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1);
+                        --m3-emphasized: linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
                     }
                     .bar {
                         position: relative;
@@ -4197,8 +4194,8 @@ class BannerController {
                         pointer-events: auto;
                         backdrop-filter: blur(28px) saturate(190%);
                         -webkit-backdrop-filter: blur(28px) saturate(190%);
-                        animation: spring-entrance 450ms cubic-bezier(0.34, 1.25, 0.64, 1) both;
-                        transition: all 300ms cubic-bezier(0.25, 1, 0.5, 1);
+                        animation: spring-entrance 450ms var(--m3-spring-default) both;
+                        transition: all 300ms var(--m3-emphasized);
                     }
                     .bar:hover {
                         transform: translateY(1px) scale(1.008);
@@ -4258,7 +4255,7 @@ class BannerController {
                         border-radius: 50%;
                         flex: 0 0 auto;
                         background: var(--et-primary);
-                        transition: all 300ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                        transition: all 300ms var(--m3-spring-fast);
                     }
                     .bar[data-state="starting"] .status-dot,
                     .bar[data-state="running"] .status-dot {
@@ -4302,7 +4299,7 @@ class BannerController {
                         font-weight: 600;
                         height: 22px;
                         box-sizing: border-box;
-                        transition: all 300ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                        transition: all 300ms var(--m3-spring-fast);
                     }
                     .provider:hover {
                         transform: translateY(-1px) scale(1.03);
@@ -4325,7 +4322,7 @@ class BannerController {
                         font-weight: 600;
                         color: var(--et-muted);
                         box-sizing: border-box;
-                        transition: all 300ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                        transition: all 300ms var(--m3-spring-fast);
                     }
                     .model:hover {
                         transform: translateY(-1px) scale(1.03);
@@ -4401,7 +4398,7 @@ class BannerController {
                         padding: 0 14px;
                         font-size: 12px;
                         font-weight: 600;
-                        transition: all 250ms cubic-bezier(0.25, 1, 0.5, 1);
+                        transition: all 250ms var(--m3-emphasized);
                     }
                     button svg {
                         width: 14px;
@@ -4435,7 +4432,7 @@ class BannerController {
                         width: 32px;
                         height: 32px;
                         border-radius: 50%;
-                        transition: all 350ms cubic-bezier(0.25, 1, 0.5, 1);
+                        transition: all 350ms var(--m3-emphasized);
                     }
                     .close:hover {
                         background: var(--et-surface-container);
@@ -4460,7 +4457,7 @@ class BannerController {
                         height: 100%;
                         background: var(--et-primary);
                         border-radius: 999px;
-                        transition: width 350ms cubic-bezier(0.34, 1.8, 0.5, 1);
+                        transition: width 350ms var(--m3-spring-fast);
                     }
                     .bar[data-state="starting"] .progress-fill {
                         width: 100% !important;
@@ -4513,11 +4510,11 @@ class BannerController {
                         pointer-events: auto;
                         backdrop-filter: blur(16px);
                         -webkit-backdrop-filter: blur(16px);
-                        transition: all 300ms cubic-bezier(0.25, 1, 0.5, 1);
+                        transition: all 300ms var(--m3-emphasized);
                     }
                     :host([data-visible="false"]) .restore {
                         display: inline-flex;
-                        animation: spring-entrance 450ms cubic-bezier(0.34, 1.25, 0.64, 1) both;
+                        animation: spring-entrance 450ms var(--m3-spring-default) both;
                     }
                     .restore:hover {
                         background: var(--et-primary-container);
@@ -5293,7 +5290,12 @@ class BannerController {
         const matches = [];
         let m;
         while ((m = markerRe.exec(accumulatedText)) !== null) {
-            matches.push({ index: matches.length, at: m.index, length: m[0].length, n: Number(m[1]) });
+            matches.push({
+                index: matches.length,
+                at: m.index,
+                length: m[0].length,
+                n: Number(m[1]),
+            });
         }
         // Only segments followed by ANOTHER marker are known-complete. The last marker's payload
         // may still be in flight — leave it for the final response handler.

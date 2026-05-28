@@ -2,8 +2,11 @@
 
 image-size = 42px;
 menu-width = 154px;
-motion-fast = 160ms cubic-bezier(0.2, 0, 0, 1);
-motion-standard = 220ms cubic-bezier(0.2, 0, 0, 1);
+// M3 Expressive — Chrome-native linear() springs (cf. input.styl tokens).
+m3-emphasized-local = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
+m3-spring-local = linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
+motion-fast = 160ms m3-emphasized-local;
+motion-standard = 220ms m3-emphasized-local;
 
 /*
  * 划词翻译按钮样式
@@ -29,7 +32,7 @@ motion-standard = 220ms cubic-bezier(0.2, 0, 0, 1);
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     transition: box-shadow motion-standard, transform motion-standard, border-color motion-fast !important;
-    animation: selection-toolbar-enter 160ms cubic-bezier(0.2, 0, 0, 1) !important;
+    animation: selection-toolbar-enter 220ms m3-spring-local !important;
 
     &:hover {
         box-shadow: 0 15px 32px rgba(30, 47, 72, 0.18), 0 0 0 4px rgba(26, 115, 232, 0.08), inset 0 1px 0 rgba(255, 255, 255, .9) !important;
