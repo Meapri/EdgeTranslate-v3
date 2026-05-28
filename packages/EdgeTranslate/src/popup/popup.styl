@@ -72,35 +72,42 @@ body
     margin: 0
     overflow: hidden
     color: unquote('var(--ios-label-primary)')
-    background: unquote('var(--ios-bg-grouped)')
+    // Highly saturated multi-stop mesh — this is what makes Liquid Glass
+    // legible in a small popup: there has to be VIVID colour behind the
+    // translucent card or the glass effect is invisible.
+    background: unquote('linear-gradient(135deg, color-mix(in oklab, var(--ios-system-blue) 55%, light-dark(#ffffff, #1c1c1e)) 0%, color-mix(in oklab, var(--ios-system-purple) 50%, light-dark(#ffffff, #1c1c1e)) 48%, color-mix(in oklab, var(--ios-system-pink) 48%, light-dark(#ffffff, #1c1c1e)) 100%)')
 
 body
     position: relative
-    padding: 14px
+    padding: 18px
     box-sizing: border-box
     animation: popup-enter 380ms motion-press-shape both
 
-// Ambient mesh — three radial blobs that bleed colour through the glass.
+// A second softer mesh on top of the base gradient — adds the "wet glass"
+// painterly feel with a couple of contrasting radial blobs.
 body::before
     content: ''
     position: fixed
-    inset: -40px
+    inset: -60px
     z-index: 0
     pointer-events: none
-    background: unquote('radial-gradient(120% 80% at 0% 0%, color-mix(in oklab, var(--ios-system-blue) 18%, transparent) 0%, transparent 56%), radial-gradient(120% 80% at 100% 100%, color-mix(in oklab, var(--ios-system-teal) 14%, transparent) 0%, transparent 60%), radial-gradient(100% 100% at 100% 0%, color-mix(in oklab, var(--ios-system-purple) 12%, transparent) 0%, transparent 55%)')
+    background: unquote('radial-gradient(120% 80% at 8% 8%, color-mix(in oklab, var(--ios-system-teal) 60%, transparent) 0%, transparent 50%), radial-gradient(120% 80% at 92% 96%, color-mix(in oklab, var(--ios-system-orange) 42%, transparent) 0%, transparent 52%), radial-gradient(140% 90% at 100% 0%, color-mix(in oklab, var(--ios-system-indigo) 56%, transparent) 0%, transparent 60%)')
+    filter: blur(40px)
 
 // ─── Card (Liquid Glass) ────────────────────────────────────────────────
+// Significantly more translucent so the underlying mesh actually shows
+// through — this is the part that visually communicates "Liquid Glass."
 .frame
     position: relative
     z-index: 1
     overflow: hidden
     padding: 18px
     border-radius: unquote('var(--ios-radius-2xl)')
-    background: unquote('var(--ios-glass-thick)')
-    backdrop-filter: unquote('var(--ios-glass-filter-thick)')
-    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thick)')
+    background: unquote('light-dark(rgba(255, 255, 255, 0.42), rgba(28, 28, 30, 0.5))')
+    backdrop-filter: blur(48px) saturate(220%) brightness(1.04)
+    -webkit-backdrop-filter: blur(48px) saturate(220%) brightness(1.04)
     border: 0.5px solid unquote('var(--ios-glass-stroke)')
-    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(0,0,0,0.04), var(--ios-elev-2)')
+    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(0,0,0,0.06), 0 16px 36px rgba(0, 0, 0, 0.18), 0 32px 64px -16px rgba(0, 0, 0, 0.22)')
     transition: background-color motion-state-standard, box-shadow motion-state-standard
 
 // Specular highlight overlay — gives the glass a subtle directional shine.
