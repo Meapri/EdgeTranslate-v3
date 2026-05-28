@@ -1,12 +1,13 @@
 // ────────────────────────────────────────────
-// Material 3 Expressive design tokens (Android 16~17)
+// iOS 26 / iPadOS 26 — "Liquid Glass" design tokens
 // Implementation: Chrome-native modern CSS primitives
-//   • light-dark()  — Chrome 123+  → auto theme without media queries
-//   • color-mix()   — Chrome 111+  → M3 surface tints derived from primary
-//   • linear()      — Chrome 113+  → true spring/expressive easing
-//   • @property     — Chrome 85+   → animatable custom properties
-//   • accent-color  — Chrome 93+   → native form-control color
-// Single source of truth for the entire extension
+//   • backdrop-filter — translucent glass surfaces with real-time blur/saturation
+//   • light-dark()    — Chrome 123+ → auto theme without media queries
+//   • color-mix()     — Chrome 111+ → blended tints
+//   • linear()        — Chrome 113+ → iOS-style spring physics
+//   • SF Pro stack    — native rendering on Apple silicon; system-ui everywhere else
+// Backwards-compat: the M3 token names below are aliased so existing code
+// keeps compiling, but new components should reach for the iOS 26 names.
 // ────────────────────────────────────────────
 
 // Primary
@@ -327,30 +328,69 @@ scale = 1.3
 // ────────────────────────────────────────────
 :root
     color-scheme: unquote('light dark')
-    accent-color: unquote('light-dark(#0b57d0, #a8c7fa)')
-    scrollbar-color: unquote('light-dark(rgba(60, 64, 67, 0.32), rgba(232, 234, 237, 0.32)) transparent')
+    accent-color: unquote('light-dark(#007aff, #0a84ff)')
+    scrollbar-color: unquote('light-dark(rgba(60, 60, 67, 0.36), rgba(235, 235, 245, 0.36)) transparent')
     scrollbar-width: thin
 
-    // M3 Expressive color tokens (auto light/dark via light-dark())
-    --md-sys-color-primary: unquote('light-dark(#0b57d0, #a8c7fa)')
-    --md-sys-color-on-primary: unquote('light-dark(#ffffff, #0b1f3a)')
-    --md-sys-color-primary-container: unquote('light-dark(#d3e3fd, #1f3b68)')
-    --md-sys-color-on-primary-container: unquote('light-dark(#001a41, #d3e3fd)')
-    --md-sys-color-secondary: unquote('light-dark(#0f6d58, #93d8c1)')
-    --md-sys-color-tertiary: unquote('light-dark(#8b5000, #ffb951)')
-    --md-sys-color-error: unquote('light-dark(#b3261e, #f2b8b5)')
-    --md-sys-color-surface: unquote('light-dark(#ffffff, #1b2026)')
-    --md-sys-color-on-surface: unquote('light-dark(#1f1f1f, #e8eaed)')
-    --md-sys-color-on-surface-variant: unquote('light-dark(#5f6368, #bdc1c6)')
-    --md-sys-color-outline: unquote('light-dark(#747775, #9aa0a6)')
-    --md-sys-color-outline-variant: unquote('light-dark(#dde6ef, #3d4651)')
+    // ─── iOS 26 system colors (light-dark auto) ───────────────────────────
+    // Sourced from Apple's Human Interface Guidelines for iOS 26 / iPadOS 26.
+    --ios-system-blue: unquote('light-dark(#007aff, #0a84ff)')
+    --ios-system-green: unquote('light-dark(#34c759, #30d158)')
+    --ios-system-indigo: unquote('light-dark(#5856d6, #5e5ce6)')
+    --ios-system-orange: unquote('light-dark(#ff9500, #ff9f0a)')
+    --ios-system-pink: unquote('light-dark(#ff2d55, #ff375f)')
+    --ios-system-purple: unquote('light-dark(#af52de, #bf5af2)')
+    --ios-system-red: unquote('light-dark(#ff3b30, #ff453a)')
+    --ios-system-teal: unquote('light-dark(#30b0c7, #40c8e0)')
+    --ios-system-yellow: unquote('light-dark(#ffcc00, #ffd60a)')
+    --ios-tint: var(--ios-system-blue)
 
-    // Surface tints derived natively via color-mix (M3 elevation levels)
-    --md-sys-color-surface-container-lowest: unquote('light-dark(#ffffff, #15191d)')
-    --md-sys-color-surface-container-low: unquote('color-mix(in oklab, var(--md-sys-color-surface), var(--md-sys-color-primary) 4%)')
-    --md-sys-color-surface-container: unquote('color-mix(in oklab, var(--md-sys-color-surface), var(--md-sys-color-primary) 8%)')
-    --md-sys-color-surface-container-high: unquote('color-mix(in oklab, var(--md-sys-color-surface), var(--md-sys-color-primary) 12%)')
-    --md-sys-color-surface-container-highest: unquote('color-mix(in oklab, var(--md-sys-color-surface), var(--md-sys-color-primary) 16%)')
+    // ─── iOS 26 labels (text colors with adaptive opacity) ────────────────
+    --ios-label-primary: unquote('light-dark(rgba(0,0,0,0.88), rgba(255,255,255,0.92))')
+    --ios-label-secondary: unquote('light-dark(rgba(60,60,67,0.6), rgba(235,235,245,0.6))')
+    --ios-label-tertiary: unquote('light-dark(rgba(60,60,67,0.3), rgba(235,235,245,0.3))')
+    --ios-label-quaternary: unquote('light-dark(rgba(60,60,67,0.18), rgba(235,235,245,0.16))')
+
+    // ─── iOS 26 background system (grouped + system) ──────────────────────
+    --ios-bg-system: unquote('light-dark(#ffffff, #000000)')
+    --ios-bg-grouped: unquote('light-dark(#f2f2f7, #000000)')
+    --ios-bg-secondary: unquote('light-dark(#f2f2f7, #1c1c1e)')
+    --ios-bg-tertiary: unquote('light-dark(#ffffff, #2c2c2e)')
+    --ios-fill-primary: unquote('light-dark(rgba(120,120,128,0.2), rgba(120,120,128,0.36))')
+    --ios-fill-secondary: unquote('light-dark(rgba(120,120,128,0.16), rgba(120,120,128,0.32))')
+    --ios-fill-tertiary: unquote('light-dark(rgba(120,120,128,0.12), rgba(118,118,128,0.24))')
+    --ios-fill-quaternary: unquote('light-dark(rgba(120,120,128,0.08), rgba(118,118,128,0.18))')
+
+    // ─── Liquid Glass — the signature iOS 26 material ────────────────────
+    // Thin / regular / thick = three glass densities. Each provides a base
+    // translucent fill plus a backdrop-filter recipe that callers compose
+    // (filter shorthand must be applied directly on the element).
+    --ios-glass-thin: unquote('light-dark(rgba(255,255,255,0.42), rgba(28,28,30,0.42))')
+    --ios-glass-regular: unquote('light-dark(rgba(255,255,255,0.6), rgba(28,28,30,0.6))')
+    --ios-glass-thick: unquote('light-dark(rgba(255,255,255,0.76), rgba(28,28,30,0.78))')
+    --ios-glass-stroke: unquote('light-dark(rgba(255,255,255,0.7), rgba(255,255,255,0.08))')
+    --ios-glass-filter-thin: blur(20px) saturate(180%);
+    --ios-glass-filter-regular: blur(30px) saturate(180%);
+    --ios-glass-filter-thick: blur(48px) saturate(190%);
+
+    // ─── M3 token aliases for backwards-compat (do not use in new code) ───
+    --md-sys-color-primary: var(--ios-system-blue)
+    --md-sys-color-on-primary: unquote('light-dark(#ffffff, #ffffff)')
+    --md-sys-color-primary-container: unquote('color-mix(in oklab, var(--ios-system-blue) 18%, var(--ios-bg-system))')
+    --md-sys-color-on-primary-container: var(--ios-system-blue)
+    --md-sys-color-secondary: var(--ios-system-purple)
+    --md-sys-color-tertiary: var(--ios-system-pink)
+    --md-sys-color-error: var(--ios-system-red)
+    --md-sys-color-surface: var(--ios-bg-system)
+    --md-sys-color-on-surface: var(--ios-label-primary)
+    --md-sys-color-on-surface-variant: var(--ios-label-secondary)
+    --md-sys-color-outline: unquote('light-dark(rgba(60,60,67,0.29), rgba(84,84,88,0.65))')
+    --md-sys-color-outline-variant: unquote('light-dark(rgba(60,60,67,0.12), rgba(84,84,88,0.35))')
+    --md-sys-color-surface-container-lowest: var(--ios-bg-system)
+    --md-sys-color-surface-container-low: var(--ios-bg-secondary)
+    --md-sys-color-surface-container: var(--ios-bg-secondary)
+    --md-sys-color-surface-container-high: var(--ios-bg-tertiary)
+    --md-sys-color-surface-container-highest: var(--ios-bg-tertiary)
 
     // M3 Expressive motion — CSS-native linear() springs.
     // Android 16~17 distinguishes two spring families:
@@ -369,20 +409,34 @@ scale = 1.3
     --md-sys-motion-emphasized: unquote('linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)')
     --md-sys-motion-emphasized-accelerate: unquote('linear(0, 0.002 8.5%, 0.024 19.3%, 0.108 30%, 0.279 41.3%, 0.526 53%, 0.747 63%, 0.892 73%, 0.969 84%, 1)')
 
-    // M3 Expressive shapes (full token scale per Android 16)
+    // ─── iOS 26 shapes (continuous corner curves) ─────────────────────────
+    --ios-radius-xs: 6px
+    --ios-radius-sm: 10px
+    --ios-radius-md: 14px
+    --ios-radius-lg: 18px
+    --ios-radius-xl: 22px
+    --ios-radius-2xl: 28px
+    --ios-radius-3xl: 34px
+    --ios-radius-pill: 9999px
+
+    // M3 shape aliases
     --md-sys-shape-corner-none: 0
-    --md-sys-shape-corner-xs: 4px
-    --md-sys-shape-corner-sm: 8px
-    --md-sys-shape-corner-md: 12px
-    --md-sys-shape-corner-lg: 16px
-    --md-sys-shape-corner-xl: 28px
-    --md-sys-shape-corner-full: 999px
+    --md-sys-shape-corner-xs: var(--ios-radius-xs)
+    --md-sys-shape-corner-sm: var(--ios-radius-sm)
+    --md-sys-shape-corner-md: var(--ios-radius-md)
+    --md-sys-shape-corner-lg: var(--ios-radius-lg)
+    --md-sys-shape-corner-xl: var(--ios-radius-2xl)
+    --md-sys-shape-corner-full: var(--ios-radius-pill)
 
-    // Native focus ring (uses :focus-visible everywhere)
-    --md-sys-focus-ring: unquote('0 0 0 3px color-mix(in oklab, var(--md-sys-color-primary) 40%, transparent)')
+    // Focus ring (iOS-style — solid 3px primary tint)
+    --md-sys-focus-ring: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 35%, transparent)')
 
-    // System font stack — uses OS native (Roboto on Android, SF on macOS, Segoe on Win)
-    --md-sys-typography-font-stack: unquote('"Roboto Flex", Roboto, system-ui, -apple-system, "Google Sans", "Segoe UI", sans-serif')
+    // ─── iOS 26 typography — SF Pro stack ─────────────────────────────────
+    // SF Pro renders natively on Apple silicon (which is the relevant audience
+    // for the iOS-26 aesthetic). On other platforms `system-ui` falls back
+    // gracefully to Segoe UI / Roboto.
+    --ios-font-stack: unquote('-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif')
+    --md-sys-typography-font-stack: var(--ios-font-stack)
 
     // ─── M3 Expressive Typography Scale (Roboto Flex) ────────────────────
     // size / line-height / letter-spacing per Android 16~17 spec
@@ -408,13 +462,20 @@ scale = 1.3
     --md-sys-state-pressed-opacity: 0.12
     --md-sys-state-dragged-opacity: 0.16
 
-    // M3 Expressive elevation (smaller, softer shadows than M2)
-    --md-sys-elevation-0: none
-    --md-sys-elevation-1: unquote('0 1px 2px rgba(0, 0, 0, 0.08), 0 1px 3px 1px color-mix(in oklab, var(--md-sys-color-primary) 8%, transparent)')
-    --md-sys-elevation-2: unquote('0 1px 2px rgba(0, 0, 0, 0.1), 0 2px 6px 2px color-mix(in oklab, var(--md-sys-color-primary) 10%, transparent)')
-    --md-sys-elevation-3: unquote('0 1px 3px rgba(0, 0, 0, 0.1), 0 4px 8px 3px color-mix(in oklab, var(--md-sys-color-primary) 12%, transparent)')
-    --md-sys-elevation-4: unquote('0 2px 3px rgba(0, 0, 0, 0.1), 0 6px 10px 4px color-mix(in oklab, var(--md-sys-color-primary) 14%, transparent)')
-    --md-sys-elevation-5: unquote('0 4px 4px rgba(0, 0, 0, 0.1), 0 8px 12px 6px color-mix(in oklab, var(--md-sys-color-primary) 16%, transparent)')
+    // ─── iOS 26 elevation — soft tight shadow + faint stroke ──────────────
+    --ios-elev-0: none
+    --ios-elev-1: unquote('0 1px 2px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.05)')
+    --ios-elev-2: unquote('0 1px 2px rgba(0,0,0,0.08), 0 6px 16px rgba(0,0,0,0.07)')
+    --ios-elev-3: unquote('0 2px 4px rgba(0,0,0,0.08), 0 12px 24px rgba(0,0,0,0.1)')
+    --ios-elev-4: unquote('0 4px 8px rgba(0,0,0,0.1), 0 24px 36px rgba(0,0,0,0.14)')
+    --ios-elev-floating: unquote('0 8px 28px rgba(0,0,0,0.18), 0 32px 64px -16px rgba(0,0,0,0.22)')
+    // M3 elevation aliases
+    --md-sys-elevation-0: var(--ios-elev-0)
+    --md-sys-elevation-1: var(--ios-elev-1)
+    --md-sys-elevation-2: var(--ios-elev-2)
+    --md-sys-elevation-3: var(--ios-elev-3)
+    --md-sys-elevation-4: var(--ios-elev-4)
+    --md-sys-elevation-5: var(--ios-elev-floating)
 
 
 // Registered animatable custom properties — let Chrome interpolate background
@@ -578,3 +639,123 @@ scale = 1.3
 .m3-lift:hover
     transform: translateY(-2px)
     box-shadow: var(--md-sys-elevation-2)
+
+
+// ────────────────────────────────────────────
+// iOS 26 component patterns (Liquid Glass + native springs)
+// ────────────────────────────────────────────
+
+// Liquid Glass — three densities. Use the matching modifier on any container.
+.ios-glass
+.ios-glass--regular
+    background: unquote('var(--ios-glass-regular)')
+    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+    border: 0.5px solid unquote('var(--ios-glass-stroke)')
+    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.35), var(--ios-elev-1)')
+
+.ios-glass--thin
+    background: unquote('var(--ios-glass-thin)')
+    backdrop-filter: unquote('var(--ios-glass-filter-thin)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thin)')
+    border: 0.5px solid unquote('var(--ios-glass-stroke)')
+
+.ios-glass--thick
+    background: unquote('var(--ios-glass-thick)')
+    backdrop-filter: unquote('var(--ios-glass-filter-thick)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thick)')
+    border: 0.5px solid unquote('var(--ios-glass-stroke)')
+    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.45), var(--ios-elev-2)')
+
+
+// iOS 26 Filled Button — vivid tint, pill shape, springy press.
+.ios-btn-filled
+    display: inline-flex
+    align-items: center
+    justify-content: center
+    gap: 6px
+    height: 50px
+    padding: 0 24px
+    min-width: 100px
+    border: 0
+    border-radius: unquote('var(--ios-radius-pill)')
+    background: unquote('var(--ios-tint)')
+    color: white
+    font: 600 17px/1 unquote('var(--ios-font-stack)')
+    letter-spacing: -0.4px
+    cursor: pointer
+    box-shadow: unquote('inset 0 -1px 0 rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.08)')
+    transition: unquote('transform 220ms var(--md-sys-motion-spring-default-spatial), background-color 180ms var(--md-sys-motion-emphasized), box-shadow 220ms var(--md-sys-motion-spring-default-effects), filter 180ms var(--md-sys-motion-emphasized)')
+.ios-btn-filled:hover
+    filter: brightness(1.06)
+.ios-btn-filled:active
+    transform: scale(0.96)
+    filter: brightness(0.92)
+
+
+// iOS 26 Tinted Button — translucent fill of the system tint.
+.ios-btn-tinted
+    display: inline-flex
+    align-items: center
+    justify-content: center
+    gap: 6px
+    height: 50px
+    padding: 0 22px
+    border: 0
+    border-radius: unquote('var(--ios-radius-pill)')
+    background: unquote('color-mix(in oklab, var(--ios-tint) 18%, transparent)')
+    color: unquote('var(--ios-tint)')
+    font: 600 17px/1 unquote('var(--ios-font-stack)')
+    cursor: pointer
+    transition: unquote('background-color 180ms var(--md-sys-motion-emphasized), transform 220ms var(--md-sys-motion-spring-default-spatial)')
+.ios-btn-tinted:hover
+    background: unquote('color-mix(in oklab, var(--ios-tint) 26%, transparent)')
+.ios-btn-tinted:active
+    transform: scale(0.96)
+
+
+// iOS 26 Plain (text) Button — no fill, just the tint label.
+.ios-btn-plain
+    display: inline-flex
+    align-items: center
+    justify-content: center
+    gap: 6px
+    height: 44px
+    padding: 0 12px
+    border: 0
+    border-radius: unquote('var(--ios-radius-md)')
+    background: transparent
+    color: unquote('var(--ios-tint)')
+    font: 500 17px/1 unquote('var(--ios-font-stack)')
+    cursor: pointer
+    transition: unquote('background-color 180ms var(--md-sys-motion-emphasized), opacity 180ms var(--md-sys-motion-emphasized)')
+.ios-btn-plain:hover
+    background: unquote('var(--ios-fill-quaternary)')
+.ios-btn-plain:active
+    opacity: 0.5
+
+
+// iOS 26 Section — grouped list container.
+.ios-section
+    background: unquote('var(--ios-bg-tertiary)')
+    border-radius: unquote('var(--ios-radius-xl)')
+    overflow: hidden
+    box-shadow: unquote('var(--ios-elev-1)')
+
+
+// iOS 26 List Row — used inside .ios-section.
+.ios-row
+    display: flex
+    align-items: center
+    gap: 12px
+    min-height: 50px
+    padding: 12px 16px
+    border-bottom: 0.5px solid unquote('var(--md-sys-color-outline-variant)')
+    color: unquote('var(--ios-label-primary)')
+    font: 400 15px/1.3 unquote('var(--ios-font-stack)')
+.ios-row:last-child
+    border-bottom: 0
+.ios-row__label
+    flex: 1
+.ios-row__value
+    color: unquote('var(--ios-label-secondary)')

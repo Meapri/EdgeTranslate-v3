@@ -4129,52 +4129,53 @@ class BannerController {
             const root = host.attachShadow({ mode: "open" });
             root.innerHTML = `
                 <style>
-                    /* M3 Expressive banner — Chrome-native primitives only:
-                       light-dark()  → auto theme without media-query duplication
-                       color-mix()   → derived tints
-                       linear()      → real spring physics for "쫀쫀" feel */
+                    /* iOS 26 banner — Liquid Glass material over page content.
+                       Heavy backdrop blur + saturation lets the host page's colours
+                       bleed through subtly, which is the signature iOS 26 look. */
                     :host {
                         color-scheme: light dark;
-                        --et-primary: light-dark(#0b57d0, #a8c7fa);
-                        --et-on-primary: light-dark(#ffffff, #0b1f3a);
-                        --et-primary-container: light-dark(#d3e3fd, #1f3b68);
-                        --et-on-primary-container: light-dark(#001a41, #d3e3fd);
-                        --et-surface-base: light-dark(rgba(255, 255, 255, 0.86), rgba(28, 31, 36, 0.86));
-                        --et-surface: linear-gradient(135deg, var(--et-surface-base), var(--et-surface-base));
-                        --et-surface-container: color-mix(in oklab, var(--et-primary) 6%, transparent);
-                        --et-outline: color-mix(in oklab, var(--et-primary) 18%, transparent);
-                        --et-outline-variant: color-mix(in oklab, var(--et-primary) 8%, transparent);
-                        --et-text: light-dark(#1f1f1f, #e8eaed);
-                        --et-muted: light-dark(#5f6368, #bdc1c6);
-                        --et-success: light-dark(#386a20, #b2f195);
-                        --et-error: light-dark(#b3261e, #f2b8b5);
+                        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+                        letter-spacing: -0.2px;
+                        --et-primary: light-dark(#007aff, #0a84ff);
+                        --et-on-primary: #ffffff;
+                        --et-primary-container: color-mix(in oklab, var(--et-primary) 18%, light-dark(white, #1c1c1e));
+                        --et-on-primary-container: var(--et-primary);
+                        --et-surface: light-dark(rgba(255,255,255,0.72), rgba(28,28,30,0.72));
+                        --et-glass-filter: blur(36px) saturate(190%);
+                        --et-surface-container: light-dark(rgba(120,120,128,0.12), rgba(120,120,128,0.24));
+                        --et-outline: light-dark(rgba(60,60,67,0.18), rgba(84,84,88,0.5));
+                        --et-outline-variant: light-dark(rgba(60,60,67,0.08), rgba(84,84,88,0.3));
+                        --et-text: light-dark(rgba(0,0,0,0.88), rgba(255,255,255,0.92));
+                        --et-muted: light-dark(rgba(60,60,67,0.6), rgba(235,235,245,0.6));
+                        --et-success: light-dark(#34c759, #30d158);
+                        --et-error: light-dark(#ff3b30, #ff453a);
                         --pulse-color: color-mix(in oklab, var(--et-primary) 24%, transparent);
-                        --et-progress-track: color-mix(in oklab, var(--et-primary) 10%, transparent);
-                        /* M3 Expressive linear() springs */
+                        --et-progress-track: color-mix(in oklab, var(--et-primary) 12%, transparent);
+                        /* iOS-style spring physics via Chrome-native linear() */
                         --m3-spring-default: linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
                         --m3-spring-fast: linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1);
                         --m3-emphasized: linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
                     }
                     .bar {
                         position: relative;
-                        margin: 12px 24px;
+                        margin: 10px 16px;
                         height: 60px;
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
                         gap: 16px;
                         box-sizing: border-box;
-                        padding: 0 24px 8px;
+                        padding: 0 22px 6px;
                         color: var(--et-text);
                         background: var(--et-surface);
-                        border: 1px solid var(--et-outline);
+                        border: 0.5px solid var(--et-outline);
                         border-radius: 999px;
-                        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+                        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 32px 64px -16px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.35);
                         font-size: 13px;
                         line-height: 1.2;
                         pointer-events: auto;
-                        backdrop-filter: blur(28px) saturate(190%);
-                        -webkit-backdrop-filter: blur(28px) saturate(190%);
+                        backdrop-filter: var(--et-glass-filter);
+                        -webkit-backdrop-filter: var(--et-glass-filter);
                         animation: spring-entrance 450ms var(--m3-spring-default) both;
                         transition: all 300ms var(--m3-emphasized);
                     }
