@@ -1,72 +1,65 @@
 /**
- * Style for notification items
+ * iOS 26 Liquid Glass — toast notifications.
+ *
+ * Floating Liquid Glass tile that slides in from the top with a spring,
+ * carries an iOS system-color accent on the icon (system-green / blue /
+ * orange / red), and dismisses with an accelerated decelerate ease.
+ *
+ * Pure CSS — light-dark() for theme, color-mix() for accent tints,
+ * linear() springs for motion. No JS animation, no per-rule dark-mode
+ * media queries.
  */
-final-opacity = 0.95;
-animation-duration = 280ms;
+
 motion-spring = linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
 motion-emphasized = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
-motion-standard = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
 
-// ─── Base Item ───────────────────────────────────────────────────────────────
+// ─── Base Toast ────────────────────────────────────────────────────────
 .edge-translate-notifier-item {
     display: flex;
     flex-direction: row;
     justify-content: center;
     align-items: flex-start;
-    max-width: 360px;
+    max-width: 380px;
     min-width: 280px;
-    padding: 16px;
+    padding: 14px 16px;
     margin: 12px 0;
     pointer-events: all;
-    border-radius: 16px;
-    background-color: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(12px) saturate(160%);
-    -webkit-backdrop-filter: blur(12px) saturate(160%);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
-    opacity: final-opacity;
-    transition: background-color animation-duration motion-standard, border-color animation-duration motion-standard, box-shadow animation-duration motion-standard;
+    color: unquote('light-dark(rgba(0,0,0,0.88), rgba(255,255,255,0.92))');
+    background-color: unquote('light-dark(rgba(255,255,255,0.78), rgba(28,28,30,0.78))');
+    border: 0.5px solid unquote('light-dark(rgba(255,255,255,0.7), rgba(255,255,255,0.08))');
+    border-radius: 22px;
+    backdrop-filter: blur(36px) saturate(190%);
+    -webkit-backdrop-filter: blur(36px) saturate(190%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 28px rgba(0,0,0,0.18), 0 32px 64px -16px rgba(0,0,0,0.22);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+    letter-spacing: -0.2px;
+    transition: background-color 260ms motion-emphasized, box-shadow 260ms motion-emphasized;
 }
 
-// ─── Color Variants (Light) ─────────────────────────────────────────────────
+// ─── Color Variants — iOS system colors via color-mix tinted backgrounds ──
 .edge-translate-notifier-success {
-    background-color: rgba(232, 245, 233, 0.92);
-    border: 1px solid #c8e6c9;
-
-    .edge-translate-notifier-icon {
-        color: #2e7d32;
-    }
+    background-color: unquote('light-dark(color-mix(in oklab, #34c759 18%, white), color-mix(in oklab, #30d158 16%, #1c1c1e))');
+    .edge-translate-notifier-icon { color: unquote('light-dark(#1f8a3d, #30d158)'); }
 }
 
 .edge-translate-notifier-info {
-    background-color: rgba(227, 242, 253, 0.92);
-    border: 1px solid #bbdefb;
-
-    .edge-translate-notifier-icon {
-        color: #1565c0;
-    }
+    background-color: unquote('light-dark(color-mix(in oklab, #007aff 16%, white), color-mix(in oklab, #0a84ff 16%, #1c1c1e))');
+    .edge-translate-notifier-icon { color: unquote('light-dark(#0064d6, #0a84ff)'); }
 }
 
 .edge-translate-notifier-warning {
-    background-color: rgba(255, 243, 224, 0.92);
-    border: 1px solid #ffe0b2;
-
-    .edge-translate-notifier-icon {
-        color: #ef6c00;
-    }
+    background-color: unquote('light-dark(color-mix(in oklab, #ff9500 20%, white), color-mix(in oklab, #ff9f0a 18%, #1c1c1e))');
+    .edge-translate-notifier-icon { color: unquote('light-dark(#cc7700, #ff9f0a)'); }
 }
 
 .edge-translate-notifier-error {
-    background-color: rgba(255, 235, 238, 0.92);
-    border: 1px solid #ffcdd2;
-
-    .edge-translate-notifier-icon {
-        color: #c62828;
-    }
+    background-color: unquote('light-dark(color-mix(in oklab, #ff3b30 18%, white), color-mix(in oklab, #ff453a 16%, #1c1c1e))');
+    .edge-translate-notifier-icon { color: unquote('light-dark(#c11d12, #ff453a)'); }
 }
 
-// ─── Content Elements ────────────────────────────────────────────────────────
+// ─── Content ───────────────────────────────────────────────────────────
 .edge-translate-notifier-icon {
-    font-size: 18px;
+    font-size: 20px;
     margin-right: 12px;
     position: relative;
     top: 1px;
@@ -78,134 +71,76 @@ motion-standard = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.
     flex-direction: column;
     justify-content: flex-start;
     align-items: flex-start;
+    min-width: 0;
 }
 
 .edge-translate-notifier-title {
     font-size: 15px;
     font-weight: 600;
-    line-height: 1.4;
-    color: #1f1f1f;
+    letter-spacing: -0.3px;
+    line-height: 1.35;
+    color: unquote('light-dark(rgba(0,0,0,0.88), rgba(255,255,255,0.92))');
 }
 
 .edge-translate-notifier-detail {
     font-size: 13px;
-    padding-top: 6px;
+    padding-top: 4px;
     line-height: 1.4;
-    color: #444746;
+    color: unquote('light-dark(rgba(60,60,67,0.6), rgba(235,235,245,0.6))');
 }
 
 .edge-translate-notifier-close {
     cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
     margin-left: 12px;
     position: relative;
     top: 2px;
-    fill: rgba(0, 0, 0, 0.45);
-    transition: fill animation-duration motion-emphasized;
+    fill: unquote('light-dark(rgba(60,60,67,0.5), rgba(235,235,245,0.5))');
+    transition: fill 180ms motion-emphasized;
 
     &:hover {
-        fill: rgba(0, 0, 0, 0.85);
+        fill: unquote('light-dark(rgba(0,0,0,0.85), rgba(255,255,255,0.92))');
     }
 }
 
-// ─── Animations ──────────────────────────────────────────────────────────────
+// ─── Motion — iOS spring entrance, smooth dismiss ──────────────────────
 .edge-translate-notifier-show-animation {
-    animation-name: edge-translate-notifier-show-animation;
-    animation-duration: 320ms;
+    animation-name: notifier-show;
+    animation-duration: 380ms;
     animation-timing-function: motion-spring;
+    animation-fill-mode: both;
 }
 
 .edge-translate-notifier-disappear-animation {
-    animation-name: edge-translate-notifier-disappear-animation;
-    animation-duration: animation-duration;
+    animation-name: notifier-dismiss;
+    animation-duration: 220ms;
     animation-timing-function: motion-emphasized;
+    animation-fill-mode: both;
 }
 
-@keyframes edge-translate-notifier-show-animation {
+@keyframes notifier-show {
     from {
-        transform: translateY(-10px) scale(0.92);
+        transform: translateY(-12px) scale(0.96);
         opacity: 0;
     }
-
     to {
         transform: translateY(0) scale(1);
-        opacity: final-opacity;
+        opacity: 1;
     }
 }
 
-@keyframes edge-translate-notifier-disappear-animation {
+@keyframes notifier-dismiss {
     from {
         transform: translateY(0) scale(1);
-        opacity: final-opacity;
+        opacity: 1;
     }
-
     to {
-        transform: translateY(-8px) scale(0.96);
+        transform: translateY(-8px) scale(0.97);
         opacity: 0;
     }
 }
 
-// ─── Dark Mode ───────────────────────────────────────────────────────────────
-@media (prefers-color-scheme: dark) {
-    .edge-translate-notifier-item {
-        background-color: rgba(27, 32, 38, 0.88);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32), 0 1px 6px rgba(0, 0, 0, 0.24);
-    }
-
-    .edge-translate-notifier-title {
-        color: #e8eaed;
-    }
-
-    .edge-translate-notifier-detail {
-        color: #bdc1c6;
-    }
-
-    .edge-translate-notifier-close {
-        fill: rgba(255, 255, 255, 0.5);
-
-        &:hover {
-            fill: rgba(255, 255, 255, 0.9);
-        }
-    }
-
-    .edge-translate-notifier-success {
-        background-color: rgba(27, 46, 30, 0.88);
-        border: 1px solid #2e7d32;
-
-        .edge-translate-notifier-icon {
-            color: #81c784;
-        }
-    }
-
-    .edge-translate-notifier-info {
-        background-color: rgba(15, 32, 56, 0.88);
-        border: 1px solid #1565c0;
-
-        .edge-translate-notifier-icon {
-            color: #90caf9;
-        }
-    }
-
-    .edge-translate-notifier-warning {
-        background-color: rgba(51, 34, 17, 0.88);
-        border: 1px solid #ef6c00;
-
-        .edge-translate-notifier-icon {
-            color: #ffb74d;
-        }
-    }
-
-    .edge-translate-notifier-error {
-        background-color: rgba(55, 29, 29, 0.88);
-        border: 1px solid #c62828;
-
-        .edge-translate-notifier-icon {
-            color: #e57373;
-        }
-    }
-}
-
-// ─── Reduced Motion ──────────────────────────────────────────────────────────
+// ─── Reduced motion ───────────────────────────────────────────────────
 @media (prefers-reduced-motion: reduce) {
     .edge-translate-notifier-show-animation,
     .edge-translate-notifier-disappear-animation {

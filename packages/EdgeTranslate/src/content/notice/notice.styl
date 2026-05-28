@@ -1,240 +1,149 @@
-@import '../display/library/notifier/notifier.styl';
+@import '../display/library/notifier/notifier.styl'
+@import '../../common/style/input.styl'
 
-// ────────────────────────────────────────────
-// Design Tokens (Material You)
-// ────────────────────────────────────────────
-m3-primary = #0b57d0
-m3-on-surface = #1f1f1f
-m3-on-surface-variant = #5f6368
-m3-outline-variant = #dde6ef
-m3-surface = #ffffff
-m3-bg = #f8fafd
-m3-surface-container = #f1f4f8
-m3-hover = rgba(11, 87, 208, 0.08)
-m3-on-primary-container = #041e49
+// ════════════════════════════════════════════════════════════════════════
+// EdgeTranslate Notice page — iOS 26 Liquid Glass
+//
+// A long-scroll informational page (changelog / about / permissions).
+// Same liquid glass app-window pattern as the options page.
+// ════════════════════════════════════════════════════════════════════════
 
-motion-fast = 180ms linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)
-motion-standard = 280ms linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)
-
-// ────────────────────────────────────────────
-// Base
-// ────────────────────────────────────────────
 html,
-body {
-	width: 100%;
-	min-height: 100%;
-	padding: 0;
-	margin: 0;
-	background:
-		radial-gradient(circle at 0% 0%, rgba(211, 227, 253, 0.7), transparent 35rem),
-		radial-gradient(circle at 100% 100%, rgba(232, 240, 254, 0.6), transparent 35rem),
-		m3-bg;
-	color: m3-on-surface;
-	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
-		Cantarell, "Helvetica Neue", Arial, sans-serif;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
-	font-variant-ligatures: none;
-	font-weight: 400;
-}
+body
+    width: 100%
+    min-height: 100%
+    padding: 0
+    margin: 0
+    color: unquote('var(--ios-label-primary)')
+    background: unquote('var(--ios-bg-grouped)')
+    font-family: unquote('var(--ios-font-stack)')
+    -webkit-font-smoothing: antialiased
+    -moz-osx-font-smoothing: grayscale
+    font-variant-ligatures: none
+    font-weight: 400
+    letter-spacing: -0.2px
 
-body {
-	padding: 32px 16px;
-	box-sizing: border-box;
-}
+body
+    position: relative
+    padding: 32px 16px
+    box-sizing: border-box
 
-// ────────────────────────────────────────────
-// Floating Glass Container
-// ────────────────────────────────────────────
-#notice {
-	width: 100%;
-	max-width: 920px;
-	margin: 0 auto;
-	padding: 0 0 28px;
-	background: rgba(255, 255, 255, 0.55);
-	backdrop-filter: blur(24px) saturate(180%);
-	-webkit-backdrop-filter: blur(24px) saturate(180%);
-	border: 1px solid rgba(255, 255, 255, 0.65);
-	border-radius: 24px;
-	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.02);
-	overflow: hidden;
-	transition: background-color motion-standard, border-color motion-standard, box-shadow motion-standard;
-}
+// Ambient mesh — same iOS system-color radial blobs as popup/options.
+body::before
+    content: ''
+    position: fixed
+    inset: -40px
+    z-index: 0
+    pointer-events: none
+    background: unquote('radial-gradient(120% 80% at 0% 0%, color-mix(in oklab, var(--ios-system-blue) 14%, transparent), transparent 56%), radial-gradient(120% 80% at 100% 100%, color-mix(in oklab, var(--ios-system-teal) 12%, transparent), transparent 60%)')
 
-// ────────────────────────────────────────────
-// Header
-// ────────────────────────────────────────────
-header {
-	min-height: 72px;
-	padding: 16px 28px;
-	box-sizing: border-box;
-	display: flex;
-	align-items: center;
-	gap: 14px;
-	background: rgba(255, 255, 255, 0.5);
-	backdrop-filter: blur(20px);
-	-webkit-backdrop-filter: blur(20px);
-	border-bottom: 1px solid rgba(255, 255, 255, 0.6);
-	color: m3-on-surface;
-	font-size: 24px;
-	font-weight: 600;
-	letter-spacing: 0;
-}
+// ─── Glass app window ──────────────────────────────────────────────────
+#notice
+    position: relative
+    z-index: 1
+    width: 100%
+    max-width: 920px
+    margin: 0 auto
+    padding: 0 0 28px
+    overflow: hidden
+    border: 0.5px solid unquote('var(--ios-glass-stroke)')
+    border-radius: unquote('var(--ios-radius-3xl)')
+    background: unquote('var(--ios-glass-thick)')
+    backdrop-filter: unquote('var(--ios-glass-filter-thick)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-thick)')
+    box-shadow: unquote('inset 0 1px 0 rgba(255,255,255,0.35), var(--ios-elev-floating)')
 
-header img {
-	width: 40px;
-	height: 40px;
-	border-radius: 8px;
-	box-shadow: 0 1px 2px rgba(60, 64, 67, 0.16);
-}
+// ─── Header (sticky Liquid Glass toolbar) ──────────────────────────────
+header
+    position: sticky
+    top: 0
+    z-index: 4
+    min-height: 76px
+    padding: 16px 32px
+    box-sizing: border-box
+    display: flex
+    align-items: center
+    gap: 14px
+    color: unquote('var(--ios-label-primary)')
+    font-size: 22px
+    font-weight: 700
+    letter-spacing: -0.5px
+    background: unquote('var(--ios-glass-regular)')
+    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+    border-bottom: 0.5px solid unquote('var(--md-sys-color-outline-variant)')
 
-.space {
-	display: none;
-}
+header img
+    width: 44px
+    height: 44px
+    border-radius: 12px
+    box-shadow: unquote('var(--ios-elev-1)')
 
-// ────────────────────────────────────────────
-// Content
-// ────────────────────────────────────────────
-h1 {
-	margin: 28px 32px 12px;
-	color: m3-on-surface;
-	font-size: 20px;
-	font-weight: 700;
-	letter-spacing: 0;
-	line-height: 1.3;
-}
+.space
+    display: none
+
+// ─── Content ───────────────────────────────────────────────────────────
+h1
+    margin: 28px 32px 12px
+    color: unquote('var(--ios-label-primary)')
+    font-size: 22px
+    font-weight: 700
+    letter-spacing: -0.4px
+    line-height: 1.3
 
 ol,
-ul {
-	box-sizing: border-box;
-	color: m3-on-surface;
-	font-size: 15px;
-	line-height: 1.65;
-}
+ul
+    box-sizing: border-box
+    color: unquote('var(--ios-label-primary)')
+    font-size: 15px
+    line-height: 1.65
 
-ol {
-	margin: 0 32px 18px;
-	padding: 16px 20px 16px 42px;
-	background: rgba(255, 255, 255, 0.6);
-	border: 1px solid m3-outline-variant;
-	border-radius: 12px;
-}
+ol
+    margin: 0 32px 18px
+    padding: 16px 20px 16px 42px
+    background: unquote('var(--ios-fill-quaternary)')
+    border-radius: unquote('var(--ios-radius-md)')
 
-ul {
-	margin: 8px 0 0;
-	padding: 10px 12px 10px 30px;
-	background: m3-surface-container;
-	border-radius: 8px;
-}
+ul
+    margin: 8px 0 0
+    padding: 10px 12px 10px 30px
+    background: unquote('var(--ios-fill-quaternary)')
+    border-radius: unquote('var(--ios-radius-sm)')
 
-li {
-	margin: 4px 0;
-}
+li
+    margin: 4px 0
 
-a {
-	color: m3-primary;
-	border-radius: 6px;
-	font-weight: 600;
-	text-decoration: none;
-	overflow-wrap: anywhere;
-	transition: background-color motion-fast, color motion-fast;
-}
+a
+    color: unquote('var(--ios-tint)')
+    border-radius: 6px
+    font-weight: 500
+    text-decoration: none
+    overflow-wrap: anywhere
+    transition: background-color motion-state-fast, color motion-state-fast
 
-a:hover {
-	background: m3-hover;
-	text-decoration: underline;
-}
+a:hover
+    background: unquote('color-mix(in oklab, var(--ios-tint) 12%, transparent)')
+    text-decoration: underline
 
-b {
-	color: m3-on-primary-container;
-	font-weight: 700;
-}
+b
+    color: unquote('var(--ios-label-primary)')
+    font-weight: 600
 
-// ────────────────────────────────────────────
-// Dark Mode
-// ────────────────────────────────────────────
-@media (prefers-color-scheme: dark) {
-	html,
-	body {
-		background:
-			radial-gradient(circle at 0% 0%, rgba(21, 32, 43, 0.9), transparent 35rem),
-			radial-gradient(circle at 100% 100%, rgba(31, 59, 104, 0.52), transparent 35rem),
-			#15191d;
-		color: #e8eaed;
-		color-scheme: dark;
-	}
-
-	#notice {
-		background: rgba(27, 32, 38, 0.55);
-		border-color: rgba(255, 255, 255, 0.08);
-		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28), 0 4px 12px rgba(0, 0, 0, 0.18);
-	}
-
-	header {
-		background: rgba(32, 38, 45, 0.5);
-		border-bottom-color: rgba(255, 255, 255, 0.06);
-		color: #e8eaed;
-	}
-
-	header img {
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.42);
-	}
-
-	h1,
-	ol,
-	ul {
-		color: #e8eaed;
-	}
-
-	ol {
-		background: rgba(27, 32, 38, 0.6);
-		border-color: #3d4651;
-	}
-
-	ul {
-		background: #242a31;
-	}
-
-	a {
-		color: #a8c7fa;
-	}
-
-	a:hover {
-		background: rgba(168, 199, 250, 0.14);
-	}
-
-	b {
-		color: #d3e3fd;
-	}
-}
-
-// ────────────────────────────────────────────
-// Responsive
-// ────────────────────────────────────────────
-@media (max-width: 640px) {
-	body {
-		padding: 0;
-	}
-
-	#notice {
-		min-height: 100vh;
-		border-radius: 0;
-		box-shadow: none;
-		border: 0;
-	}
-
-	header {
-		padding: 18px 20px;
-		font-size: 22px;
-	}
-
-	h1 {
-		margin: 24px 20px 10px;
-		font-size: 18px;
-	}
-
-	ol {
-		margin: 0 20px 16px;
-		padding: 14px 16px 14px 34px;
-	}
-}
+// ─── Responsive ────────────────────────────────────────────────────────
+@media (max-width: 640px)
+    body
+        padding: 0
+    #notice
+        min-height: 100vh
+        border-radius: 0
+        box-shadow: none
+        border: 0
+    header
+        padding: 18px 20px
+        font-size: 20px
+    h1
+        margin: 24px 20px 10px
+        font-size: 18px
+    ol
+        margin: 0 20px 16px
+        padding: 14px 16px 14px 34px

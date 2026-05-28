@@ -1,78 +1,64 @@
-/* EdgeTranslate PDF viewer Material skin.
-   Keep PDF.js vendor CSS untouched; all extension-specific styling lives here. */
+/* EdgeTranslate PDF viewer — iOS 26 Liquid Glass skin.
+   Keep PDF.js vendor CSS untouched; all extension-specific styling lives here.
+   Theme tokens auto-flip via light-dark() instead of a parallel @media block. */
 
 :root {
   color-scheme: light dark;
+  accent-color: light-dark(#007aff, #0a84ff);
+  scrollbar-color: light-dark(rgba(60, 60, 67, 0.36), rgba(235, 235, 245, 0.36)) transparent;
+  scrollbar-width: thin;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  letter-spacing: -0.2px;
 
-  --et-primary: #0b57d0;
-  --et-primary-hover: #0842a0;
-  --et-primary-container: #d3e3fd;
+  /* iOS 26 system palette */
+  --et-primary: light-dark(#007aff, #0a84ff);
+  --et-primary-hover: light-dark(#0064d6, #4ca7ff);
+  --et-primary-container: light-dark(color-mix(in oklab, #007aff 18%, #ffffff), color-mix(in oklab, #0a84ff 18%, #1c1c1e));
   --et-on-primary: #ffffff;
-  --et-secondary: #146c43;
-  --et-secondary-container: #c8ead4;
-  --et-tertiary: #7a4d00;
-  --et-tertiary-container: #ffddb0;
+  --et-secondary: light-dark(#5856d6, #5e5ce6);
+  --et-secondary-container: light-dark(color-mix(in oklab, #5856d6 16%, #ffffff), color-mix(in oklab, #5e5ce6 16%, #1c1c1e));
+  --et-tertiary: light-dark(#34c759, #30d158);
+  --et-tertiary-container: light-dark(color-mix(in oklab, #34c759 16%, #ffffff), color-mix(in oklab, #30d158 16%, #1c1c1e));
 
-  --et-bg: #f7f9fc;
-  --et-surface: #ffffff;
-  --et-surface-dim: #dde3ea;
-  --et-surface-container-low: #f1f4f8;
-  --et-surface-container: #edf2f7;
-  --et-surface-container-high: #e6edf4;
-  --et-surface-container-highest: #dde6ef;
-  --et-text: #1f1f1f;
-  --et-muted: #5f6368;
-  --et-outline: #c4c7c5;
-  --et-outline-variant: #e1e3e1;
+  /* iOS 26 surfaces — grouped bg + glass tiers */
+  --et-bg: light-dark(#f2f2f7, #000000);
+  --et-surface: light-dark(#ffffff, #1c1c1e);
+  --et-surface-dim: light-dark(#e5e5ea, #000000);
+  --et-surface-container-low: light-dark(#f9f9f9, #1c1c1e);
+  --et-surface-container: light-dark(#f2f2f7, #2c2c2e);
+  --et-surface-container-high: light-dark(#e5e5ea, #3a3a3c);
+  --et-surface-container-highest: light-dark(#d1d1d6, #48484a);
 
-  --et-radius: 8px;
-  --et-menu-item-radius: 8px;
-  --et-state-hover: rgba(11, 87, 208, 0.08);
-  --et-state-pressed: rgba(11, 87, 208, 0.12);
-  --et-focus-ring: rgba(11, 87, 208, 0.38);
-  --et-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
-  --et-shadow-low: 0 1px 2px rgba(60, 64, 67, 0.18), 0 1px 3px rgba(60, 64, 67, 0.12);
-  --et-motion-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
-  --et-motion-standard: 180ms cubic-bezier(0.2, 0, 0, 1);
-  --et-motion-emphasized: 260ms cubic-bezier(0.2, 0, 0, 1);
+  /* iOS 26 labels (rgba with opacity for adaptive contrast) */
+  --et-text: light-dark(rgba(0, 0, 0, 0.88), rgba(255, 255, 255, 0.92));
+  --et-muted: light-dark(rgba(60, 60, 67, 0.6), rgba(235, 235, 245, 0.6));
+  --et-outline: light-dark(rgba(60, 60, 67, 0.29), rgba(84, 84, 88, 0.65));
+  --et-outline-variant: light-dark(rgba(60, 60, 67, 0.12), rgba(84, 84, 88, 0.35));
+
+  /* iOS continuous shapes */
+  --et-radius: 12px;
+  --et-menu-item-radius: 10px;
+
+  /* iOS state layers */
+  --et-state-hover: color-mix(in oklab, var(--et-primary) 10%, transparent);
+  --et-state-pressed: color-mix(in oklab, var(--et-primary) 16%, transparent);
+  --et-focus-ring: color-mix(in oklab, var(--et-primary) 35%, transparent);
+
+  /* iOS soft shadows — tighter near, deeper far */
+  --et-shadow: light-dark(0 1px 2px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06), 0 12px 24px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px rgba(0, 0, 0, 0.4));
+  --et-shadow-low: light-dark(0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.32));
+
+  /* iOS-style linear() motion (spring + emphasized) */
+  --et-motion-fast: 120ms linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
+  --et-motion-standard: 180ms linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
+  --et-motion-emphasized: 260ms linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
 
   --toolbar-height: 56px;
   --toolbar-vertical-padding: 8px;
   --toolbar-button-hpad: 10px;
   --icon-size: 18px;
-  --menu-item-height: 40px;
+  --menu-item-height: 44px;
   --menu-width: 280px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --et-primary: #a8c7fa;
-    --et-primary-hover: #d3e3fd;
-    --et-primary-container: #062e6f;
-    --et-on-primary: #062e6f;
-    --et-secondary: #9bd4ad;
-    --et-secondary-container: #0f3f28;
-    --et-tertiary: #f6bd61;
-    --et-tertiary-container: #442b00;
-
-    --et-bg: #111418;
-    --et-surface: #1b1f23;
-    --et-surface-dim: #111418;
-    --et-surface-container-low: #1a1f24;
-    --et-surface-container: #20262b;
-    --et-surface-container-high: #293037;
-    --et-surface-container-highest: #343c43;
-    --et-text: #e3e3e3;
-    --et-muted: #bdc1c6;
-    --et-outline: #8e918f;
-    --et-outline-variant: #3c4043;
-
-    --et-state-hover: rgba(168, 199, 250, 0.12);
-    --et-state-pressed: rgba(168, 199, 250, 0.18);
-    --et-focus-ring: rgba(168, 199, 250, 0.44);
-    --et-shadow: 0 10px 28px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
-    --et-shadow-low: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
-  }
 }
 
 html[data-theme="light"] {

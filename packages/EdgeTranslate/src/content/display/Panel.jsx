@@ -46,7 +46,7 @@ const MotionFloatingSpotlightIn = "210ms cubic-bezier(0.2, 0, 0, 1)";
 const MotionFloatingSpotlightOut = "170ms cubic-bezier(0.32, 0, 0.67, 0)";
 const MotionSnappy = "360ms cubic-bezier(0.16, 1, 0.3, 1)";
 const DetachResizeMotion = "240ms cubic-bezier(0.2, 1, 0.2, 1)";
-const PanelRadius = "24px";
+const PanelRadius = "28px";
 const FloatingMargin = 16;
 const SlideOverMargin = 16;
 const SlideOverWidthMin = 320;
@@ -1549,17 +1549,12 @@ const GlobalStyle = createGlobalStyle`
  * }} props
  */
 const Panel = styled.div`
-    --et-outline-color: rgba(255, 255, 255, 0.76);
-    --et-glass-top: rgba(255, 255, 255, 0.9);
-    --et-glass-bottom: rgba(248, 250, 253, 0.56);
-    --et-glass-sheen: rgba(255, 255, 255, 0.7);
-
-    @media (prefers-color-scheme: dark) {
-        --et-outline-color: rgba(255, 255, 255, 0.1);
-        --et-glass-top: rgba(33, 39, 46, 0.88);
-        --et-glass-bottom: rgba(22, 27, 32, 0.62);
-        --et-glass-sheen: rgba(255, 255, 255, 0.08);
-    }
+    /* iOS 26 Liquid Glass tokens — light-dark() auto-flips for theme. */
+    color-scheme: light dark;
+    --et-outline-color: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
+    --et-glass-top: light-dark(rgba(255, 255, 255, 0.76), rgba(28, 28, 30, 0.78));
+    --et-glass-bottom: light-dark(rgba(255, 255, 255, 0.66), rgba(28, 28, 30, 0.66));
+    --et-glass-sheen: light-dark(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.08));
 
     display: flex;
     flex-direction: column;
@@ -1573,14 +1568,12 @@ const Panel = styled.div`
     border-radius: ${PanelRadius};
     overflow: hidden;
     isolation: isolate;
-    box-shadow: 0 24px 64px rgba(30, 47, 72, 0.2), 0 8px 18px rgba(30, 47, 72, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.78);
-    background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.94), transparent 34%),
-        radial-gradient(circle at 92% 8%, rgba(211, 227, 253, 0.52), transparent 32%),
-        linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 28px rgba(0, 0, 0, 0.18),
+        0 32px 64px -16px rgba(0, 0, 0, 0.22);
+    background: var(--et-glass-top);
     background-clip: padding-box;
-    backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
-    -webkit-backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
+    backdrop-filter: blur(36px) saturate(190%);
+    -webkit-backdrop-filter: blur(36px) saturate(190%);
     opacity: 1;
     scale: 1;
     transform-origin: 50% 24px;
@@ -1609,11 +1602,8 @@ const Panel = styled.div`
     border: 1px solid var(--et-outline-color);
 
     &[data-display-type="fixed"] {
-        box-shadow: 0 28px 70px rgba(30, 47, 72, 0.22), 0 12px 34px rgba(30, 47, 72, 0.14),
-            inset 0 1px 0 rgba(255, 255, 255, 0.82);
-        background: radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.94), transparent 34%),
-            radial-gradient(circle at 94% 10%, rgba(211, 227, 253, 0.56), transparent 30%),
-            linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 253, 0.62));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 12px 34px rgba(0, 0, 0, 0.2),
+            0 32px 64px -16px rgba(0, 0, 0, 0.24);
     }
 
     &[data-motion="undocking"] {
@@ -1681,14 +1671,10 @@ const Panel = styled.div`
         opacity: 0.58;
     }
 
+    /* Dark mode: --et-glass-* tokens above already flip via light-dark(). The
+       text color also adapts via the css var color-scheme matching. */
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.1), transparent 34%),
-            radial-gradient(circle at 92% 8%, rgba(31, 59, 104, 0.42), transparent 32%),
-            linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
-        border-color: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 24px 56px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.36),
-            0 1px 4px rgba(0, 0, 0, 0.2);
     }
 `;
 
