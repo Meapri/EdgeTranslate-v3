@@ -188,10 +188,7 @@ select,
     flex: 1 1 auto;
     padding-left: 20px;
     padding-right: 20px;
-
-    &:focus {
-        transform: scale(1.01);
-    }
+    // M3E: focus uses focus ring + bg state, NOT scale. Scale is reserved for :active press.
 }
 
 select {

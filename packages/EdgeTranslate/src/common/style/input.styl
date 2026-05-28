@@ -67,14 +67,47 @@ m3-spring-slow = linear(0, 0.013 3%, 0.082 8%, 0.273 16%, 0.5 24%, 0.7 32%, 0.86
 m3-emphasized = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)
 m3-emphasized-accelerate = linear(0, 0.002 8.5%, 0.024 19.3%, 0.108 30%, 0.279 41.3%, 0.526 53%, 0.747 63%, 0.892 73%, 0.969 84%, 1)
 
-// Motion shortcuts (duration + easing)
-motion-micro = 120ms cubic-bezier(0.2, 0, 0, 1)
-motion-fast = 180ms m3-emphasized
-motion-standard = 280ms m3-emphasized
-motion-emphasized = 380ms m3-emphasized
-motion-spring = 420ms m3-spring-default
-motion-spring-strong = 520ms m3-spring-fast
-motion-spring-slow = 600ms m3-spring-slow
+// ─── M3 Expressive duration tokens (Android 16~17) ────────────────────────
+// Match the spec exactly so we can compose duration + easing semantically.
+dur-short-1 = 50ms
+dur-short-2 = 100ms
+dur-short-3 = 150ms
+dur-short-4 = 200ms
+dur-medium-1 = 250ms
+dur-medium-2 = 300ms
+dur-medium-3 = 350ms
+dur-medium-4 = 400ms
+dur-long-1 = 450ms
+dur-long-2 = 500ms
+dur-long-3 = 550ms
+dur-long-4 = 600ms
+
+// ─── Purposeful motion (use these — NOT bare m3-spring everywhere) ────────
+// state-change → smooth emphasized (color / hover-elev / state layer)
+// entrance     → emphasized decelerate + spatial spring for transform only
+// exit         → emphasized accelerate
+// press        → fast spring on transform + border-radius
+// transition   → standard between two known visual states
+motion-state-fast = dur-short-2 m3-emphasized
+motion-state-standard = dur-short-4 m3-emphasized
+motion-state-slow = dur-medium-2 m3-emphasized
+
+motion-press-transform = dur-short-3 m3-spring-fast
+motion-press-shape = dur-short-4 m3-spring-default
+
+motion-entrance-fade = dur-medium-1 m3-emphasized
+motion-entrance-spatial = dur-medium-4 m3-spring-default
+motion-exit = dur-short-3 m3-emphasized-accelerate
+
+// Back-compat aliases (kept so existing styl files don't break, but new code
+// should reach for the semantic names above).
+motion-micro = motion-state-fast
+motion-fast = motion-state-fast
+motion-standard = motion-state-standard
+motion-emphasized = motion-entrance-fade
+motion-spring = motion-press-transform
+motion-spring-strong = motion-entrance-spatial
+motion-spring-slow = motion-entrance-spatial
 
 // Elevation shadows
 elevation-1 = 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)
@@ -351,6 +384,30 @@ scale = 1.3
     // System font stack — uses OS native (Roboto on Android, SF on macOS, Segoe on Win)
     --md-sys-typography-font-stack: unquote('"Roboto Flex", Roboto, system-ui, -apple-system, "Google Sans", "Segoe UI", sans-serif')
 
+    // ─── M3 Expressive Typography Scale (Roboto Flex) ────────────────────
+    // size / line-height / letter-spacing per Android 16~17 spec
+    --md-sys-typescale-display-large: 400 57px/64px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-display-medium: 400 45px/52px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-display-small: 400 36px/44px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-headline-large: 500 32px/40px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-headline-medium: 500 28px/36px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-headline-small: 500 24px/32px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-title-large: 500 22px/28px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-title-medium: 500 16px/24px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-title-small: 500 14px/20px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-body-large: 400 16px/24px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-body-medium: 400 14px/20px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-body-small: 400 12px/16px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-label-large: 500 14px/20px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-label-medium: 500 12px/16px var(--md-sys-typography-font-stack)
+    --md-sys-typescale-label-small: 500 11px/16px var(--md-sys-typography-font-stack)
+
+    // ─── State layer opacities (M3E hover/focus/pressed/drag) ─────────────
+    --md-sys-state-hover-opacity: 0.08
+    --md-sys-state-focus-opacity: 0.10
+    --md-sys-state-pressed-opacity: 0.12
+    --md-sys-state-dragged-opacity: 0.16
+
     // M3 Expressive elevation (smaller, softer shadows than M2)
     --md-sys-elevation-0: none
     --md-sys-elevation-1: unquote('0 1px 2px rgba(0, 0, 0, 0.08), 0 1px 3px 1px color-mix(in oklab, var(--md-sys-color-primary) 8%, transparent)')
@@ -409,29 +466,44 @@ scale = 1.3
     border-radius: var(--md-sys-shape-corner-md)
 
 
-// 2) Material 3 Expressive Ripple — a radial fill that emerges from the
-//    centre on press. Implemented as a transparent pseudo-element so the
-//    parent's hit-target and styling stay untouched.
+// 2) Material 3 State Layer + Press Ripple — per the M3E guideline, hover
+//    surfaces a tonal state layer (8% opacity, no scale, no movement);
+//    focus uses 10%; pressed uses 12% PLUS a radial ripple from the press
+//    point. Hover scale is intentionally NOT used — it's reserved for press.
 .m3-ripple
     position: relative
     overflow: hidden
     isolation: isolate
-.m3-ripple::after
+.m3-ripple::before
+    /* State layer — flat tonal tint, no movement */
     content: ''
     position: absolute
     inset: 0
     border-radius: inherit
     pointer-events: none
-    background-image: unquote('radial-gradient(circle at center, color-mix(in oklab, var(--md-sys-color-primary) 22%, transparent) 0%, transparent 70%)')
+    background-color: unquote('var(--md-sys-color-primary)')
     opacity: 0
-    transform: scale(0.4)
-    transition: unquote('opacity 240ms var(--md-sys-motion-spring-default-effects), transform 360ms var(--md-sys-motion-spring-default-spatial)')
-.m3-ripple:hover::after
-    opacity: 0.55
-    transform: scale(1)
+    transition: unquote('opacity var(--md-sys-state-fast, 100ms) var(--md-sys-motion-emphasized)')
+.m3-ripple:hover::before
+    opacity: var(--md-sys-state-hover-opacity)
+.m3-ripple:focus-visible::before
+    opacity: var(--md-sys-state-focus-opacity)
+.m3-ripple:active::before
+    opacity: var(--md-sys-state-pressed-opacity)
+.m3-ripple::after
+    /* Press ripple — only triggered while pressed, no hover/scale */
+    content: ''
+    position: absolute
+    inset: 0
+    border-radius: inherit
+    pointer-events: none
+    background-image: unquote('radial-gradient(circle at center, color-mix(in oklab, var(--md-sys-color-primary) 26%, transparent) 0%, transparent 70%)')
+    opacity: 0
+    transform: scale(0.55)
+    transition: unquote('opacity 180ms var(--md-sys-motion-spring-default-effects), transform 360ms var(--md-sys-motion-spring-default-spatial)')
 .m3-ripple:active::after
-    opacity: 0.85
-    transform: scale(1.05)
+    opacity: 1
+    transform: scale(1.1)
 
 
 // 3) Staggered list entrance — children animate in sequence with a

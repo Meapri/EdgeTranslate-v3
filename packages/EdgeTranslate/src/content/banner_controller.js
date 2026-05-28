@@ -4179,7 +4179,7 @@ class BannerController {
                         transition: all 300ms var(--m3-emphasized);
                     }
                     .bar:hover {
-                        transform: translateY(1px) scale(1.008);
+                        /* M3E hover: no transform, only elevation/state */
                         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5);
                         border-color: rgba(26, 115, 232, 0.24);
                     }
@@ -4283,7 +4283,7 @@ class BannerController {
                         transition: all 300ms var(--m3-spring-fast);
                     }
                     .provider:hover {
-                        transform: translateY(-1px) scale(1.03);
+                        /* M3E hover: shadow only, no scale */
                         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
                     }
                     .provider span {
@@ -4306,7 +4306,7 @@ class BannerController {
                         transition: all 300ms var(--m3-spring-fast);
                     }
                     .model:hover {
-                        transform: translateY(-1px) scale(1.03);
+                        /* M3E hover: shadow only, no scale */
                         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
                     }
                     .provider-logo {
@@ -4388,8 +4388,8 @@ class BannerController {
                         fill: currentColor;
                     }
                     button:hover {
+                        /* M3E hover: state-layer bg only */
                         background: var(--et-primary-container);
-                        transform: scale(1.06);
                     }
                     button:active {
                         transform: scale(0.92);
@@ -4402,7 +4402,6 @@ class BannerController {
                         background: var(--et-primary-container);
                         color: var(--et-on-primary-container);
                         border-color: transparent;
-                        transform: scale(1.06);
                     }
                     .hide:active {
                         transform: scale(0.92);
@@ -4418,7 +4417,7 @@ class BannerController {
                     .close:hover {
                         background: var(--et-surface-container);
                         color: var(--et-text);
-                        transform: rotate(90deg) scale(1.1);
+                        transform: rotate(90deg);
                     }
                     .close:active {
                         transform: rotate(180deg) scale(0.9);
@@ -4501,7 +4500,6 @@ class BannerController {
                         background: var(--et-primary-container);
                         color: var(--et-on-primary-container);
                         border-color: transparent;
-                        transform: scale(1.06);
                     }
                     .restore:active {
                         transform: scale(0.92);
