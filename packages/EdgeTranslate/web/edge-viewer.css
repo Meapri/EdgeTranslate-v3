@@ -61,44 +61,47 @@
   --menu-width: 280px;
 }
 
+/* Manual theme overrides — only applied when the user explicitly forces light
+   or dark via the in-app toggle. The default :root already adapts to OS
+   theme through light-dark(), so most users never enter these blocks. */
 html[data-theme="light"] {
   color-scheme: light;
-  --et-primary: #0b57d0;
-  --et-primary-hover: #0842a0;
-  --et-primary-container: #d3e3fd;
+  --et-primary: #007aff;
+  --et-primary-hover: #0064d6;
+  --et-primary-container: color-mix(in oklab, #007aff 18%, #ffffff);
   --et-on-primary: #ffffff;
-  --et-bg: #f8fafd;
+  --et-bg: #f2f2f7;
   --et-surface: #ffffff;
-  --et-surface-container: #eef3f8;
-  --et-surface-container-high: #e8eef5;
-  --et-text: #1f1f1f;
-  --et-muted: #5f6368;
-  --et-outline: #c4c7c5;
-  --et-outline-variant: #e1e3e1;
-  --et-state-hover: rgba(11, 87, 208, 0.08);
-  --et-state-pressed: rgba(11, 87, 208, 0.12);
-  --et-focus-ring: rgba(11, 87, 208, 0.38);
-  --et-shadow: 0 8px 24px rgba(60, 64, 67, 0.18), 0 2px 6px rgba(60, 64, 67, 0.12);
+  --et-surface-container: #f2f2f7;
+  --et-surface-container-high: #e5e5ea;
+  --et-text: rgba(0, 0, 0, 0.88);
+  --et-muted: rgba(60, 60, 67, 0.6);
+  --et-outline: rgba(60, 60, 67, 0.29);
+  --et-outline-variant: rgba(60, 60, 67, 0.12);
+  --et-state-hover: rgba(0, 122, 255, 0.1);
+  --et-state-pressed: rgba(0, 122, 255, 0.16);
+  --et-focus-ring: rgba(0, 122, 255, 0.35);
+  --et-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06), 0 12px 24px rgba(0, 0, 0, 0.1);
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --et-primary: #a8c7fa;
-  --et-primary-hover: #d3e3fd;
-  --et-primary-container: #062e6f;
-  --et-on-primary: #062e6f;
-  --et-bg: #101418;
-  --et-surface: #1b1f23;
-  --et-surface-container: #22272b;
-  --et-surface-container-high: #2a3035;
-  --et-text: #e3e3e3;
-  --et-muted: #bdc1c6;
-  --et-outline: #8e918f;
-  --et-outline-variant: #3c4043;
-  --et-state-hover: rgba(168, 199, 250, 0.12);
-  --et-state-pressed: rgba(168, 199, 250, 0.18);
-  --et-focus-ring: rgba(168, 199, 250, 0.44);
-  --et-shadow: 0 10px 28px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
+  --et-primary: #0a84ff;
+  --et-primary-hover: #4ca7ff;
+  --et-primary-container: color-mix(in oklab, #0a84ff 18%, #1c1c1e);
+  --et-on-primary: #ffffff;
+  --et-bg: #000000;
+  --et-surface: #1c1c1e;
+  --et-surface-container: #2c2c2e;
+  --et-surface-container-high: #3a3a3c;
+  --et-text: rgba(255, 255, 255, 0.92);
+  --et-muted: rgba(235, 235, 245, 0.6);
+  --et-outline: rgba(84, 84, 88, 0.65);
+  --et-outline-variant: rgba(84, 84, 88, 0.35);
+  --et-state-hover: rgba(10, 132, 255, 0.18);
+  --et-state-pressed: rgba(10, 132, 255, 0.24);
+  --et-focus-ring: rgba(10, 132, 255, 0.4);
+  --et-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 html[data-theme],
@@ -683,7 +686,7 @@ select {
   min-height: 40px !important;
   padding: 0 !important;
   gap: 2px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
 }
 
@@ -814,7 +817,7 @@ select {
   max-height: min(760px, calc(100vh - 40px)) !important;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   border-spacing: 0 !important;
   overflow: auto !important;
   background: var(--et-surface) !important;
@@ -852,7 +855,7 @@ select {
   width: 40px;
   height: 40px;
   margin-inline-end: 14px;
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--et-primary-container);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 18%, transparent);
 }
@@ -876,7 +879,7 @@ select {
   align-items: start !important;
   margin: 0 20px !important;
   padding: 10px 8px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   box-sizing: border-box !important;
 }
 
@@ -944,7 +947,7 @@ select {
   max-height: min(760px, calc(100vh - 40px)) !important;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   overflow: hidden !important;
   background:
     linear-gradient(180deg, var(--et-surface-container-low), var(--et-surface) 136px),
@@ -977,7 +980,7 @@ select {
   width: 40px;
   height: 40px;
   margin-inline-end: 14px;
-  border-radius: 8px;
+  border-radius: 12px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--et-primary) 15%, transparent), transparent),
     var(--et-primary-container);
@@ -1003,7 +1006,7 @@ select {
   align-items: start !important;
   margin: 0 20px !important;
   padding: 10px 8px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   line-height: 1.42 !important;
   transition: background-color var(--et-motion-fast), color var(--et-motion-fast);
 }
@@ -1623,7 +1626,7 @@ body {
 #editorModeButtons {
   min-height: 40px !important;
   padding: 2px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 70%, transparent);
 }
@@ -1713,7 +1716,7 @@ body {
   height: 40px !important;
   padding: 0 8px !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-primary-container) !important;
   color: var(--et-primary) !important;
   font-size: 15px !important;
@@ -1737,7 +1740,7 @@ body {
   height: 40px !important;
   min-width: 150px !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-high) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 80%, transparent) !important;
 }
@@ -1803,7 +1806,7 @@ html[data-theme="dark"] .pdfViewer .page {
 .colorPicker .dropdown,
 #dialogContainer dialog {
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface) !important;
   box-shadow: var(--et-shadow) !important;
   outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 72%, transparent) !important;
@@ -1831,7 +1834,7 @@ html[data-theme="dark"] .pdfViewer .page {
   justify-content: flex-start !important;
   padding: 0 12px !important;
   gap: 12px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   color: var(--et-text) !important;
   font-size: 13px !important;
   font-weight: 600 !important;
@@ -1891,7 +1894,7 @@ html[data-theme="dark"] .pdfViewer .page {
   width: auto !important;
   height: 42px !important;
   min-width: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
 }
 
@@ -1998,7 +2001,7 @@ html[data-theme="dark"] .pdfViewer .page {
 
 #thumbnailsView .thumbnail {
   padding: 8px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: transparent !important;
   transition: background-color var(--et-motion-fast), box-shadow var(--et-motion-fast);
 }
@@ -2038,7 +2041,7 @@ html[data-theme="dark"] .pdfViewer .page {
 #attachmentsView .treeItem,
 #layersView .treeItem {
   min-height: 40px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   color: var(--et-text) !important;
 }
 
@@ -2052,7 +2055,7 @@ html[data-theme="dark"] .pdfViewer .page {
   top: calc(var(--toolbar-height) + 8px) !important;
   padding: 10px !important;
   gap: 8px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
 }
 
 #findInput {
@@ -2079,7 +2082,7 @@ html[data-theme="dark"] .pdfViewer .page {
 .commentPopup,
 #editorCommentsSidebar .sidebarComment {
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: var(--et-shadow-low) !important;
   outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 80%, transparent) !important;
@@ -2113,7 +2116,7 @@ input[type="range"] {
 #editSignatureDialog,
 #editCommentDialog {
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface) !important;
   box-shadow: var(--et-shadow) !important;
   outline: 1px solid color-mix(in srgb, var(--et-outline-variant) 72%, transparent) !important;
@@ -2285,7 +2288,7 @@ input[type="range"] {
 #editorModeButtons {
   height: 36px !important;
   min-height: 36px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
 }
 
 #toolbarContainer .toolbarButton,
@@ -2296,7 +2299,7 @@ input[type="range"] {
   height: 36px !important;
   min-height: 36px !important;
   padding: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
 }
 
 #toolbarContainer .toolbarButton::before,
@@ -2372,7 +2375,7 @@ input[type="range"] {
   height: 40px !important;
   padding: 0 10px !important;
   column-gap: 10px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
 }
 
 #outerContainer #secondaryToolbar .menuContainer .toolbarButton::before,
@@ -2571,7 +2574,7 @@ input[type="range"] {
   height: var(--et-toolbar-group-height) !important;
   min-height: var(--et-toolbar-group-height) !important;
   padding: 1px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
 }
@@ -2659,7 +2662,7 @@ input[type="range"] {
   height: var(--et-toolbar-group-height) !important;
   min-height: var(--et-toolbar-group-height) !important;
   padding: 0 6px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   font-size: 14px !important;
   line-height: var(--et-toolbar-group-height) !important;
 }
@@ -2667,7 +2670,7 @@ input[type="range"] {
 #numPages {
   min-height: var(--et-toolbar-group-height) !important;
   padding: 0 8px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
   font-size: 12px !important;
@@ -2680,7 +2683,7 @@ input[type="range"] {
   height: var(--et-toolbar-group-height) !important;
   min-height: var(--et-toolbar-group-height) !important;
   margin-inline-start: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
 }
@@ -2787,7 +2790,7 @@ input[type="range"] {
 
 #thumbnailsView .thumbnail {
   padding: 4px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
 }
 
 #thumbnailsView .thumbnailImageContainer {
@@ -2836,7 +2839,7 @@ input[type="range"] {
   min-height: var(--et-toolbar-group-height) !important;
   gap: 0 !important;
   overflow: hidden !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
 }
@@ -2853,7 +2856,7 @@ input[type="range"] {
 #pageNumber {
   width: 50px !important;
   min-width: 50px !important;
-  border-radius: 8px 0 0 8px !important;
+  border-radius: 12px 0 0 8px !important;
   box-shadow: none !important;
 }
 
@@ -2928,7 +2931,7 @@ input[type="range"] {
   height: var(--et-toolbar-group-height) !important;
   min-height: var(--et-toolbar-group-height) !important;
   padding: 1px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: var(--et-surface-container-low) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-outline-variant) 74%, transparent) !important;
 }
@@ -3040,7 +3043,7 @@ input[type="range"] {
   padding: 0 12px !important;
   column-gap: 12px !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: transparent !important;
   color: var(--et-text) !important;
   font-size: 14px !important;
@@ -3139,7 +3142,7 @@ input[type="range"] {
   min-width: var(--et-toolbar-control-size) !important;
   height: var(--et-toolbar-control-size) !important;
   min-height: var(--et-toolbar-control-size) !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   overflow: hidden !important;
 }
 
@@ -3162,7 +3165,7 @@ input[type="range"] {
 #pageNumber {
   background: color-mix(in srgb, var(--et-primary-container) 42%, var(--et-surface)) !important;
   color: var(--et-primary) !important;
-  border-radius: 8px 0 0 8px !important;
+  border-radius: 12px 0 0 8px !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 16%, transparent) !important;
 }
 
@@ -3395,7 +3398,7 @@ input[type="range"] {
   margin: 0 !important;
   padding: 0 8px !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: color-mix(in srgb, var(--et-primary-container) 72%, var(--et-surface)) !important;
   color: var(--et-primary) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--et-primary) 22%, transparent) !important;
@@ -3413,7 +3416,7 @@ input[type="range"] {
   margin: 0 !important;
   padding: 0 10px !important;
   border: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   background: transparent !important;
   color: color-mix(in srgb, var(--et-text) 82%, var(--et-muted)) !important;
   box-shadow: none !important;
@@ -3478,7 +3481,7 @@ input[type="range"] {
   min-width: 0 !important;
   height: 40px !important;
   padding: 0 14px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   box-sizing: border-box !important;
 }
 
@@ -3598,7 +3601,7 @@ input[type="range"] {
   align-items: center !important;
   min-height: 36px !important;
   padding: 0 10px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   color: var(--et-text) !important;
   white-space: nowrap !important;
 }
@@ -3738,7 +3741,7 @@ html[data-theme="dark"] #etThemeMenu .horizontalToolbarSeparator {
   height: 32px !important;
   min-height: 32px !important;
   padding: 0 6px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   line-height: 32px !important;
 }
 
@@ -3748,7 +3751,7 @@ html[data-theme="dark"] #etThemeMenu .horizontalToolbarSeparator {
   height: 32px !important;
   min-height: 32px !important;
   padding: 0 6px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   line-height: 32px !important;
 }
 

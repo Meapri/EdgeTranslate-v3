@@ -5,7 +5,11 @@ import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import styled, { css } from "styled-components";
 import ArrowDownIcon from "./icons/arrow-down.svg";
 
-const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
+const iosEmphasized =
+    "linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)";
+const iosSpring =
+    "linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)";
+const MotionFast = `180ms ${iosEmphasized}`;
 
 /**
  *
@@ -101,43 +105,40 @@ const StyledSelect = styled.div`
     min-width: 0;
     font-size: 0;
 `;
+// iOS 26 Liquid Glass dropdown menu — light-dark() everywhere, no @media block.
 const Menu = styled.ul`
+    color-scheme: light dark;
     display: ${(props) => (props.open ? "block" : "none")};
-    min-width: 168px;
-    margin: 6px 0 0;
+    min-width: 180px;
+    margin: 8px 0 0;
     list-style: none;
-    font-size: 14px;
+    font-size: 15px;
+    letter-spacing: -0.2px;
     text-align: left;
-    background-color: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    border: 1px solid #e1e3e1;
-    border-radius: 8px;
+    background-color: light-dark(rgba(255, 255, 255, 0.78), rgba(28, 28, 30, 0.78));
+    backdrop-filter: blur(36px) saturate(190%);
+    -webkit-backdrop-filter: blur(36px) saturate(190%);
+    border: 0.5px solid light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
+    border-radius: 14px;
     padding: 6px;
     position: absolute;
     left: 0;
     top: 100%;
     z-index: 6;
     float: left;
-    box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
-    animation: et-dropdown-enter 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 28px rgba(0, 0, 0, 0.18),
+        0 32px 64px -16px rgba(0, 0, 0, 0.22);
+    animation: ios-dropdown-enter 320ms ${iosSpring} both;
 
-    @keyframes et-dropdown-enter {
+    @keyframes ios-dropdown-enter {
         from {
             opacity: 0;
-            transform: translateY(-8px) scale(0.97);
+            transform: translateY(-6px) scale(0.97);
         }
-
         to {
             opacity: 1;
             transform: translateY(0) scale(1);
         }
-    }
-
-    @media (prefers-color-scheme: dark) {
-        background-color: rgba(32, 38, 45, 0.9);
-        border-color: #3d4651;
-        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.3);
     }
 `;
 const Title = styled.a`
@@ -153,37 +154,22 @@ const Title = styled.a`
     white-space: nowrap;
     border: none;
     -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
     user-select: none;
-    padding: 0 10px 0 12px;
+    padding: 0 12px;
     min-height: 40px;
-    font-size: 14px;
+    font-size: 15px;
+    letter-spacing: -0.2px;
     line-height: 1.5;
-    border-radius: 999px;
+    border-radius: 9999px;
     transition: color ${MotionFast}, background-color ${MotionFast};
-    color: #0b57d0;
+    color: light-dark(#007aff, #0a84ff);
     background-color: transparent;
     overflow: hidden;
     &:hover {
-        color: #0b57d0;
-        background: rgba(11, 87, 208, 0.08);
+        background: light-dark(rgba(0, 122, 255, 0.1), rgba(10, 132, 255, 0.18));
     }
-    &:hover svg {
-        fill: #0b57d0;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        color: #a8c7fa;
-
-        &:hover {
-            color: #d3e3fd;
-            background: rgba(168, 199, 250, 0.14);
-        }
-
-        &:hover svg {
-            fill: #d3e3fd;
-        }
+    &:active {
+        background: light-dark(rgba(0, 122, 255, 0.16), rgba(10, 132, 255, 0.24));
     }
 `;
 const TitleLabel = styled.span`
@@ -194,50 +180,25 @@ const TitleLabel = styled.span`
 `;
 const StyledArrowDownIcon = styled(ArrowDownIcon)`
     flex: 0 0 auto;
-    fill: #0b57d0;
-    width: 16px;
-    height: 16px;
+    fill: light-dark(#007aff, #0a84ff);
+    width: 14px;
+    height: 14px;
     margin-left: 0;
-
-    @media (prefers-color-scheme: dark) {
-        fill: #a8c7fa;
-    }
 `;
 
-/* Style of Item */
+// iOS menu item — active state uses tinted fill, no scale on hover.
 const ActiveStyle = css`
-    color: #0b57d0;
-    font-weight: 700;
-    background-color: #d3e3fd;
+    color: light-dark(#007aff, #0a84ff);
+    font-weight: 600;
+    background-color: light-dark(rgba(0, 122, 255, 0.14), rgba(10, 132, 255, 0.22));
     &:hover {
-        color: #0b57d0;
-        background-color: #d3e3fd;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        color: #d3e3fd;
-        background-color: #1f3b68;
-
-        &:hover {
-            color: #d3e3fd;
-            background-color: #1f3b68;
-        }
+        background-color: light-dark(rgba(0, 122, 255, 0.18), rgba(10, 132, 255, 0.28));
     }
 `;
 const InActiveStyle = css`
-    color: #202124;
+    color: light-dark(rgba(0, 0, 0, 0.88), rgba(255, 255, 255, 0.92));
     &:hover {
-        color: #0b57d0;
-        background-color: rgba(11, 87, 208, 0.08);
-    }
-
-    @media (prefers-color-scheme: dark) {
-        color: #e8eaed;
-
-        &:hover {
-            color: #d3e3fd;
-            background-color: rgba(168, 199, 250, 0.14);
-        }
+        background-color: light-dark(rgba(120, 120, 128, 0.12), rgba(118, 118, 128, 0.24));
     }
 `;
 const Item = styled.li`
@@ -245,27 +206,22 @@ const Item = styled.li`
     align-items: stretch;
     min-width: 0;
     min-height: 44px;
-    padding: 8px 12px;
+    padding: 10px 14px;
     clear: both;
-    font-weight: 600;
-    line-height: 1.4;
+    font-weight: 500;
+    letter-spacing: -0.2px;
+    line-height: 1.35;
     white-space: normal;
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: 10px;
     -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
     user-select: none;
-    transition: color ${MotionFast}, background-color ${MotionFast},
-        transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: color ${MotionFast}, background-color ${MotionFast}, transform 220ms ${iosSpring};
     transform: scale(1);
     ${(props) => (props.active ? ActiveStyle : InActiveStyle)}
 
-    &:hover {
-        transform: scale(1.01);
-    }
     &:active {
-        transform: scale(0.98);
+        transform: scale(0.97);
     }
 `;
 /**

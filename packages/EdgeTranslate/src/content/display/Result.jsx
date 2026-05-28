@@ -553,16 +553,16 @@ export default function Result(props) {
 
 const BlockPadding = "12px";
 const BlockMargin = "10px";
-const LightPrimary = "#0b57d0";
-const DarkPrimary = "#a8c7fa";
-const DarkOnSurface = "#e8eaed";
-const DarkOnSurfaceVariant = "#bdc1c6";
+const LightPrimary = "light-dark(#007aff, #0a84ff)";
+const DarkPrimary = "light-dark(#007aff, #0a84ff)";
+const DarkOnSurface = "light-dark(rgba(0, 0, 0, 0.88), rgba(255, 255, 255, 0.92))";
+const DarkOnSurfaceVariant = "light-dark(rgba(60, 60, 67, 0.6), rgba(235, 235, 245, 0.6))";
 const DarkSurfaceContainer = "#20262d";
 const DarkSurfaceContainerHigh = "#242a31";
 const DarkOutline = "#3d4651";
 const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 const MotionStandard = "280ms cubic-bezier(0.25, 1, 0.5, 1)";
-const Gray = "#5f6368";
+const Gray = "light-dark(rgba(60, 60, 67, 0.6), rgba(235, 235, 245, 0.6))";
 const SurfaceContainer = "#f1f4f8";
 const OutlineVariant = "#e1e3e1";
 const GlassBorder = "rgba(255, 255, 255, 0.72)";
@@ -614,7 +614,7 @@ export const Block = styled.div`
 const Source = styled(Block)`
     font-weight: normal;
     white-space: pre-wrap;
-    color: #5f6368;
+    color: light-dark(rgba(60, 60, 67, 0.6), rgba(235, 235, 245, 0.6));
     background: ${GlassSurfaceMuted};
     --drawer-handle-surface: ${SurfaceContainer};
     --drawer-handle-fade: rgba(241, 244, 248, 0.5);
@@ -633,7 +633,7 @@ const Source = styled(Block)`
 const Target = styled(Block)`
     font-weight: normal;
     white-space: pre-wrap;
-    color: #202124;
+    color: light-dark(rgba(0, 0, 0, 0.88), rgba(255, 255, 255, 0.92));
     font-size: 16px;
     background: ${GlassSurface};
     --drawer-handle-surface: #ffffff;
@@ -1007,7 +1007,7 @@ const BlockHead = styled.div`
 `;
 
 const BlockHeadTitle = styled.span`
-    color: #202124;
+    color: light-dark(rgba(0, 0, 0, 0.88), rgba(255, 255, 255, 0.92));
     font-size: 13px;
     font-weight: 500;
     ${(props) =>
@@ -1102,7 +1102,7 @@ const SynonymWord = styled.span`
     padding: 4px 10px;
     margin: 0 2px 3px;
     color: ${LightPrimary};
-    background: #d3e3fd;
+    background: color-mix(in oklab, light-dark(#007aff, #0a84ff) 18%, light-dark(white, #1c1c1e));
     border: 1px solid rgba(11, 87, 208, 0.16);
     border-radius: 999px;
     cursor: pointer;
@@ -1111,7 +1111,7 @@ const SynonymWord = styled.span`
     transition: background-color ${MotionFast}, border-color ${MotionFast}, color ${MotionFast};
 
     @media (prefers-color-scheme: dark) {
-        color: #d3e3fd;
+        color: color-mix(in oklab, light-dark(#007aff, #0a84ff) 18%, light-dark(white, #1c1c1e));
         background: #1f3b68;
         border-color: rgba(168, 199, 250, 0.24);
     }
@@ -1124,7 +1124,7 @@ const DefinitionHeadSpot = styled(BlockHeadSpot)`
 `;
 
 const DefinitionExample = styled(DetailMeaning)`
-    color: #5f6368;
+    color: light-dark(rgba(60, 60, 67, 0.6), rgba(235, 235, 245, 0.6));
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurfaceVariant};
