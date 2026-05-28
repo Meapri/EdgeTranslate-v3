@@ -1,15 +1,15 @@
 @import '../display/library/notifier/notifier.styl';
 
-image-size = 42px;
-menu-width = 154px;
-// M3 Expressive — Chrome-native linear() springs (cf. input.styl tokens).
-m3-emphasized-local = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
-m3-spring-local = linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
-motion-fast = 160ms m3-emphasized-local;
-motion-standard = 220ms m3-emphasized-local;
+image-size = 44px;
+menu-width = 160px;
+// iOS 26 — Chrome-native linear() springs.
+ios-emphasized = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
+ios-spring = linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
 
 /*
- * 划词翻译按钮样式
+ * iOS 26 selection-translate button — Liquid Glass pill that floats next
+ * to the highlighted text. Heavy backdrop blur + 0.5px stroke + soft drop
+ * shadow, springs into view, scale-tucks on press.
  */
 #edge-translate-button {
     display: inline-block !important;
@@ -22,34 +22,32 @@ motion-standard = 220ms m3-emphasized-local;
     padding: 0 !important;
     margin: 0 !important;
     position: fixed !important;
-    box-shadow: 0 12px 28px rgba(30, 47, 72, 0.16), 0 3px 10px rgba(30, 47, 72, 0.08), inset 0 1px 0 rgba(255, 255, 255, .82) !important;
-    cursor: pointer !important;
-    border-radius: 22px !important;
-    z-index: 2147483647 !important;
     box-sizing: content-box !important;
     overflow: hidden !important;
-    border: 1px solid rgba(255, 255, 255, .76) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    transition: box-shadow motion-standard, transform motion-standard, border-color motion-fast !important;
-    animation: selection-toolbar-enter 220ms m3-spring-local !important;
+    cursor: pointer !important;
+    z-index: 2147483647 !important;
+    border-radius: 9999px !important;
+    background: light-dark(rgba(255,255,255,0.76), rgba(28,28,30,0.78)) !important;
+    backdrop-filter: blur(36px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(36px) saturate(190%) !important;
+    border: 0.5px solid light-dark(rgba(255,255,255,0.7), rgba(255,255,255,0.08)) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 8px 28px rgba(0,0,0,0.18), 0 32px 64px -16px rgba(0,0,0,0.22) !important;
+    transition: box-shadow 220ms ios-emphasized, transform 220ms ios-spring !important;
+    animation: selection-toolbar-enter 280ms ios-spring !important;
 
     &:hover {
-        box-shadow: 0 15px 32px rgba(30, 47, 72, 0.18), 0 0 0 4px rgba(26, 115, 232, 0.08), inset 0 1px 0 rgba(255, 255, 255, .9) !important;
-        transform: translateY(-1px) scale(1.006) !important;
-        border-color: rgba(211, 227, 253, .92) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 10px 32px rgba(0,0,0,0.22), 0 36px 72px -16px rgba(0,0,0,0.26) !important;
     }
 
     &:active {
-        transform: translateY(0) scale(0.985) !important;
+        transform: scale(0.95) !important;
     }
 
     @keyframes selection-toolbar-enter {
         0% {
             opacity: 0;
-            transform: translateY(5px) scale(0.98);
+            transform: translateY(4px) scale(0.94);
         }
-
         100% {
             opacity: 1;
             transform: translateY(0) scale(1);
@@ -59,7 +57,6 @@ motion-standard = 220ms m3-emphasized-local;
     @media (prefers-reduced-motion: reduce) {
         transition-duration: 1ms !important;
         animation-duration: 1ms !important;
-
         &:hover,
         &:active {
             transform: none !important;

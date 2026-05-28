@@ -226,22 +226,21 @@ select {
     }
 }
 
-// ─── Exchange Button ─────────────────────────────────────────────────────────
+// ─── Exchange Button (iOS 26 circular glyph) ───────────────────────────────
 #exchange {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: color-primary;
-    border-radius: 999px;
+    color: unquote('var(--ios-tint)')
+    background-color: unquote('var(--ios-fill-tertiary)')
+    border-radius: unquote('var(--ios-radius-pill)')
     cursor: pointer;
-    transition: transform 200ms motion-spring, background-color motion-fast, color motion-fast, box-shadow motion-fast;
+    transition: background-color motion-state-fast, color motion-state-fast, transform 200ms motion-press-transform;
 
     &:hover {
-        color: color-primary-hover;
-        background-color: color-primary-container;
-        box-shadow: 0 0 0 1px rgba(11, 87, 208, 0.12);
+        background-color: unquote('var(--ios-fill-secondary)')
     }
 
     &:active {
@@ -249,25 +248,25 @@ select {
     }
 }
 
-// ─── Hint Message ────────────────────────────────────────────────────────────
+// ─── Hint Message (iOS error label) ────────────────────────────────────────
 #hint_message {
     display: none;
-    margin: 2px 0 12px;
-    color: #d93025;
-    font-size: 12px;
+    margin: 6px 4px 12px;
+    color: unquote('var(--ios-system-red)')
+    font-size: 13px;
+    letter-spacing: -0.2px;
 }
 
-// ─── Settings Panel ──────────────────────────────────────────────────────────
+// ─── Settings Toggle Chevron ────────────────────────────────────────────────
 #setting-switch {
-    height: 28px;
+    height: 30px;
     justify-content: center;
     margin: 4px 0 0;
     cursor: pointer;
 
     &:hover .set {
-        color: color-primary-hover;
-        background-color: color-primary-container;
-        box-shadow: 0 0 0 1px rgba(11, 87, 208, 0.12);
+        background-color: unquote('var(--ios-fill-secondary)')
+        color: unquote('var(--ios-tint)')
     }
 }
 
@@ -277,14 +276,15 @@ select {
 
 .set {
     width: 36px;
-    height: 28px;
+    height: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: material-muted;
-    border-radius: 999px;
+    color: unquote('var(--ios-label-tertiary)')
+    background-color: unquote('var(--ios-fill-quaternary)')
+    border-radius: unquote('var(--ios-radius-pill)')
     line-height: 1;
-    transition: transform 200ms motion-spring, background-color motion-fast, color motion-fast, box-shadow motion-fast;
+    transition: background-color motion-state-fast, color motion-state-fast, transform 200ms motion-press-transform;
 
     &:active {
         transform: scale(0.92);
@@ -292,195 +292,115 @@ select {
 }
 
 .switch-label {
-    color: material-on-surface;
-    font-size: 14px;
+    color: unquote('var(--ios-label-primary)')
+    font-size: 15px;
+    letter-spacing: -0.2px;
+    font-weight: 500;
 }
 
+// ─── Settings Panel (iOS Liquid Glass card, distinct surface tier) ─────────
 #setting {
     display: none;
-    margin: 16px 0 4px;
-    padding: 14px;
-    background: linear-gradient(145deg, rgba(255, 255, 255, .68), rgba(255, 255, 255, .42));
-    backdrop-filter: blur(22px) saturate(170%);
-    -webkit-backdrop-filter: blur(22px) saturate(170%);
-    border: 1px solid rgba(255, 255, 255, .74);
-    border-radius: 18px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
-    transition: background-color motion-standard, border-color motion-standard, box-shadow motion-standard;
+    margin: 14px 0 4px;
+    padding: 14px 16px;
+    background: unquote('var(--ios-glass-regular)')
+    backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+    -webkit-backdrop-filter: unquote('var(--ios-glass-filter-regular)')
+    border: 0.5px solid unquote('var(--ios-glass-stroke)')
+    border-radius: unquote('var(--ios-radius-xl)')
+    box-shadow: unquote('var(--ios-elev-1)')
+    transition: background-color motion-state-standard, border-color motion-state-standard;
 
     .row:last-child {
         margin-bottom: 0;
     }
 }
 
-// ─── Toggle Controls (spring transitions) ───────────────────────────────────
-.switch,
+// ─── iOS 26 Switch Toggle (override the M3 .switch from input.styl) ────────
+// Track: pill, gray when off / green when on. Thumb: white circle, soft shadow.
+.switch {
+    position: relative;
+    width: 51px;
+    height: 31px;
+    border: 0 !important;
+    border-radius: unquote('var(--ios-radius-pill)')
+    background-color: unquote('var(--ios-fill-primary)')
+    box-sizing: border-box;
+    transition: background-color motion-state-standard, transform 200ms motion-press-transform;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    outline: none;
+
+    &:after {
+        content: " ";
+        position: absolute;
+        width: 27px;
+        height: 27px;
+        top: 2px;
+        left: 2px;
+        border-radius: 50%;
+        background-color: #ffffff;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.06);
+        transition: transform 300ms motion-press-transform, background-color motion-state-standard;
+    }
+
+    &:checked {
+        background-color: unquote('var(--ios-system-green)')
+    }
+    &:checked:after {
+        transform: translateX(20px);
+    }
+    &:active {
+        transform: scale(0.97);
+    }
+    &:focus-visible {
+        box-shadow: unquote('0 0 0 3px color-mix(in oklab, var(--ios-tint) 30%, transparent)')
+    }
+}
+
+// ─── iOS Radio / Checkbox (overrides M3) ───────────────────────────────────
 .radio,
 .checkbox {
-    transition: transform 200ms motion-spring, background-color motion-fast, border-color motion-fast, box-shadow motion-fast, opacity motion-fast;
+    background-color: unquote('var(--ios-fill-tertiary)') !important
+    border-color: unquote('var(--md-sys-color-outline)') !important
+    transition: background-color motion-state-fast, border-color motion-state-fast, transform 200ms motion-press-transform;
 
+    &:checked {
+        background-color: unquote('var(--ios-tint)') !important
+        border-color: unquote('var(--ios-tint)') !important
+    }
     &:active {
         transform: scale(0.93);
     }
 }
 
-.switch {
-    position: relative;
-    box-sizing: border-box;
-
-    &:after {
-        transition: transform 380ms motion-spring, width 200ms motion-emphasized, height 200ms motion-emphasized, background-color motion-standard;
-    }
-}
-
-.checkbox:checked,
-.radio:checked {
-    animation: android17-pop 320ms motion-spring forwards;
-}
-
 // ─── Footer ─────────────────────────────────────────────────────────────────
 footer {
-    padding: 8px 16px 10px;
+    padding: 12px 4px 4px;
     background: transparent;
     border-top: none;
-    color: material-muted;
+    color: unquote('var(--ios-label-tertiary)')
     text-align: center;
-    font-size: 11px;
-    transition: color motion-standard;
+    font-size: 12px;
+    letter-spacing: -0.1px;
+    transition: color motion-state-standard;
 
     a {
-        color: material-muted;
+        color: unquote('var(--ios-label-secondary)')
+        text-decoration: none;
+        font-weight: 500;
+    }
+    a:hover {
+        color: unquote('var(--ios-tint)')
     }
 }
 
-// ─── Dark Mode ───────────────────────────────────────────────────────────────
-@media (prefers-color-scheme: dark) {
-    html,
-    body {
-        background: app-background-dark;
-        color: #e8eaed;
-        color-scheme: dark;
-    }
-
-    .frame {
-        background: linear-gradient(145deg, rgba(30, 36, 44, .8), rgba(30, 36, 44, .56));
-        border-color: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-    }
-
-    .switch-label,
-    .option {
-        color: #e8eaed;
-    }
-
-    select,
-    #translate_input {
-        color: #e8eaed;
-        background-color: rgba(255, 255, 255, 0.06);
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-
-        &:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            box-shadow: inset 0 0 0 1px rgba(168, 199, 250, 0.3);
-        }
-
-        &:focus {
-            background-color: #1b2026;
-            box-shadow: inset 0 0 0 2px #8ab4f8, 0 0 0 4px rgba(138, 180, 248, 0.18);
-        }
-    }
-
-    select {
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bdc1c6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-    }
-
-    #translate_input::placeholder {
-        color: #9aa0a6;
-    }
-
-    #translateSubmit {
-        color: #0b1f3a;
-        background: linear-gradient(135deg, #a8c7fa, #c4e0e5);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-
-        &:hover {
-            background: linear-gradient(135deg, #d3e3fd, #e2f1f5);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.42);
-        }
-    }
-
-    #hint_message {
-        color: #f2b8b5;
-    }
-
-    #setting {
-        background: rgba(255, 255, 255, 0.04);
-        border-color: rgba(255, 255, 255, 0.06);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-    }
-
-    #exchange,
-    .set {
-        color: #a8c7fa;
-    }
-
-    #exchange:hover,
-    #setting-switch:hover .set {
-        color: #d3e3fd;
-        background: rgba(168, 199, 250, 0.14);
-        box-shadow: 0 0 0 1px rgba(138, 180, 248, 0.18);
-    }
-
-    footer {
-        color: #bdc1c6;
-
-        a {
-            color: #bdc1c6;
-        }
-    }
-
-    .radio,
-    .checkbox {
-        background-color: #1b2026;
-        border-color: #9aa0a6;
-    }
-
-    .radio:checked,
-    .checkbox:checked {
-        background-color: #8ab4f8;
-        border-color: #8ab4f8;
-    }
-
-    .radio:checked:before {
-        background-color: #0b1f3a;
-    }
-
-    .checkbox:checked:after {
-        border-color: #0b1f3a;
-    }
-
-    .switch {
-        background: #343b44;
-        border-color: #9aa0a6;
-
-        &:before {
-            background-color: #343b44;
-        }
-
-        &:after {
-            background-color: #c4c7c5;
-        }
-
-        &:checked {
-            background-color: #1f3b68;
-            border-color: #8ab4f8;
-
-            &:after {
-                background-color: #8ab4f8;
-            }
-        }
-    }
-}
+// Dark mode is handled natively via light-dark() inside the iOS 26 tokens
+// (see input.styl :root). No per-rule @media (prefers-color-scheme) duplication
+// needed — all surfaces and form controls flip palettes automatically when
+// the user's OS theme changes.
 
 // ─── Reduced Motion ──────────────────────────────────────────────────────────
 @media (prefers-reduced-motion: reduce) {
