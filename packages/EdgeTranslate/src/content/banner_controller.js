@@ -3342,27 +3342,6 @@ class BannerController {
         return true;
     }
 
-    applyDomPageReadableBlockReplacement(readableBlockReplacement, translated, preparedFragment) {
-        const block = readableBlockReplacement && readableBlockReplacement.block;
-        if (!block) return false;
-        if (readableBlockReplacement.inlineLinks && readableBlockReplacement.inlineLinks.length) {
-            const fragment =
-                preparedFragment ||
-                this.createDomPageInlineLinkFragment(
-                    translated,
-                    readableBlockReplacement.inlineLinks
-                );
-            if (!fragment) return false;
-            this.registerDomOriginalText(block, readableBlockReplacement.sourceText);
-            this.fadeInDomPageBlock(block, () => {
-                block.replaceChildren(fragment);
-            });
-            return true;
-        }
-        this.applyWithFadeIn(block, translated, "block", readableBlockReplacement.sourceText);
-        return true;
-    }
-
     sanitizeDomPageTranslatedText(text) {
         return this.stripPromptEchoFromTranslation(
             String(text || "")
@@ -3379,38 +3358,6 @@ class BannerController {
             .replace(/[ \t]+\n/g, "\n")
             .replace(/\n[ \t]+/g, "\n")
             .trim();
-    }
-
-    createDomPageInlineLinkFragment(translated, links) {
-        const text = String(translated || "");
-        const markerPattern =
-            /\[\[EDGE_TRANSLATE_LINK_(\d+)]]([\s\S]*?)\[\[\/EDGE_TRANSLATE_LINK_\1]]/g;
-        const fragment = document.createDocumentFragment();
-        let lastIndex = 0;
-        let restoredCount = 0;
-        let match;
-        while ((match = markerPattern.exec(text))) {
-            const index = Number(match[1]) - 1;
-            const link = links[index];
-            if (!link) return null;
-            if (match.index > lastIndex) {
-                fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
-            }
-            const anchor = document.createElement("a");
-            anchor.href = link.href;
-            if (link.title) anchor.title = link.title;
-            if (link.target) anchor.target = link.target;
-            if (link.rel) anchor.rel = link.rel;
-            anchor.textContent = String(match[2] || "").trim() || link.text || link.href;
-            fragment.appendChild(anchor);
-            lastIndex = markerPattern.lastIndex;
-            restoredCount += 1;
-        }
-        if (restoredCount !== links.length) return null;
-        if (lastIndex < text.length) {
-            fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-        }
-        return fragment;
     }
 
     enqueueDomPageEntryNodeTranslations(entry) {

@@ -20,8 +20,7 @@ color-primary-container = #d3e3fd
 color-primary-container-dark = #1f3b68
 color-secondary = #0f6d58
 color-secondary-container = #cce8dd
-color-tertiary = #8b5000
-color-tertiary-container = #ffddb4
+// tertiary tokens removed (unused after the iOS 26 pivot)
 
 // Surface
 color-surface = #ffffff
@@ -305,12 +304,6 @@ scale = 1.3
         transform: translateY(0) scale(1)
         filter: saturate(1)
 
-@keyframes expressive-press-ripple
-    0%
-        box-shadow: inset 0 0 0 0 rgba(11, 87, 208, .18)
-    100%
-        box-shadow: inset 0 0 0 999px rgba(11, 87, 208, 0)
-
 
 // ────────────────────────────────────────────
 // Chrome-native primitives — exposed as CSS custom properties so JSX/inline
@@ -478,24 +471,8 @@ scale = 1.3
     --md-sys-elevation-5: var(--ios-elev-floating)
 
 
-// Registered animatable custom properties — let Chrome interpolate background
-// colors and shadow strength smoothly across state changes.
-@css {
-    @property --md-bg-tint {
-        syntax: '<color>';
-        inherits: true;
-        initial-value: transparent;
-    }
-    @property --md-elevation {
-        syntax: '<number>';
-        inherits: true;
-        initial-value: 0;
-    }
-}
-
-
 // ────────────────────────────────────────────
-// Global resets that align native controls with M3 Expressive
+// Global resets — native focus / selection styling
 // ────────────────────────────────────────────
 :focus-visible
     outline: none
@@ -511,134 +488,6 @@ scale = 1.3
         animation-iteration-count: 1 !important
         transition-duration: 0.01ms !important
         scroll-behavior: auto !important
-
-
-// ────────────────────────────────────────────
-// M3 Expressive component motion patterns (Android 16~17)
-// ────────────────────────────────────────────
-// 1) Shape-morphing button press — the signature Expressive squish:
-//    radius interpolates from pill to squircle while scale tucks in, then
-//    overshoots back via spatial spring on release.
-//    Usage: add class `m3-press` to any clickable element.
-.m3-press
-    transition: unquote('transform 220ms var(--md-sys-motion-spring-fast-spatial), border-radius 220ms var(--md-sys-motion-spring-default-spatial), box-shadow 180ms var(--md-sys-motion-spring-default-effects), background-color 180ms var(--md-sys-motion-spring-default-effects)')
-.m3-press:active
-    transform: scale(.94)
-    border-radius: var(--md-sys-shape-corner-md)
-
-
-// 2) Material 3 State Layer + Press Ripple — per the M3E guideline, hover
-//    surfaces a tonal state layer (8% opacity, no scale, no movement);
-//    focus uses 10%; pressed uses 12% PLUS a radial ripple from the press
-//    point. Hover scale is intentionally NOT used — it's reserved for press.
-.m3-ripple
-    position: relative
-    overflow: hidden
-    isolation: isolate
-.m3-ripple::before
-    /* State layer — flat tonal tint, no movement */
-    content: ''
-    position: absolute
-    inset: 0
-    border-radius: inherit
-    pointer-events: none
-    background-color: unquote('var(--md-sys-color-primary)')
-    opacity: 0
-    transition: unquote('opacity var(--md-sys-state-fast, 100ms) var(--md-sys-motion-emphasized)')
-.m3-ripple:hover::before
-    opacity: var(--md-sys-state-hover-opacity)
-.m3-ripple:focus-visible::before
-    opacity: var(--md-sys-state-focus-opacity)
-.m3-ripple:active::before
-    opacity: var(--md-sys-state-pressed-opacity)
-.m3-ripple::after
-    /* Press ripple — only triggered while pressed, no hover/scale */
-    content: ''
-    position: absolute
-    inset: 0
-    border-radius: inherit
-    pointer-events: none
-    background-image: unquote('radial-gradient(circle at center, color-mix(in oklab, var(--md-sys-color-primary) 26%, transparent) 0%, transparent 70%)')
-    opacity: 0
-    transform: scale(0.55)
-    transition: unquote('opacity 180ms var(--md-sys-motion-spring-default-effects), transform 360ms var(--md-sys-motion-spring-default-spatial)')
-.m3-ripple:active::after
-    opacity: 1
-    transform: scale(1.1)
-
-
-// 3) Staggered list entrance — children animate in sequence with a
-//    spring-default-spatial curve. Drop `m3-stagger` on a list/parent.
-.m3-stagger > *
-    animation: m3-stagger-enter 420ms var(--md-sys-motion-spring-default-spatial) both
-    animation-delay: calc(var(--m3-stagger-step, 40ms) * var(--m3-stagger-index, 0))
-.m3-stagger > *:nth-child(1) { --m3-stagger-index: 0; }
-.m3-stagger > *:nth-child(2) { --m3-stagger-index: 1; }
-.m3-stagger > *:nth-child(3) { --m3-stagger-index: 2; }
-.m3-stagger > *:nth-child(4) { --m3-stagger-index: 3; }
-.m3-stagger > *:nth-child(5) { --m3-stagger-index: 4; }
-.m3-stagger > *:nth-child(6) { --m3-stagger-index: 5; }
-.m3-stagger > *:nth-child(7) { --m3-stagger-index: 6; }
-.m3-stagger > *:nth-child(8) { --m3-stagger-index: 7; }
-.m3-stagger > *:nth-child(n+9) { --m3-stagger-index: 8; }
-
-@keyframes m3-stagger-enter
-    0%
-        opacity: 0
-        transform: translateY(10px) scale(.985)
-    100%
-        opacity: 1
-        transform: translateY(0) scale(1)
-
-
-// 4) @starting-style entrance — for elements that toggle to visible (e.g.,
-//    popovers, dropdowns, dialogs). Chrome 117+ runs this during the
-//    transition from "before-open" to the rendered state.
-.m3-enter
-    opacity: 1
-    transform: translate3d(0, 0, 0) scale(1)
-    transition: unquote('opacity 260ms var(--md-sys-motion-emphasized), transform 380ms var(--md-sys-motion-spring-default-spatial)')
-
-@css {
-    @starting-style {
-        .m3-enter {
-            opacity: 0;
-            transform: translate3d(0, 8px, 0) scale(.96);
-        }
-    }
-}
-
-
-// 5) View Transitions — Chrome 111+ for popup → options navigation and
-//    intra-page tab switches. The shared name lets Chrome cross-fade with
-//    container morph automatically.
-::view-transition-old(root),
-::view-transition-new(root)
-    animation-duration: 360ms
-    animation-timing-function: unquote('var(--md-sys-motion-emphasized)')
-
-::view-transition-old(root)
-    animation-name: m3-view-fade-out
-::view-transition-new(root)
-    animation-name: m3-view-fade-in
-
-@keyframes m3-view-fade-out
-    to
-        opacity: 0
-        transform: scale(.98)
-
-@keyframes m3-view-fade-in
-    from
-        opacity: 0
-        transform: scale(1.02)
-
-
-// 6) Container hover lift — M3E cards/list tiles raise + tint on hover.
-.m3-lift
-    transition: unquote('transform 220ms var(--md-sys-motion-spring-default-spatial), box-shadow 220ms var(--md-sys-motion-spring-default-effects), background-color 180ms var(--md-sys-motion-spring-default-effects)')
-.m3-lift:hover
-    transform: translateY(-2px)
-    box-shadow: var(--md-sys-elevation-2)
 
 
 // ────────────────────────────────────────────
