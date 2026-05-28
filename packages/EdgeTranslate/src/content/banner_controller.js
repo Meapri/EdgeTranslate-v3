@@ -3076,7 +3076,7 @@ class BannerController {
             .replace(/&amp;/g, "&")
             .replace(/&lt;/g, "<")
             .replace(/&gt;/g, ">")
-            .replace(/&quot;/g, "\"")
+            .replace(/&quot;/g, String.fromCharCode(34))
             .replace(/&#39;/g, "'");
     }
 

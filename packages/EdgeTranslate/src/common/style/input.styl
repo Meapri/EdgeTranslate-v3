@@ -319,10 +319,20 @@ scale = 1.3
     --md-sys-color-surface-container-high: unquote('color-mix(in oklab, var(--md-sys-color-surface), var(--md-sys-color-primary) 12%)')
     --md-sys-color-surface-container-highest: unquote('color-mix(in oklab, var(--md-sys-color-surface), var(--md-sys-color-primary) 16%)')
 
-    // M3 Expressive motion (CSS-native linear() springs)
-    --md-sys-motion-spring-fast: unquote('linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1)')
-    --md-sys-motion-spring-default: unquote('linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)')
-    --md-sys-motion-spring-slow: unquote('linear(0, 0.013 3%, 0.082 8%, 0.273 16%, 0.5 24%, 0.7 32%, 0.86 40%, 0.965 48%, 1.034 56%, 1.063 65%, 1.044 75%, 1.007 86%, 1)')
+    // M3 Expressive motion — CSS-native linear() springs.
+    // Android 16~17 distinguishes two spring families:
+    //   *-spatial  : critically under-damped (overshoot), for position/scale/rotation
+    //   *-effects  : critically damped (no overshoot), for color/opacity/elevation
+    --md-sys-motion-spring-fast-spatial: unquote('linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1)')
+    --md-sys-motion-spring-default-spatial: unquote('linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)')
+    --md-sys-motion-spring-slow-spatial: unquote('linear(0, 0.013 3%, 0.082 8%, 0.273 16%, 0.5 24%, 0.7 32%, 0.86 40%, 0.965 48%, 1.034 56%, 1.063 65%, 1.044 75%, 1.007 86%, 1)')
+    --md-sys-motion-spring-fast-effects: unquote('linear(0, 0.131, 0.339 5%, 0.587 9%, 0.793 13%, 0.91 17%, 0.969 21%, 0.992 25%, 1)')
+    --md-sys-motion-spring-default-effects: unquote('linear(0, 0.075, 0.205, 0.378 8%, 0.591 13%, 0.79 19%, 0.916 26%, 0.974 33%, 0.995 42%, 1)')
+    --md-sys-motion-spring-slow-effects: unquote('linear(0, 0.025, 0.075, 0.158, 0.275 8%, 0.426 12%, 0.587 17%, 0.737 23%, 0.857 30%, 0.94 39%, 0.982 50%, 1)')
+    // Aliases (back-compat)
+    --md-sys-motion-spring-fast: var(--md-sys-motion-spring-fast-spatial)
+    --md-sys-motion-spring-default: var(--md-sys-motion-spring-default-spatial)
+    --md-sys-motion-spring-slow: var(--md-sys-motion-spring-slow-spatial)
     --md-sys-motion-emphasized: unquote('linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)')
     --md-sys-motion-emphasized-accelerate: unquote('linear(0, 0.002 8.5%, 0.024 19.3%, 0.108 30%, 0.279 41.3%, 0.526 53%, 0.747 63%, 0.892 73%, 0.969 84%, 1)')
 
@@ -383,3 +393,116 @@ scale = 1.3
         animation-iteration-count: 1 !important
         transition-duration: 0.01ms !important
         scroll-behavior: auto !important
+
+
+// ────────────────────────────────────────────
+// M3 Expressive component motion patterns (Android 16~17)
+// ────────────────────────────────────────────
+// 1) Shape-morphing button press — the signature Expressive squish:
+//    radius interpolates from pill to squircle while scale tucks in, then
+//    overshoots back via spatial spring on release.
+//    Usage: add class `m3-press` to any clickable element.
+.m3-press
+    transition: unquote('transform 220ms var(--md-sys-motion-spring-fast-spatial), border-radius 220ms var(--md-sys-motion-spring-default-spatial), box-shadow 180ms var(--md-sys-motion-spring-default-effects), background-color 180ms var(--md-sys-motion-spring-default-effects)')
+.m3-press:active
+    transform: scale(.94)
+    border-radius: var(--md-sys-shape-corner-md)
+
+
+// 2) Material 3 Expressive Ripple — a radial fill that emerges from the
+//    centre on press. Implemented as a transparent pseudo-element so the
+//    parent's hit-target and styling stay untouched.
+.m3-ripple
+    position: relative
+    overflow: hidden
+    isolation: isolate
+.m3-ripple::after
+    content: ''
+    position: absolute
+    inset: 0
+    border-radius: inherit
+    pointer-events: none
+    background-image: unquote('radial-gradient(circle at center, color-mix(in oklab, var(--md-sys-color-primary) 22%, transparent) 0%, transparent 70%)')
+    opacity: 0
+    transform: scale(0.4)
+    transition: unquote('opacity 240ms var(--md-sys-motion-spring-default-effects), transform 360ms var(--md-sys-motion-spring-default-spatial)')
+.m3-ripple:hover::after
+    opacity: 0.55
+    transform: scale(1)
+.m3-ripple:active::after
+    opacity: 0.85
+    transform: scale(1.05)
+
+
+// 3) Staggered list entrance — children animate in sequence with a
+//    spring-default-spatial curve. Drop `m3-stagger` on a list/parent.
+.m3-stagger > *
+    animation: m3-stagger-enter 420ms var(--md-sys-motion-spring-default-spatial) both
+    animation-delay: calc(var(--m3-stagger-step, 40ms) * var(--m3-stagger-index, 0))
+.m3-stagger > *:nth-child(1) { --m3-stagger-index: 0; }
+.m3-stagger > *:nth-child(2) { --m3-stagger-index: 1; }
+.m3-stagger > *:nth-child(3) { --m3-stagger-index: 2; }
+.m3-stagger > *:nth-child(4) { --m3-stagger-index: 3; }
+.m3-stagger > *:nth-child(5) { --m3-stagger-index: 4; }
+.m3-stagger > *:nth-child(6) { --m3-stagger-index: 5; }
+.m3-stagger > *:nth-child(7) { --m3-stagger-index: 6; }
+.m3-stagger > *:nth-child(8) { --m3-stagger-index: 7; }
+.m3-stagger > *:nth-child(n+9) { --m3-stagger-index: 8; }
+
+@keyframes m3-stagger-enter
+    0%
+        opacity: 0
+        transform: translateY(10px) scale(.985)
+    100%
+        opacity: 1
+        transform: translateY(0) scale(1)
+
+
+// 4) @starting-style entrance — for elements that toggle to visible (e.g.,
+//    popovers, dropdowns, dialogs). Chrome 117+ runs this during the
+//    transition from "before-open" to the rendered state.
+.m3-enter
+    opacity: 1
+    transform: translate3d(0, 0, 0) scale(1)
+    transition: unquote('opacity 260ms var(--md-sys-motion-emphasized), transform 380ms var(--md-sys-motion-spring-default-spatial)')
+
+@css {
+    @starting-style {
+        .m3-enter {
+            opacity: 0;
+            transform: translate3d(0, 8px, 0) scale(.96);
+        }
+    }
+}
+
+
+// 5) View Transitions — Chrome 111+ for popup → options navigation and
+//    intra-page tab switches. The shared name lets Chrome cross-fade with
+//    container morph automatically.
+::view-transition-old(root),
+::view-transition-new(root)
+    animation-duration: 360ms
+    animation-timing-function: unquote('var(--md-sys-motion-emphasized)')
+
+::view-transition-old(root)
+    animation-name: m3-view-fade-out
+::view-transition-new(root)
+    animation-name: m3-view-fade-in
+
+@keyframes m3-view-fade-out
+    to
+        opacity: 0
+        transform: scale(.98)
+
+@keyframes m3-view-fade-in
+    from
+        opacity: 0
+        transform: scale(1.02)
+
+
+// 6) Container hover lift — M3E cards/list tiles raise + tint on hover.
+.m3-lift
+    transition: unquote('transform 220ms var(--md-sys-motion-spring-default-spatial), box-shadow 220ms var(--md-sys-motion-spring-default-effects), background-color 180ms var(--md-sys-motion-spring-default-effects)')
+.m3-lift:hover
+    transform: translateY(-2px)
+    box-shadow: var(--md-sys-elevation-2)
