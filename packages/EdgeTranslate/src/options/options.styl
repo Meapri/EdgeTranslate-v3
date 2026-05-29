@@ -197,14 +197,29 @@ header img
     letter-spacing: 0
     text-align: left
     cursor: pointer
-    transition: transform motion-standard, color motion-fast
+    will-change: transform, background-color
+    transition: transform var(--dur-quick) var(--spring-pointer),
+                color var(--dur-quick) var(--ease-decelerate),
+                background-color var(--dur-quick) var(--ease-decelerate)
+    // Stagger sidebar items on first render.
+    animation: ipad-stagger var(--dur-enter) var(--ease-decelerate) both
+    animation-delay: calc(40ms * var(--stagger-index, 0))
 
-.nav-tab:hover
-    color: color-on-surface
-    background: rgba(255, 255, 255, 0.32)
+.nav-tab:nth-child(1) { --stagger-index: 1 }
+.nav-tab:nth-child(2) { --stagger-index: 2 }
+.nav-tab:nth-child(3) { --stagger-index: 3 }
+.nav-tab:nth-child(4) { --stagger-index: 4 }
+.nav-tab:nth-child(5) { --stagger-index: 5 }
+
+@media (hover: hover) and (pointer: fine)
+    .nav-tab:hover
+        color: color-on-surface
+        background: rgba(255, 255, 255, 0.32)
+        transform: translateX(2px)
 
 .nav-tab:active
     transform: scale(0.98)
+    transition-duration: var(--dur-tap)
 
 .nav-tab.active
     color: color-primary

@@ -52,31 +52,37 @@ color-bg-dark = #15191d
 color-error = #b3261e
 color-error-dark = #f2b8b5
 
-// ─── M3 Expressive motion curves ────────────────────────────────────────
-// linear() approximations of the Android 16~17 spring tokens (computed by
-// sampling spring physics into 24 stops). Falls back to cubic-bezier on
-// browsers that don't support linear() — the curve is similar enough.
+// ─── iPadOS motion curves (linear() spring approximations) ─────────────
+// Tuned tighter than M3: less overshoot, faster decelerate. Reads as
+// restrained and fluid rather than playful/bouncy.
 //
-//   spring-fast    : stiffness 1400, damping 38   (subtle bounce, ~280ms)
-//   spring-default : stiffness  800, damping 28   (signature M3E feel, ~420ms)
-//   spring-slow    : stiffness  400, damping 28   (drawer/sheet, ~600ms)
-//   emphasized     : Emphasized Decelerate (no overshoot)
-//   emphasized-acc : Emphasized Accelerate (exit)
+//   spring-pointer : stiffness 600, damping 26   (hover lift, ~240ms, no overshoot)
+//   spring-press   : stiffness 1100, damping 30  (tap feedback, ~180ms, faint overshoot)
+//   spring-glide   : stiffness 380, damping 32   (sheet/panel, ~440ms, calm)
+//   decelerate     : enters fast then settles slowly (iPadOS entrance)
+//   accelerate     : starts slow then exits quickly (iPadOS dismiss)
 //
-m3-spring-fast = linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1)
-m3-spring-default = linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)
-m3-spring-slow = linear(0, 0.013 3%, 0.082 8%, 0.273 16%, 0.5 24%, 0.7 32%, 0.86 40%, 0.965 48%, 1.034 56%, 1.063 65%, 1.044 75%, 1.007 86%, 1)
-m3-emphasized = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)
-m3-emphasized-accelerate = linear(0, 0.002 8.5%, 0.024 19.3%, 0.108 30%, 0.279 41.3%, 0.526 53%, 0.747 63%, 0.892 73%, 0.969 84%, 1)
+m3-spring-fast = linear(0, 0.054 5%, 0.214 10%, 0.46 16%, 0.706 24%, 0.892 32%, 0.99 40%, 1.022 48%, 1.014 58%, 0.999 70%, 0.998 82%, 1)
+m3-spring-default = linear(0, 0.022 3%, 0.108 7%, 0.282 13%, 0.515 21%, 0.74 30%, 0.901 40%, 0.985 50%, 1.014 62%, 1.006 75%, 0.998 86%, 1)
+m3-spring-slow = linear(0, 0.008 3%, 0.057 8%, 0.18 16%, 0.358 24%, 0.554 32%, 0.728 40%, 0.86 48%, 0.948 58%, 0.992 70%, 1.008 82%, 1.002 92%, 1)
+m3-emphasized = linear(0, 0.003, 0.014 1.5%, 0.054 4%, 0.142 8%, 0.288 14%, 0.474 22%, 0.66 30%, 0.808 39%, 0.908 48%, 0.962 58%, 0.988 68%, 0.998 80%, 1)
+m3-emphasized-accelerate = linear(0, 0.002 10%, 0.018 22%, 0.084 34%, 0.232 45%, 0.466 56%, 0.702 67%, 0.872 78%, 0.962 88%, 1)
+
+// Semantic aliases keep popup.styl / options.styl etc. working without edits.
+ios-spring-pointer = m3-spring-fast
+ios-spring-press = m3-spring-default
+ios-spring-glide = m3-spring-slow
+ios-decelerate = m3-emphasized
+ios-accelerate = m3-emphasized-accelerate
 
 // Motion shortcuts (duration + easing)
 motion-micro = 120ms cubic-bezier(0.2, 0, 0, 1)
-motion-fast = 180ms m3-emphasized
-motion-standard = 280ms m3-emphasized
-motion-emphasized = 380ms m3-emphasized
-motion-spring = 420ms m3-spring-default
-motion-spring-strong = 520ms m3-spring-fast
-motion-spring-slow = 600ms m3-spring-slow
+motion-fast = 160ms m3-emphasized
+motion-standard = 240ms m3-emphasized
+motion-emphasized = 360ms m3-emphasized
+motion-spring = 320ms m3-spring-default
+motion-spring-strong = 440ms m3-spring-fast
+motion-spring-slow = 540ms m3-spring-slow
 
 // Elevation shadows
 elevation-1 = 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)
@@ -277,6 +283,108 @@ scale = 1.3
         box-shadow: inset 0 0 0 0 rgba(11, 87, 208, .18)
     100%
         box-shadow: inset 0 0 0 999px rgba(11, 87, 208, 0)
+
+
+// ════════════════════════════════════════════════════════════════════════
+// iPadOS-native animation primitives (Chrome-native CSS only)
+// ════════════════════════════════════════════════════════════════════════
+
+// ─── Tokens exposed via :root for JSX/inline-style consumers ────────────
+:root
+    --ease-decelerate: linear(0, 0.003, 0.014 1.5%, 0.054 4%, 0.142 8%, 0.288 14%, 0.474 22%, 0.66 30%, 0.808 39%, 0.908 48%, 0.962 58%, 0.988 68%, 0.998 80%, 1)
+    --ease-accelerate: linear(0, 0.002 10%, 0.018 22%, 0.084 34%, 0.232 45%, 0.466 56%, 0.702 67%, 0.872 78%, 0.962 88%, 1)
+    --spring-pointer: linear(0, 0.054 5%, 0.214 10%, 0.46 16%, 0.706 24%, 0.892 32%, 0.99 40%, 1.022 48%, 1.014 58%, 0.999 70%, 0.998 82%, 1)
+    --spring-press: linear(0, 0.022 3%, 0.108 7%, 0.282 13%, 0.515 21%, 0.74 30%, 0.901 40%, 0.985 50%, 1.014 62%, 1.006 75%, 0.998 86%, 1)
+    --spring-glide: linear(0, 0.008 3%, 0.057 8%, 0.18 16%, 0.358 24%, 0.554 32%, 0.728 40%, 0.86 48%, 0.948 58%, 0.992 70%, 1.008 82%, 1.002 92%, 1)
+    --dur-tap: 120ms
+    --dur-quick: 180ms
+    --dur-content: 280ms
+    --dur-enter: 380ms
+    --dur-glide: 480ms
+
+// Allow height: auto / display: none to transition smoothly.
+@media (prefers-reduced-motion: no-preference)
+    html
+        interpolate-size: allow-keywords
+
+
+// ─── @keyframes for entrances ─────────────────────────────────────────────
+@keyframes ipad-enter-up
+    0%
+        opacity: 0
+        transform: translate3d(0, 12px, 0) scale(0.98)
+    100%
+        opacity: 1
+        transform: translate3d(0, 0, 0) scale(1)
+
+@keyframes ipad-enter-scale
+    0%
+        opacity: 0
+        transform: scale(0.94)
+    100%
+        opacity: 1
+        transform: scale(1)
+
+@keyframes ipad-enter-fade
+    0%
+        opacity: 0
+    100%
+        opacity: 1
+
+@keyframes ipad-stagger
+    0%
+        opacity: 0
+        transform: translate3d(0, 8px, 0)
+    100%
+        opacity: 1
+        transform: translate3d(0, 0, 0)
+
+
+// ─── Pointer hover lift — the signature iPadOS cursor feel ────────────────
+// Subtle 1.02 scale + tiny shadow gain on hover. Press cancels with 0.97.
+@media (hover: hover) and (pointer: fine)
+    .ipad-hoverable
+        will-change: transform
+        transition: transform var(--dur-quick) var(--spring-pointer), box-shadow var(--dur-quick) var(--ease-decelerate)
+    .ipad-hoverable:hover
+        transform: scale(1.02)
+    .ipad-hoverable:active
+        transform: scale(0.97)
+        transition: transform var(--dur-tap) var(--spring-press)
+
+
+// ─── Stagger children on first render via animation-delay ───────────────
+.ipad-stagger > *
+    animation: ipad-stagger var(--dur-enter) var(--ease-decelerate) both
+    animation-delay: calc(var(--stagger-step, 40ms) * var(--stagger-index, 0))
+.ipad-stagger > *:nth-child(1) { --stagger-index: 0 }
+.ipad-stagger > *:nth-child(2) { --stagger-index: 1 }
+.ipad-stagger > *:nth-child(3) { --stagger-index: 2 }
+.ipad-stagger > *:nth-child(4) { --stagger-index: 3 }
+.ipad-stagger > *:nth-child(5) { --stagger-index: 4 }
+.ipad-stagger > *:nth-child(6) { --stagger-index: 5 }
+.ipad-stagger > *:nth-child(7) { --stagger-index: 6 }
+.ipad-stagger > *:nth-child(8) { --stagger-index: 7 }
+.ipad-stagger > *:nth-child(n+9) { --stagger-index: 8 }
+
+
+// ─── Collapsible panel — height: auto transition via interpolate-size ───
+// Combined with @starting-style for the show transition.
+.ipad-collapsible
+    overflow: hidden
+    transition: height var(--dur-content) var(--ease-decelerate), opacity var(--dur-content) var(--ease-decelerate)
+
+
+// ─── Reduced motion — drop hover scale, shorten everything ──────────────
+@media (prefers-reduced-motion: reduce)
+    .ipad-hoverable
+        transition-duration: 1ms !important
+    .ipad-hoverable:hover,
+    .ipad-hoverable:active
+        transform: none !important
+    .ipad-stagger > *
+        animation-duration: 1ms !important
+        animation-delay: 0ms !important
 
 
 // ────────────────────────────────────────────

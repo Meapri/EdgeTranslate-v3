@@ -231,14 +231,15 @@ function settingSwitch() {
     let setting = document.getElementById("setting");
     let arrowUp = document.getElementById("arrow-up");
     let arrowDown = document.getElementById("arrow-down");
-    if (!setting.style.display || setting.style.display == "none") {
-        setting.style.display = "block";
+    // Toggle via class — popup.css uses .is-open + @starting-style so the
+    // height / opacity / margin all tween via the iPadOS decelerate curve.
+    const isOpen = setting.classList.toggle("is-open");
+    if (isOpen) {
         arrowDown.style.display = "none";
         arrowUp.style.display = "inline";
         document.getElementById("tl").focus(); // after show settings block, the language element <select> will be auto focused
         judgeValue(exchangeButton, sourceLanguage);
     } else {
-        setting.style.display = "none";
         arrowDown.style.display = "inline";
         arrowUp.style.display = "none";
         document.getElementById("translate_input").focus(); // after settings block disappear, the translation element <input> will be auto focused
