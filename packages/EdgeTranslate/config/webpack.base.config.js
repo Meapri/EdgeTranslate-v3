@@ -45,6 +45,11 @@ module.exports = {
                 __dirname,
                 "../../translators/dist/translators.es.js"
             ),
+            // Local Liquid Glass engine (separate sibling repo, built ESM dist).
+            "liquid-glass": path.resolve(
+                __dirname,
+                "../../../../liquid-glass/dist/liquid-glass.js"
+            ),
             "@": path.resolve(__dirname, "../src"),
             common: path.resolve(__dirname, "../src/common"),
             react: "preact/compat",

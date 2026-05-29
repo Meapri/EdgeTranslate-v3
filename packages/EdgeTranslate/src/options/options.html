@@ -2,8 +2,11 @@
 <html>
     <head>
         <meta charset="utf-8" />
-        <title class="i18n" data-i18n-name="SettingsTitle"></title>
         <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title class="i18n" data-i18n-name="SettingsTitle"></title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
         <link type="text/css" rel="stylesheet" href="./options.css" />
     </head>
 
@@ -18,23 +21,18 @@
             <div class="content">
                 <div class="main-layout">
                     <aside class="sidebar">
+                        <div class="nav-indicator"></div>
                         <button class="nav-tab active" data-tab="general">
                             <span class="nav-icon nav-icon-settings" aria-hidden="true"></span>
-                            <span class="nav-label i18n" data-i18n-name="GeneralSettings"
-                                >일반 설정</span
-                            >
+                            <span class="nav-label i18n" data-i18n-name="GeneralSettings"></span>
                         </button>
                         <button class="nav-tab" data-tab="engines">
                             <span class="nav-icon nav-icon-engines" aria-hidden="true"></span>
-                            <span class="nav-label i18n" data-i18n-name="TranslatorSettings"
-                                >번역 엔진 설정</span
-                            >
+                            <span class="nav-label i18n" data-i18n-name="TranslatorSettings"></span>
                         </button>
                         <button class="nav-tab" data-tab="captions">
                             <span class="nav-icon nav-icon-captions" aria-hidden="true"></span>
-                            <span class="nav-label i18n" data-i18n-name="RealtimeCaptionSettings"
-                                >YouTube 자막 번역</span
-                            >
+                            <span class="nav-label i18n" data-i18n-name="RealtimeCaptionSettings"></span>
                         </button>
                     </aside>
                     <div class="tab-content">
@@ -541,27 +539,6 @@
                                     </div>
                                     <div class="column" data-local-mode="googleAiStudio">
                                         <label
-                                            for="local-translator-reasoning-level"
-                                            class="checked-label i18n"
-                                            data-i18n-name="LocalTranslatorReasoningLevel"
-                                            data-insert-pos="afterBegin"
-                                        >
-                                            <select
-                                                setting-type="select"
-                                                setting-path="LocalTranslatorConfig reasoningLevel"
-                                                id="local-translator-reasoning-level"
-                                            >
-                                                <option value="auto">Auto</option>
-                                                <option value="none">None</option>
-                                                <option value="minimal">Minimal</option>
-                                                <option value="low">Low</option>
-                                                <option value="medium">Medium</option>
-                                                <option value="high">High</option>
-                                            </select>
-                                        </label>
-                                    </div>
-                                    <div class="column" data-local-mode="googleAiStudio">
-                                        <label
                                             for="local-translator-timeout"
                                             class="checked-label i18n"
                                             data-i18n-name="LocalTranslatorTimeoutMs"
@@ -726,28 +703,6 @@
                                     </div>
                                     <div class="column" data-local-mode="openai">
                                         <label
-                                            for="local-translator-openai-reasoning-effort"
-                                            class="checked-label i18n"
-                                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
-                                            data-insert-pos="afterBegin"
-                                        >
-                                            <select
-                                                setting-type="select"
-                                                setting-path="LocalTranslatorConfig openaiReasoningEffort"
-                                                id="local-translator-openai-reasoning-effort"
-                                            >
-                                                <option value="auto">Auto</option>
-                                                <option value="none">None</option>
-                                                <option value="minimal">Minimal</option>
-                                                <option value="low">Low</option>
-                                                <option value="medium">Medium</option>
-                                                <option value="high">High</option>
-                                                <option value="xhigh">XHigh</option>
-                                            </select>
-                                        </label>
-                                    </div>
-                                    <div class="column" data-local-mode="openai">
-                                        <label
                                             for="local-translator-openai-timeout"
                                             class="checked-label i18n"
                                             data-i18n-name="LocalTranslatorTimeoutMs"
@@ -862,6 +817,24 @@
                                 ></label>
                                 <div class="row">
                                     <div class="column">
+                                        <input
+                                            type="checkbox"
+                                            value="enabled"
+                                            setting-type="switch"
+                                            setting-path="PreciseTranslatorConfig enabled"
+                                            class="switch"
+                                            id="PreciseTranslatorEnabled"
+                                        />
+                                        <span class="space"></span>
+                                        <label
+                                            for="PreciseTranslatorEnabled"
+                                            class="checked-label i18n"
+                                            data-i18n-name="PreciseTranslatorEnabled"
+                                        ></label>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="column">
                                         <label
                                             for="precise-translator-mode"
                                             class="checked-label i18n"
@@ -913,27 +886,6 @@
                                             ></select>
                                         </label>
                                     </div>
-                                    <div class="column" data-precise-mode="googleAiStudio">
-                                        <label
-                                            for="precise-translator-reasoning-level"
-                                            class="checked-label i18n"
-                                            data-i18n-name="LocalTranslatorReasoningLevel"
-                                            data-insert-pos="afterBegin"
-                                        >
-                                            <select
-                                                setting-type="select"
-                                                setting-path="PreciseTranslatorConfig reasoningLevel"
-                                                id="precise-translator-reasoning-level"
-                                            >
-                                                <option value="auto">Auto</option>
-                                                <option value="none">None</option>
-                                                <option value="minimal">Minimal</option>
-                                                <option value="low">Low</option>
-                                                <option value="medium">Medium</option>
-                                                <option value="high">High</option>
-                                            </select>
-                                        </label>
-                                    </div>
                                 </div>
                                 <div class="row" id="precise-translator-openai-settings">
                                     <div class="column" data-precise-mode="openai">
@@ -949,28 +901,6 @@
                                                 id="precise-translator-openai-model"
                                                 data-model-options="openai"
                                             ></select>
-                                        </label>
-                                    </div>
-                                    <div class="column" data-precise-mode="openai">
-                                        <label
-                                            for="precise-translator-openai-reasoning-effort"
-                                            class="checked-label i18n"
-                                            data-i18n-name="LocalTranslatorOpenAIReasoningEffort"
-                                            data-insert-pos="afterBegin"
-                                        >
-                                            <select
-                                                setting-type="select"
-                                                setting-path="PreciseTranslatorConfig openaiReasoningEffort"
-                                                id="precise-translator-openai-reasoning-effort"
-                                            >
-                                                <option value="auto">Auto</option>
-                                                <option value="none">None</option>
-                                                <option value="minimal">Minimal</option>
-                                                <option value="low">Low</option>
-                                                <option value="medium">Medium</option>
-                                                <option value="high">High</option>
-                                                <option value="xhigh">XHigh</option>
-                                            </select>
                                         </label>
                                     </div>
                                 </div>

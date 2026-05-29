@@ -567,9 +567,9 @@ const SurfaceContainer = "#f1f4f8";
 const OutlineVariant = "#e1e3e1";
 const GlassBorder = "rgba(255, 255, 255, 0.72)";
 const GlassSurface =
-    "radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.92), transparent 42%), linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.46))";
+    "radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.48), transparent 42%), linear-gradient(145deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.18))";
 const GlassSurfaceMuted =
-    "radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.72), transparent 42%), linear-gradient(145deg, rgba(241, 244, 248, 0.7), rgba(241, 244, 248, 0.38))";
+    "radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.38), transparent 42%), linear-gradient(145deg, rgba(241, 244, 248, 0.28), rgba(241, 244, 248, 0.16))";
 const BlockContentDrawerHeight = 150; // drawer height for blocks
 
 /**
@@ -601,8 +601,8 @@ export const Block = styled.div`
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.08), transparent 42%),
-            linear-gradient(145deg, rgba(32, 38, 45, 0.72), rgba(27, 32, 38, 0.48));
+        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.04), transparent 42%),
+            linear-gradient(145deg, rgba(30, 36, 44, 0.28), rgba(22, 27, 32, 0.18));
         --drawer-handle-surface: ${DarkSurfaceContainer};
         --drawer-handle-fade: rgba(32, 38, 45, 0.52);
         --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
@@ -622,8 +622,8 @@ const Source = styled(Block)`
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurfaceVariant};
-        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.06), transparent 42%),
-            linear-gradient(145deg, rgba(36, 42, 49, 0.7), rgba(27, 32, 38, 0.42));
+        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.03), transparent 42%),
+            linear-gradient(145deg, rgba(36, 42, 49, 0.24), rgba(22, 27, 32, 0.14));
         --drawer-handle-surface: ${DarkSurfaceContainerHigh};
         --drawer-handle-fade: rgba(36, 42, 49, 0.56);
         --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
@@ -644,8 +644,8 @@ const Target = styled(Block)`
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.08), transparent 42%),
-            linear-gradient(145deg, rgba(32, 38, 45, 0.72), rgba(27, 32, 38, 0.48));
+        background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.04), transparent 42%),
+            linear-gradient(145deg, rgba(30, 36, 44, 0.28), rgba(22, 27, 32, 0.18));
         --drawer-handle-surface: ${DarkSurfaceContainer};
         --drawer-handle-fade: rgba(32, 38, 45, 0.52);
         border-color: ${DarkOutline};
@@ -723,7 +723,7 @@ const StyledEditIcon = styled(EditIcon)`
     border-radius: 999px;
     background-color: #f3f4f9;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
-    transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), fill ${MotionFast},
         background-color 0.2s, box-shadow 0.2s;
     transform: scale(1);
     &:hover {
@@ -768,7 +768,7 @@ const StyledEditDoneIcon = styled(EditDoneIcon)`
     border-radius: 999px;
     background-color: #f3f4f9;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
-    transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), fill ${MotionFast},
         background-color 0.2s, box-shadow 0.2s;
     transform: scale(1);
     &:hover {
@@ -823,7 +823,7 @@ const StyledCopyIcon = styled(CopyIcon)`
     border-radius: 999px;
     background-color: #f3f4f9;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
-    transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), fill ${MotionFast},
         background-color 0.2s, box-shadow 0.2s;
     transform: scale(1);
     &:hover {
@@ -867,7 +867,7 @@ const StyledPronounceIcon = styled(PronounceIcon)`
     border-radius: 999px;
     background-color: #f3f4f9;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
-    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), fill ${MotionFast},
         background-color 0.2s, box-shadow 0.2s;
 
     ${(props) =>
@@ -945,7 +945,7 @@ const StyledPronounceLoadingIcon = styled(PronounceLoadingIcon)`
     border-radius: 999px;
     background-color: #f3f4f9;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
-    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), fill ${MotionFast},
+    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), fill ${MotionFast},
         background-color 0.2s, box-shadow 0.2s;
     transform: scale(1);
 

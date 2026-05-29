@@ -1378,17 +1378,9 @@
         "message": "AI 모델",
         "description": "Google AI Studio 모델 이름"
     },
-    "LocalTranslatorReasoningLevel": {
-        "message": "추론 레벨",
-        "description": "Google AI Studio thinking level 설정"
-    },
     "LocalTranslatorOpenAIModel": {
         "message": "OpenAI 모델",
         "description": "OpenAI 모델 이름"
-    },
-    "LocalTranslatorOpenAIReasoningEffort": {
-        "message": "추론 레벨",
-        "description": "OpenAI reasoning_effort 설정"
     },
     "TranslateNormal": {
         "message": "일반 번역",
@@ -1441,6 +1433,10 @@
     "PreciseTranslatorConfig": {
         "message": "정밀 번역 모델",
         "description": "정밀 번역 프로필 설정"
+    },
+    "PreciseTranslatorEnabled": {
+        "message": "정밀 번역 사용",
+        "description": "정밀 번역 사용 여부 토글"
     },
     "PreciseTranslatorMode": {
         "message": "정밀 모드",

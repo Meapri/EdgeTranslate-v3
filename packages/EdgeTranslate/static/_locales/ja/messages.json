@@ -1342,17 +1342,9 @@
         "message": "AIモデル",
         "description": "Google AI Studio モデル名"
     },
-    "LocalTranslatorReasoningLevel": {
-        "message": "推論レベル",
-        "description": "Google AI Studio thinking level 設定"
-    },
     "LocalTranslatorOpenAIModel": {
         "message": "OpenAIモデル",
         "description": "OpenAI モデル名"
-    },
-    "LocalTranslatorOpenAIReasoningEffort": {
-        "message": "推論レベル",
-        "description": "OpenAI reasoning_effort 設定"
     },
     "TranslateNormal": {
         "message": "Normal translation",
@@ -1405,6 +1397,10 @@
     "PreciseTranslatorConfig": {
         "message": "Precise translation model",
         "description": "Settings for the precise translation profile."
+    },
+    "PreciseTranslatorEnabled": {
+        "message": "精密翻訳を使用",
+        "description": "Toggle to enable precise translation."
     },
     "PreciseTranslatorMode": {
         "message": "Precise mode",

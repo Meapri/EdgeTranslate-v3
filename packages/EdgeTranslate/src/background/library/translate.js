@@ -183,10 +183,7 @@ class TranslatorManager {
             enabled: true,
             mode,
             model: preciseConfig.model || localConfig.model,
-            reasoningLevel: preciseConfig.reasoningLevel || localConfig.reasoningLevel,
             openaiModel: preciseConfig.openaiModel || localConfig.openaiModel,
-            openaiReasoningEffort:
-                preciseConfig.openaiReasoningEffort || localConfig.openaiReasoningEffort,
             openaiCompatibleBaseUrl: localConfig.openaiCompatibleBaseUrl,
             openaiCompatibleApiKey: localConfig.openaiCompatibleApiKey,
             openaiCompatibleModel:

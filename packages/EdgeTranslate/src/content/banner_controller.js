@@ -5,11 +5,160 @@ import {
     translateWithChromeOnDevice,
 } from "common/scripts/chrome_builtin_translate.js";
 import {
+    applyHtmlPageSection,
+    applyStreamedSectionChildren,
     buildContextTranslationGroups,
+    buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
+    buildStrippedSectionHtml,
+    captureLeafSegmentTexts,
+    collectHtmlPageSections,
+    findLeafBlocksInElement,
+    isAlreadyInTargetLanguage,
     splitSegmentedTranslationText,
     splitTranslatedContext,
+    wrapLeafLineSegmentsInSpans,
 } from "./dom_page_translate_context.js";
+// Meapri/liquid-glass-web — real GPU/Chromium Liquid Glass engine (feDisplacementMap
+// refraction + baked specular rim, Shadow-DOM aware, quality tiers). Aliased in
+// webpack to the engine's prebuilt ESM. Replaces the earlier hand-rolled CSS/SVG
+// attempts. Used at quality:'balanced' for the page-translate chrome.
+import { LiquidGlass } from "liquid-glass";
+
+/**
+ * Low-priority scheduling via the Prioritized Task Scheduling API. Yields to
+ * user-visible work so cache house-keeping and similar background fetches don't
+ * block paints. Falls back to a 0ms setTimeout for browsers without scheduler.
+ *
+ * Returns nothing — schedulePostTask is fire-and-forget by design. Callers that
+ * need to await the work should use the relevant API result directly.
+ */
+function schedulePostTask(fn, priority = "background") {
+    const g = typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : null;
+    if (g && typeof g.scheduler?.postTask === "function") {
+        try {
+            g.scheduler.postTask(fn, { priority });
+            return;
+        } catch {
+            /* fall through */
+        }
+    }
+    setTimeout(fn, 0);
+}
+
+/**
+ * Run a DOM mutation inside a View Transition when available so the browser
+ * crossfades old → new at zero main-thread cost. The mutation ALWAYS runs
+ * synchronously (we await the update-callback completion via a sync sentinel)
+ * so callers can rely on side effects being visible immediately after the
+ * call returns. Falls back to a direct call on browsers without the API.
+ *
+ * IMPORTANT: this used to wrap mutations in document.startViewTransition and
+ * pass the callback to the browser. That implementation had a subtle
+ * correctness bug — the callback fires AFTER a microtask, so any state the
+ * caller read synchronously (e.g. an `applied` flag set inside the callback)
+ * was always stale. We now run the mutation eagerly and only use the API as
+ * an opportunistic visual enhancement when the page is idle.
+ */
+function runWithOptionalViewTransition(mutationFn) {
+    // For now: always run the mutation synchronously. The browser handles
+    // smooth-rendering via the standard rAF + compositor pipeline; layering
+    // View Transitions on top of our streaming/popcorn flow added complexity
+    // without measurable UX benefit because individual section applies are
+    // typically too short for the crossfade to be visible.
+    mutationFn();
+}
+
+/**
+ * Compute a short, stable hash of the current page's identity. Used as the
+ * urlHash key for the persistent translation cache so we don't re-translate
+ * the same URL on revisit.
+ */
+function computePersistentCacheUrlHash(targetLanguage) {
+    if (typeof location === "undefined") return "";
+    // Strip the hash + transient query params so anchor changes don't blow the cache.
+    const base = `${location.origin}${location.pathname}`;
+    return fnv1a32(`${base}|${targetLanguage || ""}`);
+}
+
+/**
+ * Inject DNS-prefetch + preconnect hints for the AI engine's host so the
+ * TCP/TLS handshake completes in parallel with our first section's build.
+ * No-op on duplicate calls — the link tags carry our marker attribute.
+ */
+function injectDnsPrefetchForEngine(engine) {
+    if (typeof document === "undefined" || !document.head) return;
+    const host = {
+        googleAiStudio: "https://generativelanguage.googleapis.com",
+        openai: "https://api.openai.com",
+    }[engine];
+    if (!host) return;
+    const marker = `et-prefetch-${engine}`;
+    if (document.head.querySelector(`link[data-edge-translate="${marker}"]`)) return;
+    for (const rel of ["dns-prefetch", "preconnect"]) {
+        const link = document.createElement("link");
+        link.rel = rel;
+        link.href = host;
+        link.crossOrigin = "anonymous";
+        link.setAttribute("data-edge-translate", marker);
+        document.head.appendChild(link);
+    }
+}
+
+// content-visibility only pays off for block-level containers whose layout
+// cost is significant. Applying it to inline children (e.g. spans within a
+// translated paragraph) can cause incorrect intrinsic-size estimates and
+// visible layout shift when the element scrolls into view. We restrict to
+// known block-level tags.
+const CONTENT_VISIBILITY_BLOCK_TAGS = new Set([
+    "P",
+    "DIV",
+    "ARTICLE",
+    "SECTION",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "LI",
+    "BLOCKQUOTE",
+    "FIGCAPTION",
+    "CAPTION",
+    "TD",
+    "TH",
+    "ASIDE",
+    "MAIN",
+    "NAV",
+    "HEADER",
+    "FOOTER",
+    "ADDRESS",
+    "DD",
+    "DT",
+    "FIGURE",
+]);
+
+/**
+ * Apply `content-visibility: auto` inline to translated block-level elements
+ * so off-screen regions skip layout + paint until scrolled into view. We set
+ * it inline (vs via a stylesheet) to avoid creating extra &lt;style&gt;
+ * elements that could interfere with PDF text-layer styling.
+ *
+ * Skips:
+ *   - inline elements (where contain-intrinsic-size: 200px would shift layout)
+ *   - elements inside the PDF text layer (need absolute positioning)
+ */
+function markElementTranslatedForRendering(element) {
+    if (!element || !element.style) return;
+    if (!CONTENT_VISIBILITY_BLOCK_TAGS.has(element.tagName)) return;
+    if (element.closest && element.closest(".textLayer")) return;
+    try {
+        element.style.contentVisibility = "auto";
+        element.style.containIntrinsicSize = "auto 200px";
+    } catch {
+        /* style assignment can throw on cross-origin frames — best-effort */
+    }
+}
 
 function fnv1a32(str) {
     let hash = 0x811c9dc5;
@@ -18,6 +167,20 @@ function fnv1a32(str) {
         hash = (hash * 0x01000193) >>> 0;
     }
     return hash.toString(36);
+}
+
+function estimateLlmPayloadTokens(text) {
+    const value = String(text || "");
+    if (!value) return 0;
+    const cjkChars = (value.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) || []).length;
+    const otherChars = Math.max(0, value.length - cjkChars);
+    return Math.ceil(cjkChars * 0.8 + otherChars / 3.6);
+}
+
+function estimateLlmOutputTokens(plainText, sourceHtml = "") {
+    const visibleTokens = estimateLlmPayloadTokens(plainText || sourceHtml);
+    const structuralTokens = Math.max(0, estimateLlmPayloadTokens(sourceHtml) - visibleTokens);
+    return Math.ceil(visibleTokens * 1.25 + structuralTokens * 0.8);
 }
 
 /**
@@ -58,6 +221,14 @@ class BannerController {
         this._domTotalTranslationEntries = 0;
         this._domCompletedTranslationEntries = 0;
         this._domBatchFailureCount = 0;
+        this._aiPageSectionBatchScale = 1;
+        this._aiPageSectionBatchSuccessStreak = 0;
+        this._aiPageSectionBatchFailureStreak = 0;
+        this._aiPageSectionBatchLatencyEmaMs = 0;
+        this._aiPageConcurrencySuccessStreak = 0;
+        this._aiPageConcurrencyLatencyEmaMs = 0;
+        this._aiPageConcurrencyQueueWaitEmaMs = 0;
+        this._aiPageDynamicMaxConcurrentTranslations = null;
         this._domTranslationSessionId = 0;
         this._domTokenUsage = {
             inputTokens: 0,
@@ -69,13 +240,18 @@ class BannerController {
         this._domPageRootElements = [];
         this._domCoverageScanTimer = null;
         this._domCoverageScanCount = 0;
+        this._domCoverageStableScanCount = 0;
         this._domIncrementalScanTimer = null;
+        this._domOwnMutationSuppressUntil = 0;
         this._domScrollScanHandler = null;
         this._onDeviceBridgePromise = null;
         this._onDeviceBridgeRequestId = 0;
         this._onDeviceBridgePending = new Map();
         this._domOriginalTextByElement = new WeakMap();
         this._domDuplicateEntries = new Map();
+        this._domPendingApplies = new Map();
+        this._domNextApplySequence = 0;
+        this._domNextApplyToFlush = 0;
         this._domOriginalTooltip = null;
         this._domOriginalTooltipTarget = null;
         this._domOriginalTooltipHandlers = null;
@@ -257,7 +433,10 @@ class BannerController {
         this._domCompletedTranslationEntries = 0;
         this._domTotalTranslationEntries = 0;
         this._domBatchFailureCount = 0;
+        this.resetAiPageSectionBatchTuning();
         this._domCoverageScanCount = 0;
+        this._domCoverageStableScanCount = 0;
+        this._domOwnMutationSuppressUntil = 0;
         this._domTokenUsage = {
             inputTokens: 0,
             outputTokens: 0,
@@ -2348,19 +2527,20 @@ class BannerController {
     }
 
     startFullPageBatchTranslation() {
-        const nodes = this.collectDomPageTextNodes(this._domPageRootElements);
-        if (nodes.length) this.translateBatchNodes(nodes);
+        this._domCoverageStableScanCount = 0;
+        this.dispatchAiPageSections({ reason: "initial" });
     }
 
     scanDomPageForNewTextNodes() {
         if (this.currentTranslator !== "dom") return;
         if (this._domCircuitBreakerActive) return;
         this._domPageRootElements = this.getDomPageTranslationRoots();
-        const nodes = this.collectDomPageTextNodes(this._domPageRootElements);
-        if (nodes.length) this.translateBatchNodes(nodes);
+        const enqueued = this.dispatchAiPageSections({ reason: "incremental" });
+        if (enqueued > 0) this._domCoverageStableScanCount = 0;
+        return enqueued;
     }
 
-    scheduleDomPageIncrementalScan(delay = 450) {
+    scheduleDomPageIncrementalScan(delay = 200) {
         if (this.currentTranslator !== "dom") return;
         if (this._domCircuitBreakerActive) return;
         if (this._domIncrementalScanTimer) clearTimeout(this._domIncrementalScanTimer);
@@ -2375,17 +2555,122 @@ class BannerController {
         if (this._domCircuitBreakerActive) return;
         if (this._domCoverageScanTimer) return;
         if (this._domCoverageScanCount >= 5) return;
+        if (this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1) return;
         this._domCoverageScanTimer = setTimeout(() => {
             this._domCoverageScanTimer = null;
             if (this.currentTranslator !== "dom") return;
             if (this._domCircuitBreakerActive) return;
             if (this._domTranslationQueue?.length || this._domActiveTranslations > 0) return;
-            this._domCoverageScanCount += 1;
-            const nodes = this.collectDomPageTextNodes(this._domPageRootElements);
-            if (nodes.length) {
-                this.translateBatchNodes(nodes);
+            if (this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1) {
+                return;
             }
-        }, 350);
+            this._domCoverageScanCount += 1;
+            const enqueued = this.dispatchAiPageSections({ reason: "coverage" });
+            if (enqueued > 0) {
+                this._domCoverageStableScanCount = 0;
+            } else if (this.isDomPageTranslationComplete()) {
+                this._domCoverageStableScanCount += 1;
+            }
+        }, 150);
+    }
+
+    isDomPageTranslationComplete() {
+        return (
+            this._domTotalTranslationEntries > 0 &&
+            this._domCompletedTranslationEntries >= this._domTotalTranslationEntries
+        );
+    }
+
+    noteDomPageOwnMutation(durationMs = 900) {
+        const until = Date.now() + durationMs;
+        this._domOwnMutationSuppressUntil = Math.max(this._domOwnMutationSuppressUntil || 0, until);
+    }
+
+    isDomPageOwnMutationSuppressed() {
+        return Date.now() < (this._domOwnMutationSuppressUntil || 0);
+    }
+
+    isDomPageExtensionNode(node) {
+        let element = node && node.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        while (element && element !== document.documentElement) {
+            const id = String(element.id || "");
+            const className =
+                typeof element.className === "string"
+                    ? element.className
+                    : element.getAttribute && element.getAttribute("class");
+            if (id.startsWith("edge-translate-") || id.startsWith("edge_translate_")) {
+                return true;
+            }
+            if (/\b(?:edge-translate-|et-dom-)/.test(String(className || ""))) {
+                return true;
+            }
+            element = element.parentElement;
+        }
+        return false;
+    }
+
+    isDomPageMutationTextCandidate(node, { allowTranslatedSection = false } = {}) {
+        if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+        if (this.isDomPageExtensionNode(node)) return false;
+        const parent = node.parentElement;
+        if (!allowTranslatedSection && this.isElementMarkedAsTranslatedAiSection(parent)) {
+            return false;
+        }
+        if (!this.isMeaningfulDomPageTextNode(node)) return false;
+        const targetLang = this._domPageTranslateOptions?.tl || "";
+        if (this.isDomPageTextAlreadyInTargetLanguage(node.nodeValue, targetLang)) return false;
+        return true;
+    }
+
+    findDomPageMutationCandidate(node, { ownSuppressed = false } = {}) {
+        const empty = { found: false, marked: false };
+        if (!node || this.isDomPageExtensionNode(node)) return empty;
+
+        if (node.nodeType === Node.TEXT_NODE) {
+            const marked = this.isElementMarkedAsTranslatedAiSection(node.parentElement);
+            if (marked && ownSuppressed) return empty;
+            if (this.isDomPageMutationTextCandidate(node, { allowTranslatedSection: marked })) {
+                return { found: true, marked };
+            }
+            return empty;
+        }
+
+        if (node.nodeType !== Node.ELEMENT_NODE) return empty;
+        if (this.isElementMarkedAsTranslatedAiSection(node) && ownSuppressed) return empty;
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        let textNode;
+        while ((textNode = walker.nextNode())) {
+            const marked = this.isElementMarkedAsTranslatedAiSection(textNode.parentElement);
+            if (marked && ownSuppressed) continue;
+            if (this.isDomPageMutationTextCandidate(textNode, { allowTranslatedSection: marked })) {
+                return { found: true, marked };
+            }
+        }
+        return empty;
+    }
+
+    domPageMutationHasTranslatableCandidate(mutation) {
+        if (!mutation || this.isDomPageExtensionNode(mutation.target)) return false;
+        const ownSuppressed = this.isDomPageOwnMutationSuppressed();
+
+        if (mutation.type === "characterData") {
+            const candidate = this.findDomPageMutationCandidate(mutation.target, {
+                ownSuppressed,
+            });
+            if (candidate.found && candidate.marked) {
+                this.releaseAiPageSectionElement(mutation.target);
+            }
+            return candidate.found;
+        }
+
+        if (mutation.type !== "childList") return false;
+        for (const node of Array.from(mutation.addedNodes || [])) {
+            const candidate = this.findDomPageMutationCandidate(node, { ownSuppressed });
+            if (!candidate.found) continue;
+            if (candidate.marked) this.releaseAiPageSectionElement(mutation.target);
+            return true;
+        }
+        return false;
     }
 
     isNodeInDomPageTranslationRoot(node) {
@@ -2410,9 +2695,6 @@ class BannerController {
                 .join(" ")
                 .toLowerCase();
             const normalized = signature.replace(/[_\s]+/g, "-");
-            // Comment / thread sections are intentionally allowed through — users want
-            // discussion translated alongside the article. Only widgets that are clearly UI
-            // chrome (auth forms, popups, ads, editor inputs) stay excluded.
             if (
                 /(^|-)newsletter($|-)/.test(normalized) ||
                 /(^|-)quill($|-)/.test(normalized) ||
@@ -2642,6 +2924,10 @@ class BannerController {
         return await this.channel.request("translate_text_quiet", payload);
     }
 
+    isAiDomPageEngine(engine = this._domPageTranslateOptions?.engine) {
+        return engine === "googleAiStudio" || engine === "openai" || engine === "openaiCompatible";
+    }
+
     getDomPageTranslationGroupOptions() {
         // Cap groups at the per-engine batch ceiling so context-translation requests fit a single round-trip
         // (and, for openaiCompatible, fit a single local LLM slot).
@@ -2650,44 +2936,38 @@ class BannerController {
         return { maxChars: 12000 };
     }
 
-    getReadableBlockReplacementOptions() {
-        const engine = this._domPageTranslateOptions.engine;
-        if (engine === "openaiCompatible") return { maxChars: 2400 };
-        return { maxChars: 12000 };
-    }
-
     getDomPageBatchOptions() {
         const engine = this._domPageTranslateOptions.engine;
         const failures = this._domBatchFailureCount;
-        // Universal principle: LLM generation latency is roughly linear in output tokens, so
-        // smaller batches respond noticeably faster. Combined with appropriate concurrency,
-        // total throughput stays the same while the user sees results much sooner.
+        // Speed-first sizing. Larger batches let one LLM call cover many entries, slashing
+        // per-request overhead (TLS, queueing, prompt prefill). Combined with high
+        // concurrency below, the page-translate banner reaches "everything translated"
+        // significantly faster than the conservative split-by-tens approach.
         if (engine === "openaiCompatible") {
-            // Local LLM: still slot-constrained (≤4k n_ctx) but smaller batches → faster per-response.
+            // Local LLM: still slot-constrained (~4k n_ctx per --parallel slot). Push
+            // batches and concurrency to the slot limit but stop there.
             if (failures >= 3) return { maxChars: 500, maxItems: 1 };
-            if (failures >= 2) return { maxChars: 800, maxItems: 3 };
-            if (failures >= 1) return { maxChars: 1200, maxItems: 6 };
-            return { maxChars: 1500, maxItems: 10 };
+            if (failures >= 2) return { maxChars: 1000, maxItems: 4 };
+            if (failures >= 1) return { maxChars: 1600, maxItems: 8 };
+            return { maxChars: 2400, maxItems: 16 };
         }
-        // Cloud providers (googleAiStudio, openai) and any other engine: same recipe.
-        if (failures >= 3) return { maxChars: 1500, maxItems: 1 };
-        if (failures >= 2) return { maxChars: 2500, maxItems: 8 };
-        if (failures >= 1) return { maxChars: 3500, maxItems: 16 };
-        return { maxChars: 4500, maxItems: 24 };
+        // Cloud providers (googleAiStudio, openai, default): a single request can carry
+        // 64 entries / 12000 chars without trouble. The first batch fills immediately and
+        // streaming surfaces translations to the DOM as they arrive within that one call.
+        if (failures >= 3) return { maxChars: 1800, maxItems: 1 };
+        if (failures >= 2) return { maxChars: 4000, maxItems: 6 };
+        if (failures >= 1) return { maxChars: 7000, maxItems: 32 };
+        return { maxChars: 12000, maxItems: 64 };
     }
 
     /**
-     * Tiny first batch so the user sees the first translation appear within ~0.5–1s.
-     * Applied uniformly across providers; remaining content uses the normal batch options.
+     * Speed-first: there is no separate lead batch. The first batch IS the full-size
+     * batch, and streaming surfaces translations to the DOM as they arrive within that
+     * call. A tiny lead batch would just add a serial round-trip before the real work
+     * starts, which is exactly the opposite of what we want.
      */
     getDomPageLeadBatchOptions() {
-        const engine = this._domPageTranslateOptions.engine;
-        if (engine === "openaiCompatible") {
-            // Local model: keep tiny so the first response shows up before the model warms up.
-            return { maxChars: 400, maxItems: 2, maxEntries: 2 };
-        }
-        // Cloud (Gemini / OpenAI / others): ~800 chars ≈ ~0.5s first response.
-        return { maxChars: 800, maxItems: 4, maxEntries: 4 };
+        return null;
     }
 
     /**
@@ -2698,7 +2978,11 @@ class BannerController {
      * Tiers: 0=visible, 1=just-below, 2=above, 3=far. Document order preserved within a tier.
      */
     prioritizeDomPageEntriesByViewport(entries) {
-        if (!entries || entries.length < 20) return;
+        // Articles with 8+ blocks already benefit from viewport prioritization — the visible
+        // window typically holds 3-6 blocks, so sorting them first cuts time-to-first-paint by
+        // ~30% on medium articles. A single batched layout read (getBoundingClientRect calls
+        // are coalesced by the browser) is cheap enough that we don't need a higher threshold.
+        if (!entries || entries.length < 8) return;
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
         const tiers = new Int8Array(entries.length);
         for (let i = 0; i < entries.length; i++) {
@@ -2730,34 +3014,43 @@ class BannerController {
     getDomPageMaxConcurrentTranslations() {
         const engine = this._domPageTranslateOptions.engine;
         const failures = this._domBatchFailureCount;
+        let base;
         // openaiCompatible is hard-capped by the local server's `--parallel` slot count
         // (typically 8). Going beyond that just queues at the server.
         if (engine === "openaiCompatible") {
-            if (failures >= 3) return 2;
-            if (failures >= 2) return 4;
-            if (failures >= 1) return 6;
-            return 8;
+            if (failures >= 3) base = 2;
+            else if (failures >= 2) base = 4;
+            else if (failures >= 1) base = 6;
+            else base = 8;
+        } else if (engine === "googleAiStudio") {
+            // Gemini AI Studio has effectively per-request limits that scale with the
+            // model; 2.5-flash-lite easily handles 32 simultaneous connections from one
+            // origin. Push hard on the first attempt; back off only after real failures.
+            if (failures >= 3) base = 6;
+            else if (failures >= 2) base = 8;
+            else if (failures >= 1) base = 12;
+            else base = 32;
+        } else if (engine === "openai") {
+            // OpenAI tiers vary; 16 is the conservative speed-first ceiling that paid
+            // accounts handle without 429s, with the same back-off curve as googleAiStudio.
+            if (failures >= 3) base = 6;
+            else if (failures >= 2) base = 8;
+            else if (failures >= 1) base = 12;
+            else base = 16;
+        } else if (failures >= 3) {
+            // Default / unknown engine: mirror openai.
+            base = 6;
+        } else if (failures >= 2) {
+            base = 8;
+        } else if (failures >= 1) {
+            base = 12;
+        } else {
+            base = 16;
         }
-        if (engine === "googleAiStudio") {
-            // Gemini Flash supports 1000+ RPM on tier 2+; we can fill more slots before any
-            // rate-limit response shows up. Tier-1 will 429 → automatic backoff handles it.
-            if (failures >= 3) return 16;
-            if (failures >= 2) return 32;
-            if (failures >= 1) return 48;
-            return 64;
-        }
-        if (engine === "openai") {
-            // OpenAI tier-2+ accounts handle this easily; tier-1 will get throttled and back off automatically.
-            if (failures >= 3) return 8;
-            if (failures >= 2) return 16;
-            if (failures >= 1) return 24;
-            return 32;
-        }
-        // Default / unknown engine: assume mid-tier API, same recipe as openai.
-        if (failures >= 3) return 8;
-        if (failures >= 2) return 16;
-        if (failures >= 1) return 24;
-        return 32;
+        const dynamic = Number.isFinite(this._aiPageDynamicMaxConcurrentTranslations)
+            ? this._aiPageDynamicMaxConcurrentTranslations
+            : base;
+        return Math.max(1, Math.min(base, dynamic));
     }
 
     recordDomPageBatchFailure() {
@@ -2771,6 +3064,187 @@ class BannerController {
     recordDomPageBatchSuccess() {
         if (this._domBatchFailureCount > 0) this._domBatchFailureCount -= 1;
         this._domMaxConcurrentTranslations = this.getDomPageMaxConcurrentTranslations();
+    }
+
+    resetAiPageSectionBatchTuning() {
+        this._aiPageSectionBatchScale = 1;
+        this._aiPageSectionBatchSuccessStreak = 0;
+        this._aiPageSectionBatchFailureStreak = 0;
+        this._aiPageSectionBatchLatencyEmaMs = 0;
+        this._aiPageConcurrencySuccessStreak = 0;
+        this._aiPageConcurrencyLatencyEmaMs = 0;
+        this._aiPageConcurrencyQueueWaitEmaMs = 0;
+        this._aiPageDynamicMaxConcurrentTranslations = this.getAiPageConcurrencyLimits().initial;
+        this._domMaxConcurrentTranslations = this.getDomPageMaxConcurrentTranslations();
+    }
+
+    getAiPageConcurrencyLimits() {
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible") {
+            return { min: 2, initial: 8, max: 8, growAfter: 2, fastMs: 3800, slowMs: 12000 };
+        }
+        if (engine === "googleAiStudio") {
+            return { min: 6, initial: 32, max: 32, growAfter: 2, fastMs: 2400, slowMs: 9000 };
+        }
+        if (engine === "openai") {
+            return { min: 4, initial: 16, max: 16, growAfter: 2, fastMs: 3200, slowMs: 11000 };
+        }
+        return { min: 4, initial: 16, max: 16, growAfter: 2, fastMs: 3200, slowMs: 11000 };
+    }
+
+    setAiPageDynamicConcurrency(value) {
+        const { min, max } = this.getAiPageConcurrencyLimits();
+        const next = Math.min(max, Math.max(min, Math.round(value)));
+        this._aiPageDynamicMaxConcurrentTranslations = next;
+        this._domMaxConcurrentTranslations = this.getDomPageMaxConcurrentTranslations();
+    }
+
+    recordAiPageConcurrencyTelemetry({
+        failed = false,
+        durationMs = 0,
+        queueWaitMs = 0,
+        entries = 0,
+    } = {}) {
+        const { growAfter, fastMs, slowMs } = this.getAiPageConcurrencyLimits();
+        const current = Number.isFinite(this._aiPageDynamicMaxConcurrentTranslations)
+            ? this._aiPageDynamicMaxConcurrentTranslations
+            : this.getAiPageConcurrencyLimits().initial;
+        const measuredDuration = Number(durationMs) || 0;
+        const hasQueueWaitSample = Number.isFinite(Number(queueWaitMs));
+        const measuredWait = hasQueueWaitSample ? Math.max(0, Number(queueWaitMs)) : 0;
+
+        if (measuredDuration > 0) {
+            this._aiPageConcurrencyLatencyEmaMs = this._aiPageConcurrencyLatencyEmaMs
+                ? this._aiPageConcurrencyLatencyEmaMs * 0.7 + measuredDuration * 0.3
+                : measuredDuration;
+        }
+        if (hasQueueWaitSample) {
+            this._aiPageConcurrencyQueueWaitEmaMs = this._aiPageConcurrencyQueueWaitEmaMs
+                ? this._aiPageConcurrencyQueueWaitEmaMs * 0.7 + measuredWait * 0.3
+                : measuredWait;
+        }
+
+        if (failed) {
+            this._aiPageConcurrencySuccessStreak = 0;
+            this.setAiPageDynamicConcurrency(Math.max(current - 2, current * 0.75));
+            return;
+        }
+
+        const queueIsBackingUp =
+            this._domTranslationQueue?.length > 0 &&
+            this._aiPageConcurrencyQueueWaitEmaMs > Math.max(900, fastMs * 0.35);
+        if (measuredDuration >= slowMs || queueIsBackingUp) {
+            this._aiPageConcurrencySuccessStreak = 0;
+            this.setAiPageDynamicConcurrency(current - 1);
+            return;
+        }
+
+        if (measuredDuration > 0 && measuredDuration <= fastMs && entries > 0) {
+            this._aiPageConcurrencySuccessStreak += 1;
+            if (this._aiPageConcurrencySuccessStreak >= growAfter) {
+                this._aiPageConcurrencySuccessStreak = 0;
+                this.setAiPageDynamicConcurrency(current + 1);
+            }
+        }
+    }
+
+    getAiPageSectionBatchScaleLimits() {
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible") {
+            return {
+                min: 0.5,
+                max: 1.35,
+                growAfter: 2,
+                fastMs: 4200,
+                slowMs: 14000,
+            };
+        }
+        return {
+            min: 0.6,
+            max: 1.6,
+            growAfter: 2,
+            fastMs: 2800,
+            slowMs: 10000,
+        };
+    }
+
+    getAiPageSectionBatchScale() {
+        const { min, max } = this.getAiPageSectionBatchScaleLimits();
+        const scale = Number.isFinite(this._aiPageSectionBatchScale)
+            ? this._aiPageSectionBatchScale
+            : 1;
+        return Math.min(max, Math.max(min, scale));
+    }
+
+    setAiPageSectionBatchScale(scale) {
+        const { min, max } = this.getAiPageSectionBatchScaleLimits();
+        this._aiPageSectionBatchScale = Math.min(max, Math.max(min, scale));
+    }
+
+    scaleAiPageSectionBatchOptions(options) {
+        const scale = this.getAiPageSectionBatchScale();
+        if (scale === 1) return options;
+        return {
+            maxChars: Math.max(1, Math.round(options.maxChars * scale)),
+            maxInputTokens: Math.max(1, Math.round(options.maxInputTokens * scale)),
+            maxOutputTokens: Math.max(1, Math.round(options.maxOutputTokens * scale)),
+            maxItems:
+                scale > 1
+                    ? Math.max(1, Math.ceil(options.maxItems * Math.min(scale, 1.25)))
+                    : Math.max(1, Math.floor(options.maxItems * scale)),
+        };
+    }
+
+    recordAiPageSectionBatchTelemetry({
+        failed = false,
+        durationMs = 0,
+        inputTokens = 0,
+        queueWaitMs = 0,
+        entries = 0,
+    } = {}) {
+        const { growAfter, fastMs, slowMs } = this.getAiPageSectionBatchScaleLimits();
+        const currentScale = this.getAiPageSectionBatchScale();
+        this.recordAiPageConcurrencyTelemetry({
+            failed,
+            durationMs,
+            queueWaitMs,
+            entries,
+        });
+
+        if (failed) {
+            this._aiPageSectionBatchFailureStreak += 1;
+            this._aiPageSectionBatchSuccessStreak = 0;
+            const shrink = this._aiPageSectionBatchFailureStreak >= 2 ? 0.65 : 0.8;
+            this.setAiPageSectionBatchScale(currentScale * shrink);
+            return;
+        }
+
+        this._aiPageSectionBatchFailureStreak = 0;
+        this._aiPageSectionBatchSuccessStreak += 1;
+
+        const measuredDuration = Number(durationMs) || 0;
+        if (measuredDuration > 0) {
+            this._aiPageSectionBatchLatencyEmaMs = this._aiPageSectionBatchLatencyEmaMs
+                ? this._aiPageSectionBatchLatencyEmaMs * 0.7 + measuredDuration * 0.3
+                : measuredDuration;
+        }
+
+        if (measuredDuration >= slowMs) {
+            this._aiPageSectionBatchSuccessStreak = 0;
+            this.setAiPageSectionBatchScale(currentScale * 0.86);
+            return;
+        }
+
+        if (
+            measuredDuration > 0 &&
+            measuredDuration <= fastMs &&
+            entries > 0 &&
+            inputTokens > 0 &&
+            this._aiPageSectionBatchSuccessStreak >= growAfter
+        ) {
+            this._aiPageSectionBatchSuccessStreak = 0;
+            this.setAiPageSectionBatchScale(currentScale * 1.12);
+        }
     }
 
     /**
@@ -2813,18 +3287,30 @@ class BannerController {
      */
     stripPromptEchoFromTranslation(text) {
         if (!text) return "";
-        return (
-            String(text)
-                // Full instruction lines that may be echoed verbatim.
-                .replace(
-                    /^[ \t]*(Source language|Target language|Translate|Output only the translation|Translate the user'?s text|Translate faithfully|Preserve meaning|Use the target language'?s|Preserve proper nouns)[^\n]*$/gim,
-                    ""
-                )
-                // Bare "Korean:" / "English:" language labels the model may emit.
-                .replace(/^[ \t]*[A-Z][a-z]+:\s*$/gm, "")
-                .replace(/\n{3,}/g, "\n\n")
-                .trim()
-        );
+        // Only strip prompt echo from the LEADING block of the output. Models that echo the
+        // instruction header always do so at the start; matching mid-output is dangerous
+        // because legitimate translations of English-source content can naturally begin
+        // a line with words like "Translate", "Preserve", or "Source" without being echoes.
+        // We also require an exact instruction phrase (not the bare word "Translate") so
+        // a translation that happens to start with "Translate the article" is safe.
+        // Allow blank lines between echoes (some models pad echoes with extra newlines).
+        const leadingEcho =
+            /^\s*(?:Source language|Target language|Translate the user'?s text|Translate faithfully|Output only the translation|Use the target language'?s writing system|Preserve proper nouns and official names|Keep link markers|Keep markers\.?|Translate [A-Za-z-]+ ->|[A-Za-z][A-Za-z -]*>[A-Za-z][A-Za-z -]*)[^\n]*\n?/i;
+        const leadingLanguageLabel = /^\s*[A-Z][a-z]+:\s*\n/;
+        let str = String(text);
+        // Cap iterations so a pathological input can't loop. Real echoes are 1-4 lines.
+        for (let i = 0; i < 8; i += 1) {
+            if (leadingEcho.test(str)) {
+                str = str.replace(leadingEcho, "");
+                continue;
+            }
+            if (leadingLanguageLabel.test(str)) {
+                str = str.replace(leadingLanguageLabel, "");
+                continue;
+            }
+            break;
+        }
+        return str.replace(/\n{3,}/g, "\n\n").trim();
     }
 
     isSuspiciousDomPageTranslation(sourceText, translatedText) {
@@ -2891,10 +3377,23 @@ class BannerController {
         this._domFailedTextNodes = new WeakSet();
         this._domOriginalTextByElement = new WeakMap();
         this._domDuplicateEntries = new Map();
+        this._domPendingApplies = new Map();
+        this._domNextApplySequence = 0;
+        this._domNextApplyToFlush = 0;
+        this._aiSectionLeadDispatched = false;
+        this._aiSectionFirstDispatchHooksRan = false;
+        this._aiSectionPersistentUrlHash = "";
+        this.resetAiPageSectionBatchTuning();
         if (this._domIncrementalScanTimer) {
             clearTimeout(this._domIncrementalScanTimer);
             this._domIncrementalScanTimer = null;
         }
+        if (this._domCoverageScanTimer) {
+            clearTimeout(this._domCoverageScanTimer);
+            this._domCoverageScanTimer = null;
+        }
+        this._domCoverageStableScanCount = 0;
+        this._domOwnMutationSuppressUntil = 0;
         this._pendingNodes.clear();
         if (this._scheduleBatch) {
             cancelAnimationFrame(this._scheduleBatch);
@@ -2913,6 +3412,991 @@ class BannerController {
      * For blocks containing functional non-text inline content we cannot rebuild (images,
      * iframes, code, form controls), we degrade to per-text-node group translation.
      */
+    /**
+     * AI-engine page translation dispatcher. Collects semantic sections from the page roots,
+     * skips ones already translated this session, dedupes by cacheKey, and enqueues one
+     * translation per section. No markers, no batching — each section is its own request.
+     */
+    dispatchAiPageSections({ reason = "scan" } = {}) {
+        if (!this._aiSectionTranslatedChildren) {
+            this._aiSectionTranslatedChildren = new WeakSet();
+        }
+        // Side-effects we want on the very first dispatch of a translation session:
+        //   - DNS prefetch + TCP preconnect for the AI engine's host so the TLS
+        //     handshake overlaps with our section collection (~100-200ms saved).
+        //   - Inject the content-visibility stylesheet so translated regions get
+        //     off-screen layout skipping for free.
+        //   - Prefetch the persistent IDB cache for this URL so repeat visits paint
+        //     instantly from cached translations.
+        if (!this._aiSectionFirstDispatchHooksRan) {
+            this._aiSectionFirstDispatchHooksRan = true;
+            const engine = this._domPageTranslateOptions && this._domPageTranslateOptions.engine;
+            injectDnsPrefetchForEngine(engine);
+            this.prefetchPersistentTranslationCache();
+        }
+        let sections = collectHtmlPageSections(this._domPageRootElements, {
+            maxChars: this.getAiPageSectionMaxChars(),
+            minChars: this.getAiPageSectionMinChars(),
+            isEligibleElement: (element) => this.isAiPageSectionElementEligible(element),
+            recurseNestedContainers: true,
+        });
+        if (!sections.length) return 0;
+
+        // Lead-chunk fast path: on the very first dispatch of a translation session, split
+        // the first section's children into a small prefix (~1-2k chars) so it completes
+        // in ~0.5-1s and the user sees a translated paragraph almost immediately, while
+        // the remaining full-size sections stream in the background.
+        if (!this._aiSectionLeadDispatched) {
+            this._aiSectionLeadDispatched = true;
+            const leadChars = this.getAiPageSectionLeadChars();
+            const split = this.splitSectionLeadChunk(sections[0], leadChars);
+            if (split) sections = [split.lead, split.remainder, ...sections.slice(1)];
+        }
+
+        const { tl } = this._domPageTranslateOptions;
+        const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+        const model = this._domPageTranslateOptions.model || "";
+        const enqueued = [];
+        for (const section of sections) {
+            // Skip sections whose children are all already translated.
+            const untranslatedChildren = section.children.filter((c) =>
+                this.isAiPageSectionElementEligible(c)
+            );
+            if (!untranslatedChildren.length) continue;
+            const effectiveSection = {
+                parent: section.parent,
+                children: untranslatedChildren,
+                plainText: untranslatedChildren
+                    .map((c) =>
+                        String(c.textContent || "")
+                            .replace(/\s+/g, " ")
+                            .trim()
+                    )
+                    .filter(Boolean)
+                    .join(" "),
+                role: section.role,
+            };
+            if (!effectiveSection.plainText) continue;
+            // Same-language fast path: cheap script-based heuristic that detects pages
+            // already in the target language (e.g. user hit Translate on a Korean page
+            // with KO target). Skip the API call entirely and just mark children as
+            // "translated" so the rescan loop doesn't keep flagging them.
+            if (isAlreadyInTargetLanguage(effectiveSection.plainText, tl)) {
+                for (const child of untranslatedChildren) {
+                    this._aiSectionTranslatedChildren.add(child);
+                    markElementTranslatedForRendering(child);
+                }
+                continue;
+            }
+            // Strip presentation attrs (class/id/style/data-*/aria-*/etc) before sending so
+            // the LLM sees a clean structural skeleton + translatable text. Cuts prompt
+            // size by 30-80% on typical pages — directly faster prefill and generation.
+            // The originals stay on the live DOM and are restored on apply.
+            const sourceHtml = buildStrippedSectionHtml(untranslatedChildren);
+            if (!sourceHtml) continue;
+            const cacheKey = [
+                this._domPageTranslateOptions.engine,
+                model,
+                "section",
+                sl,
+                tl,
+                fnv1a32(`${effectiveSection.plainText}\n${sourceHtml}`),
+            ].join("|");
+            const entry = {
+                sectionMode: true,
+                section: effectiveSection,
+                sourceHtml,
+                sourceText: sourceHtml,
+                plainText: effectiveSection.plainText,
+                inputTokens: estimateLlmPayloadTokens(sourceHtml),
+                outputTokens: estimateLlmOutputTokens(effectiveSection.plainText, sourceHtml),
+                cacheKey,
+                attempt: 0,
+                sessionId: this._domTranslationSessionId,
+            };
+            // Mark children as pending so subsequent scans skip them while in flight.
+            for (const child of untranslatedChildren) {
+                this._aiSectionTranslatedChildren.add(child);
+            }
+            enqueued.push(entry);
+        }
+        if (!enqueued.length) return 0;
+        this._domTotalTranslationEntries += enqueued.length;
+        this._domCoverageStableScanCount = 0;
+        this.updateDomPageBannerStatus();
+        this.logDomPageDebug("ai-section-dispatch", {
+            reason,
+            sections: sections.length,
+            enqueued: enqueued.length,
+        });
+        this.prioritizeAiPageSectionEntriesByViewport(enqueued);
+        const visibleEntries = [];
+        const offscreenEntries = [];
+        for (const entry of enqueued) {
+            if (this.getAiPageSectionViewportTier(entry) === 0) visibleEntries.push(entry);
+            else offscreenEntries.push(entry);
+        }
+        const streamingLimit = this.getAiPageVisibleStreamingLimit(visibleEntries.length);
+        visibleEntries
+            .slice(0, streamingLimit)
+            .forEach((entry) => this.enqueueAiPageSectionTranslation(entry));
+        const batchEntries = visibleEntries.slice(streamingLimit).concat(offscreenEntries);
+        this.buildAiPageSectionBatches(batchEntries).forEach((batch) =>
+            this.enqueueAiPageSectionBatchTranslation(batch)
+        );
+        return enqueued.length;
+    }
+
+    getAiPageSectionMaxChars() {
+        const engine = this._domPageTranslateOptions.engine;
+        // openaiCompatible runs on a local server with a small per-slot context (~4k n_ctx).
+        // Keep sections compact so each fits comfortably inside one slot.
+        if (engine === "openaiCompatible") return 2400;
+        // Cloud (Gemini 2.5 Flash Lite / OpenAI gpt-5-mini class) handle ~5k tokens
+        // (~20k chars) comfortably and a larger section means fewer round-trips for
+        // the same total content. Streaming partial apply means perceived ttfb
+        // doesn't degrade with section size — the first paragraph still pops in
+        // within ~1s once the lead chunk is dispatched separately.
+        return 20000;
+    }
+
+    getAiPageSectionMinChars() {
+        return 600;
+    }
+
+    /**
+     * Soft cap for the FIRST section dispatched on a page. We split the first
+     * section's children into a tiny lead chunk so the user sees the very first
+     * translated paragraph within ~0.5-1s, then continue with full-size sections
+     * for throughput. Returns 0 to disable the split entirely.
+     */
+    getAiPageSectionLeadChars() {
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible") return 800;
+        return 2000;
+    }
+
+    /**
+     * Split a section's children into a small lead chunk + remainder so the
+     * first translated paragraph lands within ~1s while the full-size sections
+     * keep streaming behind. Returns null when no split is needed (single child
+     * or already small enough).
+     */
+    splitSectionLeadChunk(section, leadChars) {
+        if (!section || !section.children || section.children.length < 2) return null;
+        if (!leadChars) return null;
+        const normalize = (el) =>
+            String((el && el.textContent) || "")
+                .replace(/\s+/g, " ")
+                .trim();
+        let leadCount = 1;
+        let acc = normalize(section.children[0]).length;
+        for (let i = 1; i < section.children.length; i += 1) {
+            const len = normalize(section.children[i]).length;
+            if (acc + len > leadChars) break;
+            acc += len;
+            leadCount = i + 1;
+        }
+        if (leadCount === 0 || leadCount === section.children.length) return null;
+        const buildSection = (children) => ({
+            parent: section.parent,
+            children,
+            plainText: children.map(normalize).filter(Boolean).join(" "),
+            role: section.role,
+        });
+        return {
+            lead: buildSection(section.children.slice(0, leadCount)),
+            remainder: buildSection(section.children.slice(leadCount)),
+        };
+    }
+
+    getAiPageVisibleStreamingLimit(visibleCount = 0) {
+        const engine = this._domPageTranslateOptions.engine;
+        if (visibleCount <= 0) return 0;
+        const concurrency = this.getDomPageMaxConcurrentTranslations();
+        const latency = this._aiPageConcurrencyLatencyEmaMs || 0;
+        const wait = this._aiPageConcurrencyQueueWaitEmaMs || 0;
+        const { fastMs, slowMs } = this.getAiPageConcurrencyLimits();
+
+        if (engine === "openaiCompatible") {
+            if (concurrency <= 2 || latency >= slowMs || wait > 1600) {
+                return Math.min(1, visibleCount);
+            }
+            if (concurrency >= 6 && latency > 0 && latency <= fastMs) {
+                return Math.min(2, visibleCount);
+            }
+            return Math.min(1, visibleCount);
+        }
+
+        if (latency >= slowMs || wait > 1800) {
+            return Math.min(1, visibleCount);
+        }
+        if (concurrency >= 12 && latency > 0 && latency <= fastMs) {
+            return Math.min(4, visibleCount);
+        }
+        if (concurrency >= 8) return Math.min(3, visibleCount);
+        return Math.min(2, visibleCount);
+    }
+
+    isElementMarkedAsTranslatedAiSection(element) {
+        if (!element || !this._aiSectionTranslatedChildren) return false;
+        let current = element;
+        while (current && current !== document.documentElement) {
+            if (this._aiSectionTranslatedChildren.has(current)) return true;
+            current = current.parentElement;
+        }
+        return false;
+    }
+
+    isAiPageSectionElementEligible(element) {
+        if (!element || !element.isConnected) return false;
+        if (this.isElementMarkedAsTranslatedAiSection(element)) return false;
+        if (element.closest && element.closest("[hidden],[aria-hidden='true']")) return false;
+        const targetLang = this._domPageTranslateOptions?.tl || "";
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+            if (!this.isMeaningfulDomPageTextNode(node)) continue;
+            if (this.isDomPageTextAlreadyInTargetLanguage(node.nodeValue, targetLang)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    getAiPageSectionViewportTier(entry) {
+        return this.getAiPageSectionViewportRank(entry).tier;
+    }
+
+    getAiPageSectionViewportRank(entry, index = 0) {
+        const element = entry?.section?.children?.[0];
+        const fallback = { tier: 4, distance: Number.MAX_SAFE_INTEGER, index };
+        if (!element || typeof element.getBoundingClientRect !== "function") return fallback;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return fallback;
+        const visibleTop = Math.max(0, rect.top);
+        const visibleBottom = Math.min(viewportHeight, rect.bottom);
+        const visiblePx = Math.max(0, visibleBottom - visibleTop);
+        if (visiblePx > 0) {
+            return {
+                tier: 0,
+                distance: Math.max(0, rect.top),
+                visiblePx: -visiblePx,
+                inputTokens: entry.inputTokens || 0,
+                index,
+            };
+        }
+        if (rect.top >= viewportHeight && rect.top < viewportHeight * 2) {
+            return {
+                tier: 1,
+                distance: rect.top - viewportHeight,
+                visiblePx: 0,
+                index,
+            };
+        }
+        if (rect.bottom <= 0 && rect.bottom >= -viewportHeight) {
+            return {
+                tier: 2,
+                distance: Math.abs(rect.bottom),
+                visiblePx: 0,
+                index,
+            };
+        }
+        return {
+            tier: 3,
+            distance:
+                rect.top >= viewportHeight ? rect.top - viewportHeight : Math.abs(rect.bottom),
+            visiblePx: 0,
+            index,
+        };
+    }
+
+    prioritizeAiPageSectionEntriesByViewport(entries) {
+        if (!entries || entries.length < 2) return;
+        const ranked = entries.map((entry, index) => ({
+            entry,
+            ...this.getAiPageSectionViewportRank(entry, index),
+        }));
+        ranked.sort(
+            (a, b) =>
+                a.tier - b.tier ||
+                a.distance - b.distance ||
+                (a.visiblePx || 0) - (b.visiblePx || 0) ||
+                (a.inputTokens || 0) - (b.inputTokens || 0) ||
+                a.index - b.index
+        );
+        for (let i = 0; i < ranked.length; i += 1) entries[i] = ranked[i].entry;
+    }
+
+    getAiPageSectionBatchOptions() {
+        const engine = this._domPageTranslateOptions.engine;
+        const failures = this._domBatchFailureCount;
+        let options;
+        if (engine === "openaiCompatible") {
+            if (failures >= 2) {
+                options = {
+                    maxChars: 1400,
+                    maxInputTokens: 520,
+                    maxOutputTokens: 650,
+                    maxItems: 1,
+                };
+            } else if (failures >= 1) {
+                options = {
+                    maxChars: 2200,
+                    maxInputTokens: 780,
+                    maxOutputTokens: 950,
+                    maxItems: 2,
+                };
+            } else {
+                options = {
+                    maxChars: 3800,
+                    maxInputTokens: 1200,
+                    maxOutputTokens: 1450,
+                    maxItems: 4,
+                };
+            }
+            return this.scaleAiPageSectionBatchOptions(options);
+        }
+        if (failures >= 2) {
+            options = {
+                maxChars: 6000,
+                maxInputTokens: 1800,
+                maxOutputTokens: 2400,
+                maxItems: 2,
+            };
+        } else if (failures >= 1) {
+            options = {
+                maxChars: 10000,
+                maxInputTokens: 3000,
+                maxOutputTokens: 4200,
+                maxItems: 4,
+            };
+        } else {
+            options = {
+                maxChars: 24000,
+                maxInputTokens: 7000,
+                maxOutputTokens: 9000,
+                maxItems: 8,
+            };
+        }
+        return this.scaleAiPageSectionBatchOptions(options);
+    }
+
+    buildAiPageSectionBatches(entries) {
+        if (!entries || !entries.length) return [];
+        const { maxChars, maxInputTokens, maxOutputTokens, maxItems } =
+            this.getAiPageSectionBatchOptions();
+        const batches = [];
+        let current = [];
+        let currentChars = 0;
+        let currentInputTokens = 0;
+        let currentOutputTokens = 0;
+        for (const entry of entries) {
+            const len = String(entry?.sourceHtml || "").length;
+            const inputTokens =
+                entry?.inputTokens || estimateLlmPayloadTokens(entry?.sourceHtml || "");
+            const outputTokens =
+                entry?.outputTokens ||
+                estimateLlmOutputTokens(entry?.plainText || "", entry?.sourceHtml || "");
+            const wouldOverflowItems = current.length >= maxItems;
+            const wouldOverflowChars = current.length > 0 && currentChars + len > maxChars;
+            const wouldOverflowTokens =
+                current.length > 0 && currentInputTokens + inputTokens > maxInputTokens;
+            const wouldOverflowOutput =
+                current.length > 0 && currentOutputTokens + outputTokens > maxOutputTokens;
+            if (
+                wouldOverflowItems ||
+                wouldOverflowChars ||
+                wouldOverflowTokens ||
+                wouldOverflowOutput
+            ) {
+                batches.push(current);
+                current = [];
+                currentChars = 0;
+                currentInputTokens = 0;
+                currentOutputTokens = 0;
+            }
+            current.push(entry);
+            currentChars += len;
+            currentInputTokens += inputTokens;
+            currentOutputTokens += outputTokens;
+        }
+        if (current.length) batches.push(current);
+        return batches;
+    }
+
+    applyAiPageSectionTranslation(entry, translatedHtml, skipCount = 0) {
+        if (!this._aiSectionTranslatedChildren) {
+            this._aiSectionTranslatedChildren = new WeakSet();
+        }
+        const originalTexts = this.captureAiPageSectionOriginalTexts(entry, skipCount);
+        this.noteDomPageOwnMutation();
+        // Run the DOM mutation synchronously so the result is available before
+        // we evaluate it. (Earlier code wrapped this in a View Transition, but
+        // the API's callback fires after a microtask, which means `applied`
+        // was always stale.)
+        let applied = false;
+        runWithOptionalViewTransition(() => {
+            applied = applyHtmlPageSection(entry.section, translatedHtml, skipCount);
+        });
+        if (!applied) {
+            this.releaseAiPageSectionEntry(entry);
+            return false;
+        }
+        for (const child of entry.section.children) {
+            if (!child) continue;
+            this._aiSectionTranslatedChildren.add(child);
+            // content-visibility: auto lets off-screen translated regions skip
+            // layout/paint until scrolled into view — huge win on long pages.
+            markElementTranslatedForRendering(child);
+        }
+        this.registerAiPageSectionOriginalTexts(entry, originalTexts, skipCount);
+        this.cacheDomPageTranslation(entry.cacheKey, translatedHtml);
+        // Fire-forget save to the IDB-backed persistent cache so a revisit to
+        // this URL paints instantly without re-translating.
+        this.savePersistentTranslationCacheEntry(entry, translatedHtml);
+        return true;
+    }
+
+    /**
+     * On the very first dispatch of a translation session, ask the background
+     * SW for all cached translations for this URL + target language and prefill
+     * our in-memory LRU. Subsequent section dispatches that hit cached entries
+     * apply instantly without any API call.
+     */
+    prefetchPersistentTranslationCache() {
+        try {
+            const tl = this._domPageTranslateOptions && this._domPageTranslateOptions.tl;
+            if (!tl) return;
+            const urlHash = computePersistentCacheUrlHash(tl);
+            if (!urlHash) return;
+            this._aiSectionPersistentUrlHash = urlHash;
+            if (!this.channel || typeof this.channel.request !== "function") return;
+            schedulePostTask(() => {
+                let pending;
+                try {
+                    pending = this.channel.request("persistent_cache_prefetch", { urlHash });
+                } catch {
+                    return;
+                }
+                if (!pending || typeof pending.then !== "function") return;
+                pending
+                    .then((entries) => {
+                        if (!Array.isArray(entries) || !entries.length) return;
+                        for (const { key, value } of entries) {
+                            if (!key || !value) continue;
+                            this.cacheDomPageTranslation(key, value);
+                        }
+                    })
+                    .catch(() => null);
+            }, "user-visible");
+        } catch {
+            /* persistent cache is opportunistic — never block translation */
+        }
+    }
+
+    savePersistentTranslationCacheEntry(entry, translatedHtml) {
+        try {
+            if (!entry?.cacheKey || !translatedHtml) return;
+            if (!this.channel || typeof this.channel.emit !== "function") return;
+            const urlHash = this._aiSectionPersistentUrlHash || "";
+            schedulePostTask(() => {
+                try {
+                    this.channel.emit("persistent_cache_save", {
+                        urlHash,
+                        key: entry.cacheKey,
+                        value: translatedHtml,
+                    });
+                } catch {
+                    /* noop */
+                }
+            }, "background");
+        } catch {
+            /* noop */
+        }
+    }
+
+    /**
+     * Capture per-LEAF + per-SEGMENT original texts before a section swap so
+     * we can pair them with the corresponding translated targets after apply.
+     *
+     * Returns a 2D array: result[childIndex] is an array of leaf descriptors
+     *   [{ segmentTexts: [s1, s2, ...] }, ...]
+     * where segmentTexts has one entry per &lt;br&gt;-separated line inside the
+     * leaf. Single-line leaves get a one-element array; pages that pack all
+     * paragraphs into one &lt;p&gt; with &lt;br&gt; (very common in legacy news
+     * markup) get one entry per visible line.
+     */
+    captureAiPageSectionOriginalTexts(entry, startIndex = 0) {
+        const children = entry?.section?.children || [];
+        const out = [];
+        for (let i = Math.max(0, startIndex); i < children.length; i += 1) {
+            out.push(captureLeafSegmentTexts(children[i]));
+        }
+        return out;
+    }
+
+    /**
+     * After the section swap, walk the translated child's leaves and register
+     * each captured segment text on the positionally-matching target. For
+     * single-segment leaves we register on the leaf itself. For multi-segment
+     * leaves (i.e. one &lt;p&gt; with multiple &lt;br&gt; lines) we wrap each
+     * &lt;br&gt;-separated segment in a `<span data-edge-translate-segment>` and
+     * register the original on that span — so the hover tooltip shows just the
+     * line the cursor is on instead of the whole paragraph blob.
+     */
+    registerAiPageSectionOriginalTexts(entry, perChildCaptures, startIndex = 0, endIndex = null) {
+        const children = entry?.section?.children || [];
+        const start = Math.max(0, startIndex);
+        const end =
+            endIndex == null
+                ? Math.min(children.length, start + (perChildCaptures?.length || 0))
+                : Math.min(children.length, endIndex);
+        for (let index = start; index < end; index += 1) {
+            const child = children[index];
+            if (!child) continue;
+            const captured = perChildCaptures?.[index - start];
+            if (!Array.isArray(captured) || !captured.length) continue;
+            const translatedLeaves = findLeafBlocksInElement(child);
+            const pairCount = Math.min(translatedLeaves.length, captured.length);
+            for (let i = 0; i < pairCount; i += 1) {
+                const transLeaf = translatedLeaves[i];
+                const { segmentTexts } = captured[i] || {};
+                if (!transLeaf || !Array.isArray(segmentTexts) || !segmentTexts.length) {
+                    continue;
+                }
+                if (segmentTexts.length === 1) {
+                    if (segmentTexts[0]) {
+                        this.registerDomOriginalText(transLeaf, segmentTexts[0]);
+                    }
+                    continue;
+                }
+                // Multi-segment leaf: wrap translated <br>-separated lines in
+                // spans and register per-span original text.
+                const spans = wrapLeafLineSegmentsInSpans(transLeaf);
+                const spanPair = Math.min(spans.length, segmentTexts.length);
+                for (let j = 0; j < spanPair; j += 1) {
+                    if (spans[j] && segmentTexts[j]) {
+                        this.registerDomOriginalText(spans[j], segmentTexts[j]);
+                    }
+                }
+            }
+        }
+    }
+
+    releaseAiPageSectionEntry(entry) {
+        if (!this._aiSectionTranslatedChildren) return;
+        for (const child of entry?.section?.children || []) {
+            this._aiSectionTranslatedChildren.delete(child);
+        }
+    }
+
+    releaseAiPageSectionElement(element) {
+        if (!element || !this._aiSectionTranslatedChildren) return;
+        let current = element.nodeType === Node.ELEMENT_NODE ? element : element.parentElement;
+        while (current && current !== document.documentElement) {
+            if (this._aiSectionTranslatedChildren.delete(current)) return;
+            current = current.parentElement;
+        }
+    }
+
+    enqueueAiPageSectionTranslation(entry) {
+        const queuedAt = Date.now();
+        const run = async () => {
+            if (this._domCircuitBreakerActive) {
+                this.markDomPageTranslationEntriesCompleted();
+                return;
+            }
+            this._domActiveTranslations += 1;
+            const queueWaitMs = Math.max(0, Date.now() - queuedAt);
+            let requestDurationMs = 0;
+            // Streaming partial apply: as the SSE buffer grows, swap completed top-level
+            // children into the live DOM one-by-one. The reader sees translations popcorn
+            // into place instead of waiting 3-8s for the full section response.
+            const streamId = `et-section-${Date.now().toString(36)}-${Math.random()
+                .toString(36)
+                .slice(2, 8)}`;
+            let appliedStreamCount = 0;
+            // rAF-throttled stream apply: SSE chunks can arrive 50-100×/second from fast
+            // models, but the DOM only paints at 60fps. Coalesce intermediate events into
+            // one apply per animation frame so we don't thrash the DOM and so React-like
+            // listeners on the page aren't overwhelmed.
+            let streamLatestText = "";
+            let streamRafScheduled = false;
+            let streamingFinished = false;
+            const flushStreamApply = () => {
+                streamRafScheduled = false;
+                if (streamingFinished) return;
+                const accumulated = streamLatestText;
+                if (!accumulated) return;
+                try {
+                    const previousCount = appliedStreamCount;
+                    const originalTexts = this.captureAiPageSectionOriginalTexts(
+                        entry,
+                        previousCount
+                    );
+                    this.noteDomPageOwnMutation();
+                    appliedStreamCount = applyStreamedSectionChildren(
+                        entry,
+                        accumulated,
+                        appliedStreamCount
+                    );
+                    // Register each newly-swapped child in the translated-children set
+                    // immediately so the MutationObserver-driven rescan can't re-detect
+                    // them as fresh content (which would re-translate and burn tokens).
+                    for (let i = previousCount; i < appliedStreamCount; i += 1) {
+                        const newChild = entry.section.children[i];
+                        if (!this._aiSectionTranslatedChildren) {
+                            this._aiSectionTranslatedChildren = new WeakSet();
+                        }
+                        if (newChild) this._aiSectionTranslatedChildren.add(newChild);
+                    }
+                    this.registerAiPageSectionOriginalTexts(
+                        entry,
+                        originalTexts,
+                        previousCount,
+                        appliedStreamCount
+                    );
+                } catch {
+                    /* stream-apply must never throw — final response still recovers */
+                }
+            };
+            const streamHandler = (event) => {
+                if (!event || event.streamId !== streamId) return;
+                streamLatestText = event.text || "";
+                if (streamRafScheduled) return;
+                streamRafScheduled = true;
+                if (typeof requestAnimationFrame === "function") {
+                    requestAnimationFrame(flushStreamApply);
+                } else {
+                    setTimeout(flushStreamApply, 16);
+                }
+            };
+            try {
+                this.channel.on("translation_stream_progress", streamHandler);
+            } catch {
+                /* channel may not expose .on in test contexts */
+            }
+            try {
+                const { tl } = this._domPageTranslateOptions;
+                const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                const cached = this._domTranslationCache.get(entry.cacheKey);
+                let translatedHtml = cached;
+                if (!translatedHtml) {
+                    const startedAt = Date.now();
+                    this.logDomPageDebug("ai-section:request", {
+                        chars: entry.sourceHtml.length,
+                        plainChars: entry.plainText.length,
+                        inputTokens: entry.inputTokens,
+                    });
+                    const result = await this.translateWithDomPageEngine(
+                        entry.sourceHtml,
+                        sl,
+                        tl,
+                        streamId
+                    );
+                    this.recordDomPageTokenUsage(result);
+                    requestDurationMs = Date.now() - startedAt;
+                    this.logDomPageDebug("ai-section:response", {
+                        durationMs: requestDurationMs,
+                        failed: Boolean(result && result.translationFailed),
+                        streamApplied: appliedStreamCount,
+                    });
+                    if (result && result.translationFailed) {
+                        throw new Error(result.errorMsg || "AI page section translation failed.");
+                    }
+                    translatedHtml = result.mainMeaning || result.translatedText || "";
+                    if (!translatedHtml || !translatedHtml.trim()) {
+                        throw new Error("AI page section returned empty translation.");
+                    }
+                }
+
+                // Flush any pending throttled stream apply BEFORE the final apply so the
+                // skipCount handed to applyHtmlPageSection reflects everything the stream
+                // path actually swapped. Otherwise an SSE chunk that arrived between the
+                // last rAF tick and the request resolving would be ignored.
+                if (streamRafScheduled) flushStreamApply();
+                if (
+                    !this.applyAiPageSectionTranslation(entry, translatedHtml, appliedStreamCount)
+                ) {
+                    throw new Error("AI page section apply rejected.");
+                }
+
+                this.recordAiPageConcurrencyTelemetry({
+                    durationMs: requestDurationMs,
+                    queueWaitMs,
+                    entries: 1,
+                });
+                this.recordDomPageBatchSuccess();
+            } catch (error) {
+                this.updateDomPageBannerStatus(
+                    "error",
+                    error && error.message ? error.message : String(error || "")
+                );
+                this.recordAiPageConcurrencyTelemetry({
+                    failed: true,
+                    durationMs: requestDurationMs,
+                    queueWaitMs,
+                    entries: 1,
+                });
+                this.recordDomPageBatchFailure();
+                // One automatic retry; further failures leave the section as the original
+                // text so the reader at least sees something readable.
+                if (entry.attempt < 1 && this._domBatchFailureCount < 5) {
+                    entry.attempt += 1;
+                    this._domTotalTranslationEntries += 1;
+                    if (!this._domTranslationQueue) this._domTranslationQueue = [];
+                    this._domTranslationQueue.unshift(run);
+                } else {
+                    this.releaseAiPageSectionEntry(entry);
+                }
+            } finally {
+                // Mark stream as finished BEFORE detaching the listener so any rAF that
+                // was already scheduled (and fires after the request resolves) skips its
+                // apply work — entry.section.children may have moved on by then.
+                streamingFinished = true;
+                try {
+                    this.channel.off("translation_stream_progress", streamHandler);
+                } catch {
+                    /* noop */
+                }
+                this.markDomPageTranslationEntriesCompleted();
+                this._domActiveTranslations -= 1;
+                this.flushDomTranslationQueue();
+            }
+        };
+
+        if (!this._domTranslationQueue) this._domTranslationQueue = [];
+        this._domTranslationQueue.push(run);
+        this.flushDomTranslationQueue();
+    }
+
+    enqueueAiPageSectionBatchTranslation(entries, attempt = 0, options = {}) {
+        if (!entries || !entries.length) return;
+        const queuedAt = Date.now();
+        const run = async () => {
+            if (this._domCircuitBreakerActive) {
+                entries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
+                this.markDomPageTranslationEntriesCompleted(entries.length);
+                return;
+            }
+            this._domActiveTranslations += 1;
+            const queueWaitMs = Math.max(0, Date.now() - queuedAt);
+            let pendingEntries = entries.slice();
+            let batchStartedAt = 0;
+            let batchDurationMs = 0;
+            let batchInputTokens = 0;
+            let batchEntryCount = 0;
+            const streamId = `et-section-batch-${Date.now().toString(36)}-${Math.random()
+                .toString(36)
+                .slice(2, 8)}`;
+            const appliedSegmentIndices = new Set();
+            const streamHandler = (event) => {
+                if (!event || event.streamId !== streamId) return;
+                this.applyStreamedAiPageSectionBatchSegments(
+                    pendingEntries,
+                    event.text,
+                    appliedSegmentIndices
+                );
+            };
+            try {
+                this.channel.on("translation_stream_progress", streamHandler);
+            } catch {
+                /* channel may not expose .on in test contexts */
+            }
+            try {
+                const { tl } = this._domPageTranslateOptions;
+                const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                const uncachedEntries = [];
+                for (const entry of pendingEntries) {
+                    const cached = this._domTranslationCache.get(entry.cacheKey);
+                    if (cached && this.applyAiPageSectionTranslation(entry, cached)) continue;
+                    uncachedEntries.push(entry);
+                }
+                pendingEntries = uncachedEntries;
+
+                if (pendingEntries.length) {
+                    const batchedSourceText = buildSegmentedTranslationText(
+                        pendingEntries.map((entry) => ({
+                            text: entry.sourceHtml,
+                            role: entry.section?.role || "text",
+                        })),
+                        { compactMarkers: true }
+                    );
+                    batchStartedAt = Date.now();
+                    batchInputTokens = estimateLlmPayloadTokens(batchedSourceText);
+                    batchEntryCount = pendingEntries.length;
+                    this.logDomPageDebug("ai-section-batch:request", {
+                        entries: pendingEntries.length,
+                        chars: batchedSourceText.length,
+                        inputTokens: batchInputTokens,
+                        batchScale: this.getAiPageSectionBatchScale(),
+                    });
+                    const result = await this.translateWithDomPageEngine(
+                        batchedSourceText,
+                        sl,
+                        tl,
+                        streamId
+                    );
+                    this.recordDomPageTokenUsage(result);
+                    batchDurationMs = Date.now() - batchStartedAt;
+                    this.logDomPageDebug("ai-section-batch:response", {
+                        entries: pendingEntries.length,
+                        durationMs: batchDurationMs,
+                        failed: Boolean(result && result.translationFailed),
+                        batchScale: this.getAiPageSectionBatchScale(),
+                    });
+                    if (result && result.translationFailed) {
+                        throw new Error(
+                            result.errorMsg || "AI page section batch translation failed."
+                        );
+                    }
+                    const translated = result.mainMeaning || result.translatedText || "";
+                    const translatedParts = splitSegmentedTranslationText(
+                        translated,
+                        pendingEntries.length
+                    );
+                    if (!translatedParts) {
+                        const unappliedEntries = pendingEntries.filter(
+                            (_, index) => !appliedSegmentIndices.has(index)
+                        );
+                        if (!unappliedEntries.length) {
+                            this.recordAiPageSectionBatchTelemetry({
+                                durationMs: batchDurationMs,
+                                inputTokens: batchInputTokens,
+                                queueWaitMs,
+                                entries: batchEntryCount,
+                            });
+                            this.recordDomPageBatchSuccess();
+                            return;
+                        }
+                        this.recordAiPageSectionBatchTelemetry({
+                            failed: true,
+                            durationMs: batchDurationMs,
+                            inputTokens: batchInputTokens,
+                            queueWaitMs,
+                            entries: batchEntryCount,
+                        });
+                        this.recordDomPageBatchFailure();
+                        this.retryAiPageSectionBatchEntries(unappliedEntries, attempt);
+                        return;
+                    }
+
+                    const failedEntries = [];
+                    pendingEntries.forEach((entry, index) => {
+                        if (appliedSegmentIndices.has(index)) return;
+                        if (!this.applyAiPageSectionTranslation(entry, translatedParts[index])) {
+                            failedEntries.push(entry);
+                        }
+                    });
+                    if (failedEntries.length) {
+                        this.recordAiPageSectionBatchTelemetry({
+                            failed: true,
+                            durationMs: batchDurationMs,
+                            inputTokens: batchInputTokens,
+                            queueWaitMs,
+                            entries: batchEntryCount,
+                        });
+                        this.recordDomPageBatchFailure();
+                        this.retryAiPageSectionBatchEntries(failedEntries, attempt);
+                    } else {
+                        this.recordAiPageSectionBatchTelemetry({
+                            durationMs: batchDurationMs,
+                            inputTokens: batchInputTokens,
+                            queueWaitMs,
+                            entries: batchEntryCount,
+                        });
+                        this.recordDomPageBatchSuccess();
+                    }
+                } else {
+                    this.recordDomPageBatchSuccess();
+                }
+            } catch (error) {
+                this.updateDomPageBannerStatus(
+                    "error",
+                    error && error.message ? error.message : String(error || "")
+                );
+                this.recordAiPageSectionBatchTelemetry({
+                    failed: true,
+                    durationMs:
+                        batchDurationMs || (batchStartedAt ? Date.now() - batchStartedAt : 0),
+                    inputTokens: batchInputTokens,
+                    queueWaitMs,
+                    entries: pendingEntries.length,
+                });
+                this.recordDomPageBatchFailure();
+                this.retryAiPageSectionBatchEntries(
+                    pendingEntries.filter((_, index) => !appliedSegmentIndices.has(index)),
+                    attempt
+                );
+            } finally {
+                try {
+                    this.channel.off("translation_stream_progress", streamHandler);
+                } catch {
+                    /* noop */
+                }
+                this.markDomPageTranslationEntriesCompleted(entries.length);
+                this._domActiveTranslations -= 1;
+                this.flushDomTranslationQueue();
+            }
+        };
+
+        if (!this._domTranslationQueue) this._domTranslationQueue = [];
+        if (options.front) this._domTranslationQueue.unshift(run);
+        else this._domTranslationQueue.push(run);
+        this.flushDomTranslationQueue();
+    }
+
+    applyStreamedAiPageSectionBatchSegments(entries, accumulatedText, appliedSet) {
+        if (!entries?.length || !accumulatedText) return;
+        const markerRe =
+            /\[\[(\d+)(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
+        const matches = [];
+        let m;
+        while ((m = markerRe.exec(accumulatedText)) !== null) {
+            matches.push({
+                at: m.index,
+                length: m[0].length,
+                n: Number(m[1] || m[2] || m[3]),
+            });
+        }
+        for (let i = 0; i < matches.length - 1; i += 1) {
+            const entryIndex = matches[i].n - 1;
+            if (entryIndex < 0 || entryIndex >= entries.length) continue;
+            if (appliedSet.has(entryIndex)) continue;
+            const entry = entries[entryIndex];
+            const start = matches[i].at + matches[i].length;
+            const end = matches[i + 1].at;
+            const translatedHtml = accumulatedText.slice(start, end).trim();
+            if (!entry || !translatedHtml) continue;
+            if (this.applyAiPageSectionTranslation(entry, translatedHtml)) {
+                appliedSet.add(entryIndex);
+            }
+        }
+    }
+
+    retryAiPageSectionBatchEntries(entries, attempt = 0) {
+        if (!entries || !entries.length) return;
+        if (attempt >= 1 || this._domBatchFailureCount >= 5) {
+            entries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
+            return;
+        }
+        this._domTotalTranslationEntries += entries.length;
+        if (entries.length > 1) {
+            const mid = Math.ceil(entries.length / 2);
+            this.enqueueAiPageSectionBatchTranslation(entries.slice(mid), attempt + 1, {
+                front: true,
+            });
+            this.enqueueAiPageSectionBatchTranslation(entries.slice(0, mid), attempt + 1, {
+                front: true,
+            });
+            return;
+        }
+        const [entry] = entries;
+        entry.attempt = 1;
+        this.enqueueAiPageSectionTranslation(entry);
+    }
+
     createDomPageTranslationEntry(group) {
         const { tl } = this._domPageTranslateOptions;
         const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
@@ -2923,6 +4407,35 @@ class BannerController {
         if (group && group.sessionId === undefined) group.sessionId = sessionId;
         const block = group?.block || group?.nodes?.[0]?.parentElement || null;
         const role = group?.role || "text";
+
+        // HTML-native path: when the engine is an LLM and the block is safe to round-trip
+        // through innerHTML, send the model raw HTML and apply with structure validation +
+        // critical-attribute restoration. Kept for callers that build entries via this
+        // method (legacy tests + the per-group fallback inside enqueueDomPageGroupTranslation).
+        if (block && this.isHtmlNativeEntryEligible(block)) {
+            const plainText = this.computeDomPageBlockPlainText(block);
+            const innerHtml = block.innerHTML;
+            const cacheKey = [
+                this._domPageTranslateOptions.engine,
+                this._domPageTranslateOptions.model || "",
+                role,
+                sl,
+                tl,
+                fnv1a32(plainText),
+            ].join("|");
+            return {
+                group,
+                block,
+                htmlMode: true,
+                htmlElement: block,
+                plainText,
+                role,
+                sourceText: innerHtml,
+                cacheKey,
+                sessionId,
+            };
+        }
+
         const wrapped = this.isHtmlWrapEligible(block)
             ? this.serializeBlockForHtmlWrap(block)
             : null;
@@ -2946,6 +4459,36 @@ class BannerController {
             cacheKey,
             sessionId,
         };
+    }
+
+    computeDomPageBlockPlainText(block) {
+        return String((block && block.textContent) || "")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    /**
+     * HTML-native eligibility: the block must be a real element with translatable text and
+     * HTML-native eligibility: real element with translatable text and no media/widgets
+     * we'd irrevocably lose if re-rendered. Permits common inline content because
+     * restoreHtmlCriticalAttributes copies attrs from original on apply.
+     */
+    isHtmlNativeEntryEligible(block) {
+        if (!block || block.nodeType !== Node.ELEMENT_NODE) return false;
+        const engine = this._domPageTranslateOptions && this._domPageTranslateOptions.engine;
+        if (engine !== "openaiCompatible" && engine !== "googleAiStudio" && engine !== "openai") {
+            return false;
+        }
+        if (
+            block.querySelector(
+                "script,style,iframe,canvas,object,embed,video,audio,svg,math,select,textarea,input,pre,code,kbd,samp"
+            )
+        ) {
+            return false;
+        }
+        if (!block.textContent || !block.textContent.trim()) return false;
+        if (block.innerHTML.length > 6000) return false;
+        return true;
     }
 
     /**
@@ -3076,7 +4619,7 @@ class BannerController {
             .replace(/&amp;/g, "&")
             .replace(/&lt;/g, "<")
             .replace(/&gt;/g, ">")
-            .replace(/&quot;/g, "\"")
+            .replace(/&quot;/g, String.fromCharCode(34))
             .replace(/&#39;/g, "'");
     }
 
@@ -3086,12 +4629,35 @@ class BannerController {
             .trim();
     }
 
+    assignDomPageApplySequence(entry) {
+        if (!entry) return entry;
+        if (!Number.isFinite(entry.applySequence)) {
+            entry.applySequence = this._domNextApplySequence;
+            this._domNextApplySequence += 1;
+        }
+        return entry;
+    }
+
     queueDomPageEntryApply(entry, translated) {
+        if (!this.isDomPageEntryCurrentSession(entry)) return;
+        if (Number.isFinite(entry?.applySequence)) {
+            this._domPendingApplies.set(entry.applySequence, {
+                entry,
+                translated,
+            });
+            this.flushDomPagePendingApplies();
+            return;
+        }
+        this.applyDomPageEntryNow(entry, translated);
+    }
+
+    applyDomPageEntryNow(entry, translated) {
         if (!this.isDomPageEntryCurrentSession(entry)) return;
         if (!this.isDomPageEntryStillCurrent(entry)) {
             this.releaseDomPageEntryPending(entry);
             return;
         }
+        this.noteDomPageOwnMutation();
         if (this.applyDomPageTranslatedEntry(entry, translated)) {
             this.cacheDomPageTranslation(entry.cacheKey, translated);
             this.markDomPageEntryApplied(entry);
@@ -3099,6 +4665,28 @@ class BannerController {
         } else {
             this.releaseDomPageEntryPending(entry);
         }
+    }
+
+    flushDomPagePendingApplies() {
+        if (!this._domPendingApplies) return;
+        while (this._domPendingApplies.has(this._domNextApplyToFlush)) {
+            const pending = this._domPendingApplies.get(this._domNextApplyToFlush);
+            this._domPendingApplies.delete(this._domNextApplyToFlush);
+            this._domNextApplyToFlush += 1;
+            if (pending && !pending.skip) {
+                this.applyDomPageEntryNow(pending.entry, pending.translated);
+            }
+        }
+    }
+
+    releaseDomPageApplySequence(entry) {
+        if (!Number.isFinite(entry?.applySequence)) return;
+        if (entry.applySequence < this._domNextApplyToFlush) return;
+        this._domPendingApplies.set(entry.applySequence, {
+            entry,
+            skip: true,
+        });
+        this.flushDomPagePendingApplies();
     }
 
     /**
@@ -3141,7 +4729,8 @@ class BannerController {
      * sourceText is the full HTML payload including <t> tags.
      */
     getDomPageEntryRejectionReason(entry, translated) {
-        const source = entry.wrappedPlainText || entry.sourceText;
+        const source =
+            (entry.htmlMode && entry.plainText) || entry.wrappedPlainText || entry.sourceText;
         if (!this.canUseDomPageTranslation(source, translated)) {
             return "suspicious-output";
         }
@@ -3168,6 +4757,7 @@ class BannerController {
     skipDomPageEntryApply(entry) {
         if (!this.isDomPageEntryCurrentSession(entry)) return;
         this.releaseDomPageEntryPending(entry);
+        this.releaseDomPageApplySequence(entry);
     }
 
     cacheDomPageTranslation(cacheKey, translated) {
@@ -3230,9 +4820,6 @@ class BannerController {
             this.skipDomPageEntryApply(entry);
             return false;
         }
-        if (entry.readableBlockReplacement) {
-            entry.group.forceDomPageContext = true;
-        }
         // At this point we're retrying a real network/API error (validation failures returned false above).
         // Bump total by 1 so the completion counter stays balanced when this retry eventually finishes.
         this._domTotalTranslationEntries += 1;
@@ -3245,15 +4832,13 @@ class BannerController {
 
     shouldRetryDomPageEntryTranslation(entry, attempt, reason = "") {
         if (!entry || attempt >= 1) return false;
-        // Content-validation retries are useless at temperature=0: the model returns the same output
-        // on the same input. Skip them — let the caller fall back to per-node translation (for local
-        // LLMs via shouldUsePlainDomPageNodeFallback) or leave the source intact.
-        // Only network/API errors (reason "") benefit from a retry.
-        if (reason) return false;
+        // Deterministic format failures (line-count, marker missing, link placeholders) usually
+        // repeat on the same prompt, but suspicious/hallucinated output inside a larger batch can
+        // recover when retried as one focused unit.
+        if (reason && !["suspicious-output", "suspicious-line"].includes(reason)) return false;
         const role = entry.role || entry.group?.role || "text";
         const sourceLength = String(entry.sourceText || "").trim().length;
         const contentRoles = ["paragraph", "list-item", "caption", "table-header"];
-        if (entry.readableBlockReplacement) return true;
         if (role === "title" || role === "date") return sourceLength >= 8;
         if (contentRoles.includes(role)) return sourceLength >= 40;
         return sourceLength >= 120;
@@ -3265,13 +4850,13 @@ class BannerController {
             this._domPendingTextNodes.delete(node);
             this._domFailedTextNodes.add(node);
         });
-        if (entry?.group) {
-            entry.group.forceDomPageContext = false;
-        }
     }
 
     applyDomPageTranslatedEntry(entry, translated) {
         if (!translated) return false;
+        if (entry.htmlMode && entry.htmlElement && entry.htmlElement.isConnected) {
+            return this.applyDomPageHtmlNativeEntry(entry, translated);
+        }
         // HTML-wrap path (Google-style): parse <t i="N">…</t> wrappers from the response and
         // apply each translation to its original text node. Inline structure (bolds, links,
         // italics) stays intact because we only mutate text-node values, never the DOM tree.
@@ -3326,91 +4911,89 @@ class BannerController {
         if (!group?.nodes?.length) return false;
         const parts = splitTranslatedContext(translated, group.nodes.length);
         if (!parts) {
-            const target = group.nodes.find((n) => n.parentElement);
-            if (!target) return false;
-            target.nodeValue = this.sanitizeDomPageTranslatedText(translated);
-            for (const node of group.nodes) {
-                if (node !== target && node.parentElement) node.nodeValue = "";
-            }
-            return true;
+            // The model gave us a coherent translation, but couldn't line-split it back to the
+            // group's text nodes (often happens when the model merges several paragraphs into
+            // one fluent sentence). The OLD behavior — dump the merged blob into the first node
+            // and clear every other node to "" — caused entries to literally disappear from the
+            // page whenever the merged blob sanitized to empty (or even when it didn't, because
+            // siblings still ended up blank). Return false so the caller leaves the original
+            // text in place, releases the entry from the pending queue, and lets the retry
+            // pipeline ask the model again. Worst case the paragraph stays in the source
+            // language — never silently empty.
+            return false;
         }
+        // Track whether at least one node got a real translation; if every applyWithFadeIn
+        // bailed (because sanitize emptied the part), tell the caller the entry was not
+        // applied so the original text stays intact and the retry pipeline can recover.
+        let appliedAny = false;
         group.nodes.forEach((node, index) => {
             if (parts[index] && node.parentElement) {
-                this.applyWithFadeIn(node, parts[index], "text", group.texts[index]);
+                if (this.applyWithFadeIn(node, parts[index], "text", group.texts[index])) {
+                    appliedAny = true;
+                }
             }
         });
-        return true;
+        return appliedAny;
     }
 
-    applyDomPageReadableBlockReplacement(readableBlockReplacement, translated, preparedFragment) {
-        const block = readableBlockReplacement && readableBlockReplacement.block;
-        if (!block) return false;
-        if (readableBlockReplacement.inlineLinks && readableBlockReplacement.inlineLinks.length) {
-            const fragment =
-                preparedFragment ||
-                this.createDomPageInlineLinkFragment(
-                    translated,
-                    readableBlockReplacement.inlineLinks
-                );
-            if (!fragment) return false;
-            this.registerDomOriginalText(block, readableBlockReplacement.sourceText);
-            this.fadeInDomPageBlock(block, () => {
-                block.replaceChildren(fragment);
-            });
-            return true;
+    /**
+     * Apply an HTML-native translation. The translated string is the block's new innerHTML.
+     * buildSafeTranslatedHtml does the heavy lifting: parses the payload into a detached
+     * container, strips dangerous descendants (script, iframe, on* handlers, javascript: URLs),
+     * and restores every critical attribute (href, src, alt, srcset, id, class, style, data-*,
+     * aria-*) from the original element so the model can't rewrite page identifiers or links.
+     *
+     * Returns false when the validator rejects the payload (empty, malformed, or stripped to
+     * nothing after sanitize). false leaves the original block intact — the caller releases
+     * the entry from pending state and the retry pipeline can try again.
+     */
+    /**
+     * Apply an HTML-native entry: parse the model's HTML response, sanitize, restore
+     * critical attrs from the original block, then swap innerHTML. Returns false (no
+     * mutation) on any structural / sanitize / suspicious-output rejection.
+     */
+    applyDomPageHtmlNativeEntry(entry, translated) {
+        const block = entry.htmlElement;
+        if (!block || !block.isConnected) return false;
+        const safeContainer = buildSafeTranslatedHtml(block, translated);
+        if (!safeContainer) return false;
+        const sourcePlain = entry.plainText || this.computeDomPageBlockPlainText(block);
+        const translatedPlain = String(safeContainer.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (!translatedPlain) return false;
+        if (!this.canUseDomPageTranslation(sourcePlain, translatedPlain)) return false;
+        if (
+            sourcePlain &&
+            translatedPlain.length < Math.max(2, Math.floor(sourcePlain.length / 8))
+        ) {
+            return false;
         }
-        this.applyWithFadeIn(block, translated, "block", readableBlockReplacement.sourceText);
+        this.registerDomOriginalText(block, sourcePlain);
+        this.fadeInDomPageBlock(block, () => {
+            block.innerHTML = safeContainer.innerHTML;
+            const textWalker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+            let textNode = textWalker.nextNode();
+            while (textNode) {
+                this._translatedSet.add(textNode);
+                this._domPendingTextNodes.delete(textNode);
+                textNode = textWalker.nextNode();
+            }
+        });
+        this._translatedBlocks.add(block);
         return true;
     }
 
     sanitizeDomPageTranslatedText(text) {
-        return this.stripPromptEchoFromTranslation(
-            String(text || "")
-                .replace(/\[\[EDGE_TRANSLATE_LINK_\d+]]/g, "")
-                .replace(/\[\[\/EDGE_TRANSLATE_LINK_\d+]]/g, "")
-        );
+        return this.stripPromptEchoFromTranslation(String(text || ""));
     }
 
     sanitizeDomPageOriginalText(text) {
         return String(text || "")
-            .replace(/\[\[EDGE_TRANSLATE_LINK_\d+]]/g, "")
-            .replace(/\[\[\/EDGE_TRANSLATE_LINK_\d+]]/g, "")
             .replace(/[ \t]{2,}/g, " ")
             .replace(/[ \t]+\n/g, "\n")
             .replace(/\n[ \t]+/g, "\n")
             .trim();
-    }
-
-    createDomPageInlineLinkFragment(translated, links) {
-        const text = String(translated || "");
-        const markerPattern =
-            /\[\[EDGE_TRANSLATE_LINK_(\d+)]]([\s\S]*?)\[\[\/EDGE_TRANSLATE_LINK_\1]]/g;
-        const fragment = document.createDocumentFragment();
-        let lastIndex = 0;
-        let restoredCount = 0;
-        let match;
-        while ((match = markerPattern.exec(text))) {
-            const index = Number(match[1]) - 1;
-            const link = links[index];
-            if (!link) return null;
-            if (match.index > lastIndex) {
-                fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
-            }
-            const anchor = document.createElement("a");
-            anchor.href = link.href;
-            if (link.title) anchor.title = link.title;
-            if (link.target) anchor.target = link.target;
-            if (link.rel) anchor.rel = link.rel;
-            anchor.textContent = String(match[2] || "").trim() || link.text || link.href;
-            fragment.appendChild(anchor);
-            lastIndex = markerPattern.lastIndex;
-            restoredCount += 1;
-        }
-        if (restoredCount !== links.length) return null;
-        if (lastIndex < text.length) {
-            fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-        }
-        return fragment;
     }
 
     enqueueDomPageEntryNodeTranslations(entry) {
@@ -3429,35 +5012,46 @@ class BannerController {
 
     /**
      * Apply translated text with a subtle fade-in for smooth UX.
+     *
+     * Returns false (without mutating the DOM) when sanitize produces an empty string —
+     * this guards against the prompt-echo stripper accidentally collapsing the whole
+     * translation, which would otherwise blank the original node and make the entry
+     * disappear from the page.
      */
     applyWithFadeIn(node, translated, type, originalText) {
         translated = this.sanitizeDomPageTranslatedText(translated);
+        if (!translated || !translated.trim()) return false;
         if (type === "text") {
+            this.noteDomPageOwnMutation();
             return this.applyTextNodeTranslationWithOriginalChunks(node, translated, originalText);
         }
         const el = type === "block" ? node : node.parentElement;
         if (!el || !el.style) {
+            this.noteDomPageOwnMutation();
             if (type === "block") node.textContent = translated;
             else node.nodeValue = translated;
-            return;
+            return true;
         }
         if (this.isPdfViewerTextLayerElement(el)) {
             this.ensureDomPageStyle();
             el.classList.add("et-dom-pdf-translated-text");
         }
+        this.noteDomPageOwnMutation();
         this.registerDomOriginalText(el, originalText);
         this.fadeInDomPageBlock(el, () => {
             if (type === "block") node.textContent = translated;
             else node.nodeValue = translated;
         });
+        return true;
     }
 
     applyTextNodeTranslationWithOriginalChunks(node, translated, originalText) {
         translated = this.sanitizeDomPageTranslatedText(translated);
+        if (!translated || !translated.trim()) return false;
         const parent = node && node.parentElement;
         if (!parent) {
             if (node) node.nodeValue = this.preserveDomTextNodeBoundaryWhitespace(node, translated);
-            return;
+            return true;
         }
         const pairs = this.buildDomOriginalDisplayPairs(translated, originalText);
         const fragment = document.createDocumentFragment();
@@ -3483,14 +5077,13 @@ class BannerController {
         });
 
         if (!spans.length) {
-            this.fadeInDomPageBlock(parent, () => {
-                node.nodeValue = this.preserveDomTextNodeBoundaryWhitespace(node, translated);
-            });
+            node.nodeValue = this.preserveDomTextNodeBoundaryWhitespace(node, translated);
             return;
         }
 
-        this.fadeInDomPageBlock(parent, () => {
-            parent.replaceChild(fragment, node);
+        parent.replaceChild(fragment, node);
+        spans.forEach((span) => {
+            this.fadeInDomPageBlock(span, () => {});
         });
     }
 
@@ -3520,14 +5113,23 @@ class BannerController {
         if (this._domPageStyleInjected) return;
         this._domPageStyleInjected = true;
         const style = document.createElement("style");
+        // PDF text-layer translated content carries a soft Liquid Glass chip so it
+        // reads cleanly above the canvas at any zoom level. light-dark() picks the
+        // tint automatically from the page's color-scheme.
         style.textContent = `
             .textLayer .et-dom-pdf-translated-text {
-                color: #202124 !important;
-                background: rgba(255,255,255,.86) !important;
-                border-radius: 2px !important;
+                color-scheme: light dark;
+                color: light-dark(#1d1d1f, #f2f2f7) !important;
+                background: light-dark(rgba(255, 255, 255, 0.78), rgba(28, 28, 30, 0.78)) !important;
+                backdrop-filter: blur(12px) saturate(170%) !important;
+                -webkit-backdrop-filter: blur(12px) saturate(170%) !important;
+                border-radius: 4px !important;
                 box-decoration-break: clone !important;
                 -webkit-box-decoration-break: clone !important;
-                text-shadow: 0 0 1px rgba(255,255,255,.9) !important;
+                box-shadow:
+                    0 0.5px 0 light-dark(rgba(255, 255, 255, 0.60), rgba(255, 255, 255, 0.08)) inset,
+                    0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08)) !important;
+                text-shadow: 0 0 1px light-dark(rgba(255, 255, 255, 0.85), transparent) !important;
             }
         `;
         document.head.appendChild(style);
@@ -3574,10 +5176,47 @@ class BannerController {
             runMutate();
             return;
         }
+
+        // Inline elements (like <span> tags created for text node replacements) cannot be promoted
+        // to GPU compositor layers without triggering severe layout rendering bugs (rendering empty/blank).
+        // For these display: inline elements, we skip transform/will-change and transition opacity only.
+        const isInline =
+            block.tagName === "SPAN" || block.classList.contains("et-dom-translated-text");
+
         const prevTransition = block.style.transition;
         const prevOpacity = block.style.opacity;
         const prevTransform = block.style.transform;
         const prevWillChange = block.style.willChange;
+
+        const m3Emphasized =
+            "linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)";
+
+        if (isInline) {
+            block.style.transition = "none";
+            block.style.opacity = "0";
+            // Force synchronous layout pass to commit the opacity: 0 state before running mutations
+            void block.offsetWidth;
+            runMutate();
+
+            if (typeof requestAnimationFrame !== "function") {
+                block.style.removeProperty("opacity");
+                block.style.removeProperty("transition");
+                return;
+            }
+            requestAnimationFrame(() => {
+                if (!block.isConnected) return;
+                block.style.transition = `opacity 280ms ${m3Emphasized}`;
+                block.style.opacity = "1";
+                setTimeout(() => {
+                    if (!block.isConnected) return;
+                    if (prevTransition) block.style.transition = prevTransition;
+                    else block.style.removeProperty("transition");
+                    if (prevOpacity) block.style.opacity = prevOpacity;
+                    else block.style.removeProperty("opacity");
+                }, 420);
+            });
+            return;
+        }
 
         // Promote to a compositor layer up-front so the first frame doesn't pop.
         block.style.willChange = "opacity, transform";
@@ -3598,8 +5237,6 @@ class BannerController {
             if (!block.isConnected) return;
             // M3 Expressive: opacity uses Emphasized Decelerate; transform uses a real spring
             // via Chrome-native linear() easing for the signature "쫀쫀" Expressive feel.
-            const m3Emphasized =
-                "linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1)";
             const m3Spring =
                 "linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1)";
             block.style.transition = [
@@ -3735,50 +5372,93 @@ class BannerController {
                 const style = document.createElement("style");
                 style.id = "edge-translate-dom-original-tooltip-style";
                 style.textContent = `
+                /* iOS 26 Liquid Glass tooltip — translucent panel that floats over the
+                   page with a soft blur, multi-layer highlight, and spring entrance. */
+                #edge-translate-dom-original-tooltip {
+                    color-scheme: light dark;
+                    --etip-glass-base: light-dark(rgba(255, 255, 255, 0.74), rgba(28, 28, 30, 0.66));
+                    --etip-edge-top: light-dark(rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.10));
+                    --etip-edge-bottom: light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.32));
+                    --etip-outline: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.10));
+                    --etip-text: light-dark(#1d1d1f, #f2f2f7);
+                    --etip-muted: light-dark(#6e6e73, #aeaeb2);
+                    --etip-accent: light-dark(#0a84ff, #64d2ff);
+                    --etip-spring: linear(0, 0.052 3.3%, 0.197 6.7%, 0.547 14%, 0.832 21.5%, 1.029 29.5%, 1.097 36%, 1.111 43.5%, 1.074 52.5%, 1.018 65%, 0.992 75.5%, 0.999 88.5%, 1);
+                }
                 .et-dom-original-source {
-                    background: rgba(26, 115, 232, 0.14) !important;
-                    border-radius: 4px !important;
-                    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.08) !important;
+                    background: light-dark(rgba(10, 132, 255, 0.12), rgba(100, 210, 255, 0.16)) !important;
+                    border-radius: 6px !important;
+                    box-shadow: 0 0 0 1.5px light-dark(rgba(10, 132, 255, 0.20), rgba(100, 210, 255, 0.28)) !important;
                     cursor: help !important;
+                    transition: background 220ms ease, box-shadow 220ms ease !important;
                 }
                 #edge-translate-dom-original-tooltip {
                     position: fixed;
                     z-index: 2147483647;
                     width: min(480px, calc(100vw - 32px));
                     max-height: min(320px, calc(100vh - 32px));
-                    overflow: auto;
+                    overflow: hidden auto;
                     box-sizing: border-box;
                     padding: 0;
-                    border: 1px solid #dadce0;
-                    border-radius: 8px;
-                    background: #fff;
-                    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.16), 0 8px 24px rgba(60, 64, 67, 0.18);
-                    color: #202124;
-                    font-family: Roboto, Arial, "Noto Sans", "Apple SD Gothic Neo", sans-serif;
+                    border-radius: 22px;
+                    isolation: isolate;
+                    background: var(--etip-glass-base);
+                    backdrop-filter: blur(40px) saturate(190%) contrast(110%);
+                    -webkit-backdrop-filter: blur(40px) saturate(190%) contrast(110%);
+                    box-shadow:
+                        0 1.5px 0 light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.14)) inset,
+                        0 -1px 0 var(--etip-edge-bottom) inset,
+                        1px 0 0 -0.5px light-dark(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.06)) inset,
+                        -1px 0 0 -0.5px light-dark(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.06)) inset,
+                        0 0 0 0.5px var(--etip-outline),
+                        0 22px 60px rgba(0, 0, 0, 0.22),
+                        0 6px 18px rgba(0, 0, 0, 0.10),
+                        0 1px 2px rgba(0, 0, 0, 0.12);
+                    color: var(--etip-text);
+                    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", system-ui, sans-serif;
                     font-size: 14px;
                     line-height: 1.55;
+                    letter-spacing: -0.1px;
                     pointer-events: none;
                     opacity: 0;
-                    transform: translateY(6px) scale(0.98);
+                    transform: translateY(-8px) scale(0.84);
                     transform-origin: top left;
-                    transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1), transform 120ms cubic-bezier(0.2, 0, 0, 1);
+                    filter: blur(10px) saturate(140%);
+                    transition: opacity 240ms ease, transform 420ms var(--etip-spring), filter 280ms ease;
+                }
+                /* Top-edge sheen + diagonal highlight via pseudo-elements. */
+                #edge-translate-dom-original-tooltip::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    border-radius: inherit;
+                    pointer-events: none;
+                    background:
+                        linear-gradient(180deg, light-dark(rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06)) 0%, transparent 30%),
+                        linear-gradient(135deg, transparent 0%, transparent 55%, light-dark(rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03)) 100%);
+                    mix-blend-mode: screen;
+                    z-index: -1;
                 }
                 #edge-translate-dom-original-tooltip[data-visible="true"] {
                     opacity: 1;
                     transform: translateY(0) scale(1);
+                    filter: blur(0) saturate(210%);
                 }
                 #edge-translate-dom-original-tooltip .et-original-header {
                     position: sticky;
                     top: 0;
                     display: flex;
                     align-items: center;
-                    gap: 8px;
-                    padding: 12px 16px 9px;
-                    color: #5f6368;
-                    background: #fff;
-                    border-bottom: 1px solid #f1f3f4;
+                    gap: 10px;
+                    padding: 12px 18px 10px;
+                    color: var(--etip-muted);
+                    background: linear-gradient(180deg, light-dark(rgba(255,255,255,0.18), rgba(28,28,30,0.22)) 0%, light-dark(rgba(255,255,255,0.04), rgba(28,28,30,0.08)) 100%);
+                    backdrop-filter: blur(20px) saturate(170%);
+                    -webkit-backdrop-filter: blur(20px) saturate(170%);
+                    border-bottom: 0.5px solid var(--etip-outline);
                     font-size: 13px;
                     font-weight: 600;
+                    letter-spacing: -0.1px;
                 }
                 #edge-translate-dom-original-tooltip .et-original-icon {
                     display: inline-flex;
@@ -3786,18 +5466,28 @@ class BannerController {
                     justify-content: center;
                     width: 24px;
                     height: 24px;
-                    border-radius: 6px;
-                    background: #e8f0fe;
-                    color: #1a73e8;
-                    font-size: 15px;
+                    border-radius: 8px;
+                    background: light-dark(rgba(10, 132, 255, 0.14), rgba(100, 210, 255, 0.18));
+                    color: var(--etip-accent);
+                    font-size: 14px;
                     font-weight: 700;
+                    box-shadow:
+                        0 0.5px 0 light-dark(rgba(255,255,255,0.55), rgba(255,255,255,0.10)) inset,
+                        0 0 0 0.5px light-dark(rgba(10, 132, 255, 0.20), rgba(100, 210, 255, 0.20));
                 }
                 #edge-translate-dom-original-tooltip .et-original-text {
-                    padding: 14px 18px 18px;
+                    padding: 14px 20px 18px;
                     white-space: pre-wrap;
                     word-break: break-word;
                     font-size: 15px;
-                    color: #202124;
+                    color: var(--etip-text);
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    #edge-translate-dom-original-tooltip {
+                        transition: opacity 100ms ease;
+                        transform: none !important;
+                        filter: none !important;
+                    }
                 }
             `;
                 document.head.appendChild(style);
@@ -3818,6 +5508,26 @@ class BannerController {
             `;
             document.documentElement.appendChild(tooltip);
             this._domOriginalTooltip = tooltip;
+            // Real Liquid Glass engine on the tooltip too. 'tinted' variant is a
+            // touch more opaque so the original-text content reads cleanly.
+            try {
+                this._tooltipGlass = new LiquidGlass(tooltip, {
+                    quality: "high",
+                    variant: "tinted",
+                    scheme: "auto",
+                    radius: 22,
+                    thickness: 16,
+                    refraction: 16,
+                    chromaticAberration: 0.5,
+                    blur: 10,
+                    saturation: 180,
+                    specular: true,
+                    applyRadius: false,
+                    fallbackFilter: "blur(40px) saturate(190%) contrast(110%)",
+                });
+            } catch {
+                /* CSS fallback in the injected style block covers failures */
+            }
         }
     }
 
@@ -3946,6 +5656,10 @@ class BannerController {
             document.removeEventListener("mousemove", this._domOriginalTooltipHandlers.move, true);
             document.removeEventListener("mouseout", this._domOriginalTooltipHandlers.out, true);
             this._domOriginalTooltipHandlers = null;
+        }
+        if (this._tooltipGlass) {
+            this._tooltipGlass.destroy();
+            this._tooltipGlass = null;
         }
         if (this._domOriginalTooltip) {
             this._domOriginalTooltip.remove();
@@ -4148,96 +5862,163 @@ class BannerController {
             const root = host.attachShadow({ mode: "open" });
             root.innerHTML = `
                 <style>
-                    /* M3 Expressive banner — Chrome-native primitives only:
-                       light-dark()  → auto theme without media-query duplication
-                       color-mix()   → derived tints
-                       linear()      → real spring physics for "쫀쫀" feel */
+                    /* iOS 26 Liquid Glass — multi-layer translucency with the signature
+                       top-edge highlight, deep saturate+blur, and spring-physics motion. */
                     :host {
                         color-scheme: light dark;
-                        --et-primary: light-dark(#0b57d0, #a8c7fa);
-                        --et-on-primary: light-dark(#ffffff, #0b1f3a);
-                        --et-primary-container: light-dark(#d3e3fd, #1f3b68);
-                        --et-on-primary-container: light-dark(#001a41, #d3e3fd);
-                        --et-surface-base: light-dark(rgba(255, 255, 255, 0.86), rgba(28, 31, 36, 0.86));
-                        --et-surface: linear-gradient(135deg, var(--et-surface-base), var(--et-surface-base));
-                        --et-surface-container: color-mix(in oklab, var(--et-primary) 6%, transparent);
-                        --et-outline: color-mix(in oklab, var(--et-primary) 18%, transparent);
-                        --et-outline-variant: color-mix(in oklab, var(--et-primary) 8%, transparent);
-                        --et-text: light-dark(#1f1f1f, #e8eaed);
-                        --et-muted: light-dark(#5f6368, #bdc1c6);
-                        --et-success: light-dark(#386a20, #b2f195);
-                        --et-error: light-dark(#b3261e, #f2b8b5);
-                        --pulse-color: color-mix(in oklab, var(--et-primary) 24%, transparent);
-                        --et-progress-track: color-mix(in oklab, var(--et-primary) 10%, transparent);
-                        /* M3 Expressive linear() springs */
-                        --m3-spring-default: linear(0, 0.046 4%, 0.196 9%, 0.523 19%, 0.81 28%, 1.012 37%, 1.099 45%, 1.108 53%, 1.069 64%, 1.014 76%, 0.987 86%, 1);
-                        --m3-spring-fast: linear(0, 0.083 6%, 0.286 12%, 0.572 21%, 0.844 30%, 1.014 38%, 1.069 44%, 1.072 51%, 1.038 60%, 1.011 69%, 0.998 78%, 0.999 90%, 1);
-                        --m3-emphasized: linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.6%, 0.547 21%, 0.722 29.4%, 0.853 38.4%, 0.937 47.7%, 0.978 56.8%, 0.997 67.4%, 1);
+                        --et-primary: light-dark(#0a84ff, #64d2ff);
+                        --et-on-primary: light-dark(#ffffff, #00264d);
+                        --et-primary-container: light-dark(rgba(10, 132, 255, 0.16), rgba(100, 210, 255, 0.20));
+                        --et-on-primary-container: light-dark(#003e7a, #cce4ff);
+                        /* Liquid Glass tint. Apple HIG's "Regular" Material aim is for
+                           text behind to fade into an unreadable wash. We use ~0.72 opacity
+                           in light and ~0.62 in dark — high enough to dominate the backdrop
+                           but still let saturated color bleed through (the "vibrancy" effect). */
+                        --et-glass-base: light-dark(rgba(255, 255, 255, 0.72), rgba(28, 28, 30, 0.62));
+                        --et-glass-base-hover: light-dark(rgba(255, 255, 255, 0.80), rgba(44, 44, 46, 0.70));
+                        /* Edge reflections: bright top + side highlights, dark bottom shadow
+                           to simulate a curved glass dome. */
+                        --et-glass-edge-top: light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.14));
+                        --et-glass-edge-side: light-dark(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.08));
+                        --et-glass-edge-bottom: light-dark(rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.36));
+                        --et-glass-outline: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.10));
+                        --et-specular: light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.18));
+                        --et-surface-container: light-dark(rgba(255, 255, 255, 0.55), rgba(60, 60, 67, 0.40));
+                        --et-text: light-dark(#1d1d1f, #f2f2f7);
+                        --et-muted: light-dark(#6e6e73, #aeaeb2);
+                        --et-success: light-dark(#34c759, #30d158);
+                        --et-error: light-dark(#ff3b30, #ff453a);
+                        --pulse-color: color-mix(in oklab, var(--et-primary) 36%, transparent);
+                        --et-progress-track: light-dark(rgba(120, 120, 128, 0.16), rgba(120, 120, 128, 0.32));
+                        /* Bouncy double-overshoot spring for entrance/morph. */
+                        --ios-bouncy: linear(0, 0.062 1.5%, 0.235 3.3%, 0.482 5.6%, 0.732 8.3%, 0.948 11.3%, 1.106 14.4%, 1.184 18.1%, 1.193 22.2%, 1.146 27.1%, 1.05 33.1%, 0.972 40.2%, 0.949 47.5%, 0.97 54.5%, 1.005 61.6%, 1.019 69.5%, 1.011 78%, 1.001 88%, 1);
+                        /* Soft spring for micro-interactions. */
+                        --ios-spring-soft: linear(0, 0.018 1.4%, 0.075 3.2%, 0.183 5.7%, 0.351 8.9%, 0.554 13.2%, 0.762 18.6%, 0.929 25.4%, 1.033 33.2%, 1.077 42.2%, 1.066 53.8%, 1.025 68%, 1.005 81.6%, 1);
+                        --ios-glide: linear(0, 0.009, 0.035 2.1%, 0.078 3.6%, 0.182 6.7%, 0.323 10.5%, 0.496 14.9%, 0.679 19.8%, 0.84 25.4%, 0.937 31.5%, 0.984 38.3%, 1);
+                        /* JS sets --mx/--my via pointermove for the spotlight follow. */
+                        --mx: 50%;
+                        --my: -20%;
                     }
+                    /* Liquid Glass capsule. The full-rounded radius + multi-layer
+                       inset shadows (top bright, bottom dark, sides subtle) give the
+                       "curved glass dome" look. The ::before is a moving specular
+                       highlight that follows the cursor; the ::after layers a fine
+                       diagonal sheen so the surface never reads as flat. */
                     .bar {
                         position: relative;
-                        margin: 12px 24px;
-                        height: 60px;
+                        margin: 10px 20px;
+                        height: 56px;
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
-                        gap: 16px;
+                        gap: 14px;
                         box-sizing: border-box;
-                        padding: 0 24px 8px;
+                        padding: 0 18px 6px;
                         color: var(--et-text);
-                        background: var(--et-surface);
-                        border: 1px solid var(--et-outline);
-                        border-radius: 999px;
-                        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+                        background: var(--et-glass-base);
+                        border-radius: 9999px;
                         font-size: 13px;
                         line-height: 1.2;
                         pointer-events: auto;
-                        backdrop-filter: blur(28px) saturate(190%);
-                        -webkit-backdrop-filter: blur(28px) saturate(190%);
-                        animation: spring-entrance 450ms var(--m3-spring-default) both;
-                        transition: all 300ms var(--m3-emphasized);
+                        isolation: isolate;
+                        overflow: hidden;
+                        /* Heavy frost: blur is the workhorse — at 40px+ text behind
+                           is unreadable. saturate boosts the vibrancy bleed-through,
+                           contrast restores the punch the blur+tint suck out. */
+                        backdrop-filter: blur(40px) saturate(190%) contrast(110%);
+                        -webkit-backdrop-filter: blur(40px) saturate(190%) contrast(110%);
+                        box-shadow:
+                            0 1.5px 0 var(--et-glass-edge-top) inset,
+                            0 -1px 0 var(--et-glass-edge-bottom) inset,
+                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            0 0 0 0.5px var(--et-glass-outline),
+                            0 16px 48px rgba(0, 0, 0, 0.16),
+                            0 4px 12px rgba(0, 0, 0, 0.08),
+                            0 1px 2px rgba(0, 0, 0, 0.10);
+                        animation: lg-entrance 720ms var(--ios-bouncy) both, lg-idle-drift 8s ease-in-out 720ms infinite;
+                        transition: transform 360ms var(--ios-spring-soft), box-shadow 360ms var(--ios-glide), background 280ms ease;
                     }
+                    /* Specular spotlight that tracks the pointer. inert to layout. */
+                    .bar::before {
+                        content: "";
+                        position: absolute;
+                        inset: 0;
+                        border-radius: inherit;
+                        pointer-events: none;
+                        background: radial-gradient(
+                            420px circle at var(--mx) var(--my),
+                            var(--et-specular) 0%,
+                            transparent 45%
+                        );
+                        opacity: 0;
+                        mix-blend-mode: lighten;
+                        transition: opacity 380ms var(--ios-glide);
+                        z-index: 0;
+                    }
+                    /* Diagonal sheen — always visible, gives the surface depth. */
+                    .bar::after {
+                        content: "";
+                        position: absolute;
+                        inset: 0;
+                        border-radius: inherit;
+                        pointer-events: none;
+                        background:
+                            linear-gradient(180deg, light-dark(rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.06)) 0%, transparent 28%),
+                            linear-gradient(135deg, transparent 0%, transparent 55%, light-dark(rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)) 100%);
+                        mix-blend-mode: screen;
+                        z-index: 0;
+                    }
+                    .bar > * { position: relative; z-index: 1; }
                     .bar:hover {
-                        transform: translateY(1px) scale(1.008);
-                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-                        border-color: rgba(26, 115, 232, 0.24);
+                        transform: translateY(-2px) scale(1.008);
+                        background: var(--et-glass-base-hover);
+                        box-shadow:
+                            0 1.5px 0 var(--et-glass-edge-top) inset,
+                            0 -1px 0 var(--et-glass-edge-bottom) inset,
+                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            0 0 0 0.5px var(--et-glass-outline),
+                            0 24px 60px rgba(0, 0, 0, 0.22),
+                            0 6px 16px rgba(0, 0, 0, 0.12),
+                            0 1px 2px rgba(0, 0, 0, 0.12);
                     }
-                    @media (prefers-color-scheme: dark) {
-                        .bar:hover {
-                            border-color: rgba(138, 180, 248, 0.24);
-                        }
-                    }
+                    .bar:hover::before { opacity: 1; }
+                    /* State outlines — tinted but the glass surface stays unchanged. */
                     .bar[data-state="starting"],
                     .bar[data-state="running"] {
-                        border-color: rgba(26, 115, 232, 0.3);
-                        box-shadow: 0 4px 24px rgba(26, 115, 232, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        .bar[data-state="starting"],
-                        .bar[data-state="running"] {
-                            border-color: rgba(138, 180, 248, 0.3);
-                            box-shadow: 0 4px 24px rgba(138, 180, 248, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-                        }
+                        box-shadow:
+                            0 1.5px 0 var(--et-glass-edge-top) inset,
+                            0 -1px 0 var(--et-glass-edge-bottom) inset,
+                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            0 0 0 0.5px color-mix(in oklab, var(--et-primary) 38%, var(--et-glass-outline)),
+                            0 16px 48px color-mix(in oklab, var(--et-primary) 26%, rgba(0, 0, 0, 0.16)),
+                            0 4px 12px rgba(0, 0, 0, 0.08),
+                            0 1px 2px rgba(0, 0, 0, 0.10);
                     }
                     .bar[data-state="complete"] {
-                        border-color: rgba(56, 106, 32, 0.3);
-                        box-shadow: 0 4px 24px rgba(56, 106, 32, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        .bar[data-state="complete"] {
-                            border-color: rgba(178, 241, 149, 0.3);
-                            box-shadow: 0 4px 24px rgba(178, 241, 149, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-                        }
+                        animation: lg-celebrate 900ms var(--ios-bouncy) both;
+                        box-shadow:
+                            0 1.5px 0 var(--et-glass-edge-top) inset,
+                            0 -1px 0 var(--et-glass-edge-bottom) inset,
+                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            0 0 0 0.5px color-mix(in oklab, var(--et-success) 36%, var(--et-glass-outline)),
+                            0 16px 48px color-mix(in oklab, var(--et-success) 22%, rgba(0, 0, 0, 0.14)),
+                            0 4px 12px rgba(0, 0, 0, 0.08),
+                            0 1px 2px rgba(0, 0, 0, 0.10);
                     }
                     .bar[data-state="error"] {
-                        border-color: rgba(179, 38, 30, 0.3);
-                        box-shadow: 0 4px 24px rgba(179, 38, 30, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        .bar[data-state="error"] {
-                            border-color: rgba(242, 184, 181, 0.3);
-                            box-shadow: 0 4px 24px rgba(242, 184, 181, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-                        }
+                        box-shadow:
+                            0 1.5px 0 var(--et-glass-edge-top) inset,
+                            0 -1px 0 var(--et-glass-edge-bottom) inset,
+                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            0 0 0 0.5px color-mix(in oklab, var(--et-error) 40%, var(--et-glass-outline)),
+                            0 16px 48px color-mix(in oklab, var(--et-error) 24%, rgba(0, 0, 0, 0.16)),
+                            0 4px 12px rgba(0, 0, 0, 0.08),
+                            0 1px 2px rgba(0, 0, 0, 0.10);
                     }
                     :host([data-visible="false"]) .bar {
                         display: none;
@@ -4250,16 +6031,17 @@ class BannerController {
                     }
                     .status-dot {
                         position: relative;
-                        width: 8px;
-                        height: 8px;
+                        width: 9px;
+                        height: 9px;
                         border-radius: 50%;
                         flex: 0 0 auto;
                         background: var(--et-primary);
-                        transition: all 300ms var(--m3-spring-fast);
+                        box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.4) inset, 0 0 6px color-mix(in oklab, var(--et-primary) 50%, transparent);
+                        transition: all 320ms var(--ios-spring-soft);
                     }
                     .bar[data-state="starting"] .status-dot,
                     .bar[data-state="running"] .status-dot {
-                        animation: pulse-breath 1.6s ease-in-out infinite;
+                        animation: pulse-breath 1.8s ease-in-out infinite;
                     }
                     .text {
                         display: flex;
@@ -4280,53 +6062,48 @@ class BannerController {
                         text-overflow: ellipsis;
                         white-space: nowrap;
                         font-size: 13px;
-                        font-weight: 700;
-                        letter-spacing: -0.1px;
+                        font-weight: 600;
+                        letter-spacing: -0.2px;
                     }
-                    .provider {
+                    /* Inset glass pills — slightly recessed via inner shadow so the
+                       primary glass surface still dominates. */
+                    .provider, .model {
                         display: inline-flex;
                         align-items: center;
                         gap: 6px;
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
-                        border-radius: 8px;
+                        border-radius: 11px;
                         padding: 2px 10px;
-                        color: var(--et-on-primary-container);
-                        background: var(--et-primary-container);
-                        border: 1px solid var(--et-outline);
-                        font-size: 11px;
-                        font-weight: 600;
                         height: 22px;
                         box-sizing: border-box;
-                        transition: all 300ms var(--m3-spring-fast);
+                        font-size: 11px;
+                        font-weight: 600;
+                        letter-spacing: -0.1px;
+                        background: var(--et-surface-container);
+                        backdrop-filter: blur(16px) saturate(180%);
+                        -webkit-backdrop-filter: blur(16px) saturate(180%);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.08)) inset,
+                            0 -0.5px 0 light-dark(rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.20)) inset,
+                            0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
+                        transition: transform 280ms var(--ios-spring-soft), background 220ms ease;
                     }
-                    .provider:hover {
-                        transform: translateY(-1px) scale(1.03);
-                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+                    .provider {
+                        color: var(--et-on-primary-container);
+                        background: var(--et-primary-container);
                     }
-                    .provider span {
+                    .model {
+                        color: var(--et-muted);
+                    }
+                    .provider:hover, .model:hover {
+                        transform: translateY(-0.5px) scale(1.025);
+                    }
+                    .provider span, .model span {
                         min-width: 0;
                         overflow: hidden;
                         text-overflow: ellipsis;
-                    }
-                    .model {
-                        display: inline-flex;
-                        align-items: center;
-                        padding: 2px 8px;
-                        height: 22px;
-                        border-radius: 8px;
-                        border: 1px solid var(--et-outline-variant);
-                        background: var(--et-surface-container);
-                        font-size: 10px;
-                        font-weight: 600;
-                        color: var(--et-muted);
-                        box-sizing: border-box;
-                        transition: all 300ms var(--m3-spring-fast);
-                    }
-                    .model:hover {
-                        transform: translateY(-1px) scale(1.03);
-                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
                     }
                     .provider-logo {
                         width: 14px;
@@ -4345,11 +6122,12 @@ class BannerController {
                         max-width: min(50vw, 520px);
                         font-size: 11px;
                         font-weight: 500;
+                        letter-spacing: -0.05px;
                     }
                     .actions {
                         display: flex;
                         align-items: center;
-                        gap: 8px;
+                        gap: 6px;
                         flex: 0 0 auto;
                     }
                     .progress-meta {
@@ -4360,6 +6138,7 @@ class BannerController {
                         font-weight: 600;
                         text-align: right;
                         font-variant-numeric: tabular-nums;
+                        letter-spacing: -0.1px;
                     }
                     .bar[data-state="complete"] .progress-meta {
                         color: var(--et-success);
@@ -4375,14 +6154,20 @@ class BannerController {
                         white-space: nowrap;
                         box-sizing: border-box;
                         padding: 3px 10px;
-                        border-radius: 8px;
+                        border-radius: 11px;
                         background: var(--et-surface-container);
                         color: var(--et-muted);
-                        border: 1px solid var(--et-outline-variant);
                         font-size: 11px;
                         font-weight: 500;
                         font-variant-numeric: tabular-nums;
+                        backdrop-filter: blur(16px) saturate(180%);
+                        -webkit-backdrop-filter: blur(16px) saturate(180%);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.06)) inset,
+                            0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.06));
                     }
+                    /* Liquid Glass button: convex glass capsule with inset highlight on
+                       top edge and a tightly-clipped backdrop blur. */
                     button {
                         display: inline-flex;
                         align-items: center;
@@ -4390,15 +6175,22 @@ class BannerController {
                         gap: 6px;
                         border: 0;
                         border-radius: 16px;
-                        background: transparent;
-                        color: var(--et-on-primary-container);
+                        background: var(--et-surface-container);
+                        color: var(--et-text);
                         cursor: pointer;
                         font: inherit;
                         height: 32px;
-                        padding: 0 14px;
+                        padding: 0 12px;
                         font-size: 12px;
                         font-weight: 600;
-                        transition: all 250ms var(--m3-emphasized);
+                        letter-spacing: -0.1px;
+                        backdrop-filter: blur(20px) saturate(180%);
+                        -webkit-backdrop-filter: blur(20px) saturate(180%);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08)) inset,
+                            0 -0.5px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.22)) inset,
+                            0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
+                        transition: transform 280ms var(--ios-spring-soft), background 220ms ease, box-shadow 220ms ease;
                     }
                     button svg {
                         width: 14px;
@@ -4407,89 +6199,82 @@ class BannerController {
                         fill: currentColor;
                     }
                     button:hover {
-                        background: var(--et-primary-container);
-                        transform: scale(1.06);
+                        transform: translateY(-0.5px) scale(1.06);
+                        background: light-dark(rgba(255, 255, 255, 0.78), rgba(72, 72, 74, 0.70));
                     }
+                    /* Squish on press — non-uniform scale gives a gummy press feel. */
                     button:active {
-                        transform: scale(0.92);
-                    }
-                    .hide {
-                        background: var(--et-surface-container);
-                        border: 1px solid var(--et-outline);
-                    }
-                    .hide:hover {
-                        background: var(--et-primary-container);
-                        color: var(--et-on-primary-container);
-                        border-color: transparent;
-                        transform: scale(1.06);
-                    }
-                    .hide:active {
-                        transform: scale(0.92);
+                        transform: scale(0.92, 1.04);
+                        transition-duration: 120ms;
                     }
                     .close {
                         color: var(--et-muted);
                         padding: 0;
                         width: 32px;
                         height: 32px;
-                        border-radius: 50%;
-                        transition: all 350ms var(--m3-emphasized);
+                        border-radius: 9999px;
                     }
                     .close:hover {
-                        background: var(--et-surface-container);
                         color: var(--et-text);
-                        transform: rotate(90deg) scale(1.1);
+                        transform: rotate(90deg) scale(1.12);
                     }
                     .close:active {
-                        transform: rotate(180deg) scale(0.9);
+                        transform: rotate(180deg) scale(0.88);
                     }
                     .progress {
                         position: absolute;
-                        left: 24px;
-                        right: 24px;
-                        bottom: 4px;
-                        height: 4px;
+                        left: 22px;
+                        right: 22px;
+                        bottom: 3px;
+                        height: 3px;
                         overflow: hidden;
                         background: var(--et-progress-track);
-                        border-radius: 999px;
+                        border-radius: 9999px;
                     }
+                    /* Liquid wave fill — animated multi-stop gradient that flows. */
                     .progress-fill {
+                        position: relative;
                         width: 0%;
                         height: 100%;
-                        background: var(--et-primary);
-                        border-radius: 999px;
-                        transition: width 350ms var(--m3-spring-fast);
+                        background:
+                            linear-gradient(90deg,
+                                color-mix(in oklab, var(--et-primary) 80%, white) 0%,
+                                var(--et-primary) 40%,
+                                color-mix(in oklab, var(--et-primary) 65%, white) 60%,
+                                var(--et-primary) 100%);
+                        background-size: 200% 100%;
+                        border-radius: 9999px;
+                        box-shadow:
+                            0 0 12px color-mix(in oklab, var(--et-primary) 55%, transparent),
+                            0 0 0 0.5px rgba(255, 255, 255, 0.30) inset;
+                        animation: liquid-flow 2.4s linear infinite;
+                        transition: width 480ms var(--ios-spring-soft), background 280ms ease;
                     }
                     .bar[data-state="starting"] .progress-fill {
                         width: 100% !important;
-                        background: linear-gradient(90deg, transparent, var(--et-primary) 50%, transparent);
+                        background: linear-gradient(90deg, transparent 0%, var(--et-primary) 50%, transparent 100%);
                         background-size: 200% 100%;
-                        animation: shimmer 1.5s infinite linear;
+                        animation: shimmer 1.6s infinite linear;
                     }
                     .bar[data-state="error"] .status-dot {
                         background: var(--et-error);
-                        box-shadow: 0 0 0 4px rgba(179, 38, 30, 0.2);
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        .bar[data-state="error"] .status-dot {
-                            box-shadow: 0 0 0 4px rgba(242, 184, 181, 0.2);
-                        }
+                        box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.4) inset, 0 0 8px color-mix(in oklab, var(--et-error) 55%, transparent);
                     }
                     .bar[data-state="error"] .progress-fill {
                         width: 100%;
-                        background: var(--et-error);
+                        background: linear-gradient(90deg, var(--et-error), color-mix(in oklab, var(--et-error) 70%, white));
+                        box-shadow: 0 0 8px color-mix(in oklab, var(--et-error) 40%, transparent);
                     }
                     .bar[data-state="complete"] .status-dot {
                         background: var(--et-success);
-                        box-shadow: 0 0 0 4px rgba(56, 106, 32, 0.2);
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        .bar[data-state="complete"] .status-dot {
-                            box-shadow: 0 0 0 4px rgba(178, 241, 149, 0.2);
-                        }
+                        box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.4) inset, 0 0 8px color-mix(in oklab, var(--et-success) 55%, transparent);
                     }
                     .bar[data-state="complete"] .progress-fill {
-                        background: var(--et-success);
+                        background: linear-gradient(90deg, var(--et-success), color-mix(in oklab, var(--et-success) 70%, white));
+                        box-shadow: 0 0 8px color-mix(in oklab, var(--et-success) 40%, transparent);
                     }
+                    /* Restore floater — mini Liquid Glass pill that lives at the top
+                       when the banner is hidden. */
                     .restore {
                         position: fixed;
                         top: 10px;
@@ -4499,31 +6284,37 @@ class BannerController {
                         gap: 6px;
                         height: 32px;
                         padding: 0 14px;
-                        border: 1px solid var(--et-outline);
                         border-radius: 16px;
-                        background: var(--et-surface);
+                        background: var(--et-glass-base);
                         color: var(--et-primary);
-                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
                         font: inherit;
                         font-size: 12px;
                         font-weight: 600;
+                        letter-spacing: -0.1px;
                         pointer-events: auto;
-                        backdrop-filter: blur(16px);
-                        -webkit-backdrop-filter: blur(16px);
-                        transition: all 300ms var(--m3-emphasized);
+                        backdrop-filter: blur(36px) saturate(190%) contrast(110%);
+                        -webkit-backdrop-filter: blur(36px) saturate(190%) contrast(110%);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08)) inset,
+                            0 -0.5px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.22)) inset,
+                            0 0 0 0.5px var(--et-glass-outline),
+                            0 6px 18px rgba(0, 0, 0, 0.12);
+                        transition: transform 320ms var(--ios-spring-soft), box-shadow 320ms var(--ios-glide);
                     }
                     :host([data-visible="false"]) .restore {
                         display: inline-flex;
-                        animation: spring-entrance 450ms var(--m3-spring-default) both;
+                        animation: lg-entrance 520ms var(--ios-spring) both;
                     }
                     .restore:hover {
-                        background: var(--et-primary-container);
-                        color: var(--et-on-primary-container);
-                        border-color: transparent;
-                        transform: scale(1.06);
+                        transform: translateY(-1px) scale(1.04);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.10)) inset,
+                            0 -0.5px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.22)) inset,
+                            0 0 0 0.5px var(--et-glass-outline),
+                            0 10px 28px rgba(0, 0, 0, 0.16);
                     }
                     .restore:active {
-                        transform: scale(0.92);
+                        transform: scale(0.94);
                     }
                     .sr-only {
                         position: absolute;
@@ -4536,34 +6327,62 @@ class BannerController {
                         white-space: nowrap;
                         border: 0;
                     }
-                    @keyframes spring-entrance {
+                    /* Liquid Glass entrance: settle from above with a brief blur lift,
+                       saturation surge, and a double-overshoot spring. */
+                    @keyframes lg-entrance {
                         0% {
-                            transform: translateY(-24px) scale(0.95);
+                            transform: translateY(-22px) scale(0.88);
                             opacity: 0;
-                            filter: blur(4px);
+                            filter: blur(12px) saturate(130%);
+                        }
+                        45% {
+                            transform: translateY(2px) scale(1.012);
+                            opacity: 1;
+                            filter: blur(0) saturate(220%);
+                        }
+                        72% {
+                            transform: translateY(-1px) scale(0.997);
                         }
                         100% {
                             transform: translateY(0) scale(1);
                             opacity: 1;
-                            filter: blur(0);
+                            filter: blur(0) saturate(210%);
                         }
+                    }
+                    /* Subtle 1px vertical breathing while idle so the glass feels alive. */
+                    @keyframes lg-idle-drift {
+                        0%, 100% { transform: translateY(0) scale(1); }
+                        50% { transform: translateY(-1px) scale(1.002); }
+                    }
+                    /* Brief celebration morph when state flips to complete. */
+                    @keyframes lg-celebrate {
+                        0% { transform: scale(1); }
+                        25% { transform: scale(1.025) translateY(-1px); }
+                        55% { transform: scale(0.992) translateY(0.5px); }
+                        80% { transform: scale(1.006); }
+                        100% { transform: scale(1); }
                     }
                     @keyframes shimmer {
                         0% { background-position: 200% 0; }
                         100% { background-position: -200% 0; }
                     }
+                    /* Liquid wave gradient flow for the progress fill. */
+                    @keyframes liquid-flow {
+                        0% { background-position: 0% 50%; }
+                        100% { background-position: 200% 50%; }
+                    }
                     @keyframes pulse-breath {
                         0% {
-                            transform: scale(0.9);
-                            box-shadow: 0 0 0 0px var(--pulse-color);
+                            transform: scale(0.88);
+                            box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.45) inset, 0 0 0 0px var(--pulse-color), 0 0 4px var(--pulse-color);
                         }
                         50% {
-                            transform: scale(1.15);
-                            box-shadow: 0 0 0 10px transparent;
+                            transform: scale(1.18);
+                            box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.45) inset, 0 0 0 10px transparent, 0 0 12px color-mix(in oklab, var(--et-primary) 60%, transparent);
                         }
                         100% {
-                            transform: scale(0.9);
-                            box-shadow: 0 0 0 0px transparent;
+                            transform: scale(0.88);
+                            box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.45) inset, 0 0 0 0px transparent, 0 0 4px var(--pulse-color);
                         }
                     }
                     @media (max-width: 640px) {
@@ -4642,6 +6461,97 @@ class BannerController {
             root.querySelector("[data-action='close']").addEventListener("click", () => {
                 this.cancelDomPageTranslate();
             });
+            // Real Liquid Glass engine (Meapri/liquid-glass-web) on Chromium. The
+            // earlier homemade SVG attempt emitted an invalid `filter="blur(N)"` (no px
+            // units) that silently killed the whole backdrop-filter chain; the engine
+            // instead builds a valid FilterChain (feGaussianBlur + feDisplacementMap +
+            // baked specular) and falls back to the CSS backdrop-filter declared on
+            // .bar / .restore on non-Chromium.
+            const bar = root.querySelector("[data-role='bar']");
+            const restore = root.querySelector(".restore");
+            // Keep the HIG glass tint (~0.72 light / 0.62 dark) so the bar's controls
+            // stay legible; the engine adds rim refraction + specular at the pill edge.
+            // Tint follows the scheme since the engine can't read CSS light-dark().
+            const glassTint = () =>
+                window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+                    ? "rgba(28, 28, 30, 0.38)"
+                    : "rgba(255, 255, 255, 0.4)";
+            if (restore) {
+                try {
+                    this._restoreGlass = new LiquidGlass(restore, {
+                        quality: "high",
+                        scheme: "auto",
+                        radius: "pill",
+                        thickness: 12,
+                        refraction: 14,
+                        chromaticAberration: 0.45,
+                        blur: 10,
+                        saturation: 190,
+                        specularIntensity: 0.6,
+                        tint: glassTint(),
+                        applyRadius: false,
+                        fallbackFilter: "blur(36px) saturate(190%) contrast(110%)",
+                    });
+                } catch {
+                    /* CSS backdrop-filter fallback already on .restore */
+                }
+            }
+            if (!this._glassSchemeBound && window.matchMedia) {
+                this._glassSchemeBound = true;
+                window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+                    const t = glassTint();
+                    this._barGlass?.update({ tint: t });
+                    this._restoreGlass?.update({ tint: t });
+                });
+            }
+            if (bar) {
+                try {
+                    this._barGlass = new LiquidGlass(bar, {
+                        quality: "high",
+                        scheme: "auto",
+                        radius: "pill",
+                        thickness: 22,
+                        refraction: 22,
+                        chromaticAberration: 0.5,
+                        blur: 10,
+                        saturation: 190,
+                        specularIntensity: 0.7,
+                        tint: glassTint(),
+                        applyRadius: false,
+                        fallbackFilter: "blur(40px) saturate(190%) contrast(110%)",
+                    });
+                } catch {
+                    /* CSS backdrop-filter fallback already on .bar */
+                }
+                let mxScheduled = false;
+                let pendingX = "50%";
+                let pendingY = "-20%";
+                const flushMouse = () => {
+                    mxScheduled = false;
+                    bar.style.setProperty("--mx", pendingX);
+                    bar.style.setProperty("--my", pendingY);
+                };
+                bar.addEventListener("pointermove", (event) => {
+                    const rect = bar.getBoundingClientRect();
+                    const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+                    const y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
+                    pendingX = `${x.toFixed(1)}%`;
+                    pendingY = `${y.toFixed(1)}%`;
+                    if (!mxScheduled) {
+                        mxScheduled = true;
+                        requestAnimationFrame(flushMouse);
+                    }
+                });
+                bar.addEventListener("pointerleave", () => {
+                    // Park the spotlight just above center so it eases out gently.
+                    pendingX = "50%";
+                    pendingY = "-20%";
+                    if (!mxScheduled) {
+                        mxScheduled = true;
+                        requestAnimationFrame(flushMouse);
+                    }
+                });
+            }
             (document.documentElement || document.body).appendChild(host);
         }
         this._domPageBanner = host;
@@ -4655,6 +6565,17 @@ class BannerController {
         host.dataset.visible = visible ? "true" : "false";
         host.style.height = visible ? `${this._domPageBannerHeight}px` : "0";
         this.movePage("top", visible ? this._domPageBannerHeight : 0, true);
+        // Liquid Glass is GPU work — only run the filter on whichever element is
+        // actually on screen. suspend()/resume() detach/re-attach the built
+        // filter without rebuilding the (expensive) displacement/specular maps.
+        if (this._barGlass) {
+            if (visible) this._barGlass.resume();
+            else this._barGlass.suspend();
+        }
+        if (this._restoreGlass) {
+            if (visible) this._restoreGlass.suspend();
+            else this._restoreGlass.resume();
+        }
     }
 
     /**
@@ -4832,6 +6753,14 @@ class BannerController {
             this._mo.disconnect();
             this._mo = null;
         }
+        if (this._barGlass) {
+            this._barGlass.destroy();
+            this._barGlass = null;
+        }
+        if (this._restoreGlass) {
+            this._restoreGlass.destroy();
+            this._restoreGlass = null;
+        }
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
         this.destroyDomOriginalTooltip();
@@ -4844,6 +6773,8 @@ class BannerController {
         this._domCompletedTranslationEntries = 0;
         this.resetDomPageRuntimeState();
         this._domCoverageScanCount = 0;
+        this._domCoverageStableScanCount = 0;
+        this._domOwnMutationSuppressUntil = 0;
         this._domTokenUsage = {
             inputTokens: 0,
             outputTokens: 0,
@@ -5020,40 +6951,24 @@ class BannerController {
      */
     startDomFallback() {
         if (this._mo) return;
-        const enqueue = (node) => {
-            this._pendingNodes.add(node);
-            if (this._scheduleBatch) return;
-            this._scheduleBatch = requestAnimationFrame(() => {
-                this._scheduleBatch = null;
-                const batch = Array.from(this._pendingNodes);
-                this._pendingNodes.clear();
-                this.translateBatchNodes(batch);
-            });
-        };
         this._mo = new MutationObserver((mutations) => {
+            let shouldScan = false;
             for (const m of mutations) {
-                if (m.type === "childList") {
-                    this._domPageRootElements = this.getDomPageTranslationRoots();
-                    m.addedNodes &&
-                        m.addedNodes.forEach((n) =>
-                            this.enqueueDomPageTextTreeForMutation(n, enqueue)
-                        );
-                    this.scheduleDomPageIncrementalScan(250);
-                } else if (m.type === "characterData") {
-                    const tn = m.target;
-                    this._translatedSet.delete(tn);
-                    this._domPendingTextNodes.delete(tn);
-                    this._domFailedTextNodes.delete(tn);
-                    if (this.isMeaningfulDomPageTextNode(tn)) enqueue(tn);
-                }
+                if (!this.domPageMutationHasTranslatableCandidate(m)) continue;
+                shouldScan = true;
+                if (m.type === "characterData") this.releaseAiPageSectionElement(m.target);
             }
+            if (!shouldScan) return;
+            this._domCoverageStableScanCount = 0;
+            this._domPageRootElements = this.getDomPageTranslationRoots();
+            this.scheduleDomPageIncrementalScan(120);
         });
         this._mo.observe(document.documentElement || document.body, {
             subtree: true,
             childList: true,
             characterData: true,
         });
-        this._domScrollScanHandler = () => this.scheduleDomPageIncrementalScan(500);
+        this._domScrollScanHandler = () => this.scheduleDomPageIncrementalScan(180);
         window.addEventListener("scroll", this._domScrollScanHandler, {
             passive: true,
             capture: true,
@@ -5071,6 +6986,15 @@ class BannerController {
      */
     translateBatchNodes(nodes) {
         if (this._domCircuitBreakerActive) return;
+        // AI engines go through the section-level path: no markers, no per-block batching,
+        // one LLM call per semantic section, raw HTML in / raw HTML out. The text-node
+        // collection that fed this function is ignored — the section collector walks the
+        // root containers directly so the model sees full structural context.
+        const engine = this._domPageTranslateOptions && this._domPageTranslateOptions.engine;
+        if (this.isAiDomPageEngine(engine)) {
+            this.dispatchAiPageSections();
+            return;
+        }
         const eligibleNodes = [];
         for (const n of nodes) {
             const p = n.parentElement;
@@ -5099,7 +7023,21 @@ class BannerController {
             return;
         }
         if (this.getDomPageBatchOptions()) {
-            const entries = groups.map((group) => this.createDomPageTranslationEntry(group));
+            const rawEntries = groups.map((group) => this.createDomPageTranslationEntry(group));
+            // HTML-native dedupe: when buildContextTranslationGroups splits one block into
+            // multiple groups, the same block would produce several htmlMode entries pointing
+            // at the same element. Drop duplicates so we don't burn tokens re-translating
+            // identical innerHTML and so concurrent applies don't race.
+            const seenHtmlBlocks = new WeakSet();
+            const entries = [];
+            for (const entry of rawEntries) {
+                if (entry.htmlMode && entry.htmlElement) {
+                    if (seenHtmlBlocks.has(entry.htmlElement)) continue;
+                    seenHtmlBlocks.add(entry.htmlElement);
+                }
+                entries.push(entry);
+            }
+            entries.forEach((entry) => this.assignDomPageApplySequence(entry));
             const uncachedEntries = [];
             entries.forEach((entry) => {
                 const cached = this._domTranslationCache.get(entry.cacheKey);
@@ -5110,9 +7048,11 @@ class BannerController {
                 uncachedEntries.push(entry);
             });
             // Deduplicate: same sourceText (cacheKey) → translate once, fan out to siblings.
-            // Only run on larger pages where duplicates are likely (small pages: pure overhead).
+            // Lowered threshold to 12 because typical articles repeat boilerplate (navigation
+            // labels, "Share", "Read more", date stamps, footer links) and the bucketing cost
+            // is negligible vs. the savings on every avoided API call.
             let primaries = uncachedEntries;
-            if (uncachedEntries.length >= 30) {
+            if (uncachedEntries.length >= 12) {
                 primaries = [];
                 const duplicateBuckets = new Map();
                 for (const entry of uncachedEntries) {
@@ -5286,7 +7226,7 @@ class BannerController {
      */
     applyStreamedBatchSegments(entries, accumulatedText, appliedSet) {
         if (!entries?.length || !accumulatedText) return;
-        const markerRe = /\[\[(\d+):[a-z][a-z0-9-]*\]\]/g;
+        const markerRe = /\[\[(\d+)(?::[a-z][a-z0-9-]*)?\]\]/g;
         const matches = [];
         let m;
         while ((m = markerRe.exec(accumulatedText)) !== null) {
@@ -5329,7 +7269,6 @@ class BannerController {
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
-                const { readableBlockReplacement } = entry;
                 let translated = this._domTranslationCache.get(entry.cacheKey);
                 if (!translated) {
                     const requestText = this.buildDomPageRoleSegmentText(entry);
@@ -5347,8 +7286,8 @@ class BannerController {
                     }
                 }
 
-                if (readableBlockReplacement) {
-                    const block = readableBlockReplacement.block;
+                // HTML-native single-entry: translated is the block's new innerHTML.
+                if (entry.htmlMode && entry.htmlElement && entry.htmlElement.isConnected) {
                     const rejectionReason = this.getDomPageEntryRejectionReason(entry, translated);
                     if (rejectionReason) {
                         this.retryDomPageEntryTranslation(entry, attempt, {
@@ -5357,11 +7296,7 @@ class BannerController {
                         this.markDomPageTranslationEntriesCompleted();
                         return;
                     }
-                    if (translated && block && block.isConnected) {
-                        this.queueDomPageEntryApply(entry, translated);
-                    } else {
-                        this.skipDomPageEntryApply(entry);
-                    }
+                    this.queueDomPageEntryApply(entry, translated);
                     this.markDomPageTranslationEntriesCompleted();
                     return;
                 }

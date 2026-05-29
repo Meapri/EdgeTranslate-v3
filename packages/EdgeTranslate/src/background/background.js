@@ -1,6 +1,11 @@
 import { TranslatorManager } from "./library/translate.js";
 import { translatePage, executeGoogleScript } from "./library/pageTranslate.js";
 import {
+    clearAll as clearPersistentTranslationCache,
+    prefetchEntriesForUrlHash as prefetchPersistentCacheForUrl,
+    saveEntry as savePersistentCacheEntry,
+} from "./library/translationPersistentCache.js";
+import {
     addUrlBlacklist,
     addDomainBlacklist,
     removeUrlBlacklist,
@@ -457,6 +462,30 @@ channel.on("page_translate_event", (detail, sender) => {
         }
     } catch {}
     channel.emitToTabs(sender.tab.id, "page_translate_event", detail);
+});
+
+/**
+ * Persistent translation cache served from IndexedDB in the background SW.
+ * Content scripts prefetch all entries for the current page on translation
+ * start, then fire-forget save successful section translations as they land.
+ */
+channel.provide("persistent_cache_prefetch", (detail) => {
+    const urlHash = detail && detail.urlHash;
+    if (!urlHash) return Promise.resolve([]);
+    return prefetchPersistentCacheForUrl(String(urlHash)).catch(() => []);
+});
+
+channel.on("persistent_cache_save", (detail) => {
+    if (!detail || !detail.key || !detail.value) return;
+    savePersistentCacheEntry({
+        urlHash: detail.urlHash || "",
+        key: detail.key,
+        value: detail.value,
+    }).catch(() => null);
+});
+
+channel.on("persistent_cache_clear", () => {
+    clearPersistentTranslationCache().catch(() => null);
 });
 
 /**

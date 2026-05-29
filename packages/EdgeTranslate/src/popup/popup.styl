@@ -211,18 +211,19 @@ select {
     min-height: 44px;
     padding: 0 20px;
     color: color-on-primary;
-    background: linear-gradient(135deg, color-primary, #146c43);
+    background: color-primary;
     border: 0;
     border-radius: 999px;
-    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.18);
+    box-shadow: 0 1px 3px rgba(14, 124, 134, 0.32), 0 6px 16px rgba(14, 124, 134, 0.18);
     font-size: 14px;
     font-weight: 700;
+    letter-spacing: 0.1px;
     cursor: pointer;
     transition: transform 200ms motion-spring, background-color motion-fast, box-shadow motion-fast, color motion-fast;
 
     &:hover {
-        background: linear-gradient(135deg, color-primary-hover, #0f6d58);
-        box-shadow: 0 2px 6px rgba(60, 64, 67, 0.2);
+        background: color-primary-hover;
+        box-shadow: 0 2px 4px rgba(14, 124, 134, 0.36), 0 10px 22px rgba(14, 124, 134, 0.22);
     }
 
     &:active {

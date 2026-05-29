@@ -4,6 +4,7 @@ import { forwardRef } from "preact/compat";
 import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import styled, { css } from "styled-components";
 import ArrowDownIcon from "./icons/arrow-down.svg";
+import { LiquidGlass } from "liquid-glass";
 
 const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 
@@ -23,6 +24,7 @@ const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 const Dropdown = forwardRef((props, ref) => {
     const [open, setOpen] = useState(false);
     const titleElRef = useRef();
+    const menuElRef = useRef();
     const clickAwayHandler = useCallback((event) => {
         // Chrome has the "path" property and Firefox has the "composedPath" function.
         const path = event.path || (event.composedPath && event.composedPath());
@@ -43,6 +45,45 @@ const Dropdown = forwardRef((props, ref) => {
         return () => window.removeEventListener("click", clickAwayHandler);
     }, [clickAwayHandler]);
 
+    // Opt-in Liquid Glass on the menu surface. lazy:true lets the engine build
+    // the filter only while the menu is shown (display toggles intersection) and
+    // drop it when closed. Keep a fairly opaque tint so the menu items stay
+    // legible; the engine adds rim refraction + specular at the 8px corners.
+    useEffect(() => {
+        if (!props.glass || !menuElRef.current) return undefined;
+        const prefersDark = () =>
+            window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const tintFor = () =>
+            prefersDark() ? "rgba(32, 38, 45, 0.66)" : "rgba(255, 255, 255, 0.62)";
+        let glass = null;
+        try {
+            glass = new LiquidGlass(menuElRef.current, {
+                quality: "high",
+                lazy: true,
+                scheme: "auto",
+                radius: 8,
+                thickness: 12,
+                refraction: 14,
+                chromaticAberration: 0.45,
+                blur: 6,
+                saturation: 175,
+                specularIntensity: 0.7,
+                tint: tintFor(),
+                applyRadius: false,
+                fallbackFilter: "blur(16px) saturate(160%)",
+            });
+        } catch {
+            glass = null;
+        }
+        const mql = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+        const onScheme = () => glass && glass.update({ tint: tintFor() });
+        if (mql && mql.addEventListener) mql.addEventListener("change", onScheme);
+        return () => {
+            if (mql && mql.removeEventListener) mql.removeEventListener("change", onScheme);
+            if (glass) glass.destroy();
+        };
+    }, [props.glass]);
+
     return (
         <StyledSelect className={props.className} ref={ref}>
             <Title
@@ -58,7 +99,9 @@ const Dropdown = forwardRef((props, ref) => {
                 <TitleLabel>{props.title}</TitleLabel>
                 <StyledArrowDownIcon />
             </Title>
-            <Menu open={open}>{Items}</Menu>
+            <Menu ref={menuElRef} open={open}>
+                {Items}
+            </Menu>
         </StyledSelect>
     );
 });
@@ -120,7 +163,7 @@ const Menu = styled.ul`
     z-index: 6;
     float: left;
     box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
-    animation: et-dropdown-enter 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation: et-dropdown-enter 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
     @keyframes et-dropdown-enter {
         from {
@@ -257,7 +300,7 @@ const Item = styled.li`
     -ms-user-select: none;
     user-select: none;
     transition: color ${MotionFast}, background-color ${MotionFast},
-        transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+        transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
     transform: scale(1);
     ${(props) => (props.active ? ActiveStyle : InActiveStyle)}
 

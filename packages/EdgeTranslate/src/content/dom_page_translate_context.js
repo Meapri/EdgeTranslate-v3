@@ -36,71 +36,6 @@ const BLOCK_TAGS = new Set([
     "UL",
 ]);
 
-const READABLE_REPLACE_BLOCK_TAGS = new Set([
-    "BLOCKQUOTE",
-    "CAPTION",
-    "DD",
-    "DT",
-    "FIGCAPTION",
-    "H1",
-    "H2",
-    "H3",
-    "H4",
-    "H5",
-    "H6",
-    "LI",
-    "P",
-]);
-
-const UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR = [
-    "a",
-    "button",
-    "canvas",
-    "code",
-    "embed",
-    "iframe",
-    "img",
-    "input",
-    "kbd",
-    "math",
-    "object",
-    "option",
-    "picture",
-    "pre",
-    "samp",
-    "script",
-    "select",
-    "style",
-    "svg",
-    "textarea",
-    "video",
-    "audio",
-].join(",");
-
-const UNSAFE_INLINE_LINK_BLOCK_REPLACE_SELECTOR = [
-    "button",
-    "canvas",
-    "code",
-    "embed",
-    "iframe",
-    "img",
-    "input",
-    "kbd",
-    "math",
-    "object",
-    "option",
-    "picture",
-    "pre",
-    "samp",
-    "script",
-    "select",
-    "style",
-    "svg",
-    "textarea",
-    "video",
-    "audio",
-].join(",");
-
 function normalizeTextNodeValue(node) {
     return String((node && node.nodeValue) || "")
         .replace(/\s+/g, " ")
@@ -141,17 +76,6 @@ function inferDomPageTextRole(element) {
     if (element.closest("caption,figcaption")) return "caption";
     if (element.closest("p,blockquote,dd,dt")) return "paragraph";
     return "text";
-}
-
-function getMeaningfulTextNodes(element) {
-    if (!element) return [];
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let node;
-    while ((node = walker.nextNode())) {
-        if (normalizeTextNodeValue(node)) nodes.push(node);
-    }
-    return nodes;
 }
 
 function getContextBlockElement(node) {
@@ -211,92 +135,1069 @@ function createContextGroup(block, entries) {
     };
 }
 
-function createReadableBlockReplacement(group, options = {}) {
-    const minNodes = options.minNodes || 2;
-    const maxChars = options.maxChars || 3500;
-    const preserveInlineFormatting = options.preserveInlineFormatting !== false;
-    const preserveInlineLinks = options.preserveInlineLinks !== false;
-    const block = group && group.block;
-    if (!block || !READABLE_REPLACE_BLOCK_TAGS.has(block.tagName)) return null;
-    if (!group.nodes || group.nodes.length < minNodes) return null;
+// ---------------------------------------------------------------------------
+// HTML-native page translation (LLM-optimized path)
+// ---------------------------------------------------------------------------
+// For AI engines we send the leaf block's innerHTML as the payload and ask the
+// model to return translated innerHTML preserving every tag and attribute. The
+// apply path validates the response before swapping innerHTML so a malformed
+// or empty translation can never erase the original block.
+// ---------------------------------------------------------------------------
 
-    const meaningfulNodes = getMeaningfulTextNodes(block);
-    const groupNodes = new Set(group.nodes);
-    if (!meaningfulNodes.length || meaningfulNodes.some((node) => !groupNodes.has(node))) {
-        return null;
-    }
+const HTML_BLOCK_LEAF_TAGS = new Set([
+    "P",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "LI",
+    "DD",
+    "DT",
+    "BLOCKQUOTE",
+    "FIGCAPTION",
+    "CAPTION",
+    "TH",
+    "TD",
+    "LABEL",
+    "BUTTON",
+    "SUMMARY",
+]);
 
-    if (preserveInlineLinks) {
-        const inlineLinkReplacement = createInlineLinkBlockReplacement(block, maxChars);
-        if (inlineLinkReplacement) {
-            return {
-                ...inlineLinkReplacement,
-                role: inferDomPageTextRole(block),
-                nodes: group.nodes,
-            };
+const HTML_BLOCK_EXCLUDE_TAGS = new Set([
+    "SCRIPT",
+    "STYLE",
+    "NOSCRIPT",
+    "TEMPLATE",
+    "SVG",
+    "MATH",
+    "CODE",
+    "PRE",
+    "KBD",
+    "SAMP",
+    "TEXTAREA",
+    "INPUT",
+    "SELECT",
+    "OPTION",
+]);
+
+const HTML_SECTION_CONTAINER_TAGS = new Set([
+    "ARTICLE",
+    "ASIDE",
+    "BODY",
+    "DIV",
+    "FOOTER",
+    "HEADER",
+    "MAIN",
+    "NAV",
+    "SECTION",
+    "TABLE",
+    "TBODY",
+    "TFOOT",
+    "THEAD",
+    "UL",
+    "OL",
+]);
+
+const HTML_DANGEROUS_TAG_SELECTOR =
+    "script,style,iframe,object,embed,link[rel=stylesheet],meta,base";
+const HTML_DANGEROUS_ATTR_PREFIX = /^on/i;
+
+const HTML_PRESERVED_ATTRS_BY_TAG = {
+    A: ["href", "target", "rel", "download", "hreflang", "type"],
+    IMG: ["src", "srcset", "alt", "width", "height", "loading", "decoding", "sizes"],
+    AREA: ["href", "alt", "target", "rel", "coords", "shape"],
+    SOURCE: ["src", "srcset", "type", "media", "sizes"],
+    VIDEO: ["src", "poster", "controls", "autoplay", "muted", "loop"],
+    AUDIO: ["src", "controls", "autoplay", "muted", "loop"],
+    INPUT: ["type", "name", "value", "placeholder"],
+};
+
+function isExcludedHtmlSubtree(element) {
+    if (!element) return true;
+    if (HTML_BLOCK_EXCLUDE_TAGS.has(element.tagName)) return true;
+    if (element.closest) {
+        const exclusionSelectors =
+            "script,style,noscript,template,svg,math,code,pre,kbd,samp,textarea,input,select,option";
+        if (
+            element.closest(exclusionSelectors) !== element &&
+            element.closest(exclusionSelectors)
+        ) {
+            return true;
         }
     }
-
-    if (preserveInlineFormatting && block.children && block.children.length > 0) {
-        return null;
-    }
-    if (block.querySelector && block.querySelector(UNSAFE_WHOLE_BLOCK_REPLACE_SELECTOR)) {
-        return null;
-    }
-
-    const sourceText = normalizeBlockText(block.textContent);
-    if (!sourceText || sourceText.length > maxChars) return null;
-
-    return {
-        block,
-        role: inferDomPageTextRole(block),
-        nodes: group.nodes,
-        sourceText,
-    };
+    return false;
 }
 
-function createInlineLinkBlockReplacement(block, maxChars) {
-    if (!block || !block.querySelector || !block.querySelector("a[href]")) return null;
-    if (
-        block.querySelector(UNSAFE_INLINE_LINK_BLOCK_REPLACE_SELECTOR) ||
-        block.querySelector("a[href] a[href]")
-    ) {
-        return null;
-    }
-
-    const links = [];
-    const sourceText = normalizeBlockText(serializeInlineLinkBlock(block, links));
-    if (!sourceText || !links.length || sourceText.length > maxChars) return null;
-
-    return {
-        block,
-        sourceText,
-        inlineLinks: links,
-    };
+function elementHasMeaningfulText(element, minLength = 2) {
+    if (!element) return false;
+    const text = normalizeBlockText(element.textContent);
+    return text.length >= minLength;
 }
 
-function serializeInlineLinkBlock(node, links) {
-    if (!node) return "";
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
-    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+function elementHasNestedTranslatableBlock(element) {
+    if (!element || !element.querySelector) return false;
+    for (const tag of HTML_BLOCK_LEAF_TAGS) {
+        if (element.querySelector(tag)) return true;
+    }
+    return false;
+}
 
-    if (node.tagName === "A" && node.getAttribute("href")) {
-        const index = links.length + 1;
-        links.push({
-            href: node.getAttribute("href") || "",
-            text: normalizeBlockText(node.textContent),
-            title: node.getAttribute("title") || "",
-            target: node.getAttribute("target") || "",
-            rel: node.getAttribute("rel") || "",
+/**
+ * Walk the DOM under `roots` and collect leaf-level translatable blocks. Each
+ * returned descriptor is an HTML entry: the block element, its role marker,
+ * the trimmed plain text (for cache keys + suspicious-translation detection),
+ * and the innerHTML that will be sent to the model.
+ */
+function collectHtmlPageBlocks(roots, options = {}) {
+    const seen = new WeakSet();
+    const skipExisting = options.skipExisting instanceof WeakSet ? options.skipExisting : null;
+    const blocks = [];
+    const sources = Array.isArray(roots) ? roots : [roots];
+    const selector = Array.from(HTML_BLOCK_LEAF_TAGS).join(",").toLowerCase();
+
+    for (const root of sources) {
+        if (!root || !root.querySelectorAll) continue;
+        if (root.tagName && HTML_BLOCK_LEAF_TAGS.has(root.tagName) && !seen.has(root)) {
+            considerHtmlBlock(root, blocks, seen, skipExisting);
+        }
+        root.querySelectorAll(selector).forEach((el) => {
+            if (!seen.has(el)) considerHtmlBlock(el, blocks, seen, skipExisting);
         });
-        return ` [[EDGE_TRANSLATE_LINK_${index}]]${normalizeBlockText(
-            node.textContent
-        )}[[/EDGE_TRANSLATE_LINK_${index}]] `;
+    }
+    return blocks;
+}
+
+function considerHtmlBlock(element, out, seen, skipExisting) {
+    if (!element || !element.isConnected || seen.has(element)) return;
+    seen.add(element);
+    if (isExcludedHtmlSubtree(element)) return;
+    if (skipExisting && skipExisting.has(element)) return;
+    if (elementHasNestedTranslatableBlock(element)) return;
+    if (!elementHasMeaningfulText(element)) return;
+
+    const role = inferDomPageTextRole(element);
+    const plainText = normalizeBlockText(element.textContent);
+    out.push({
+        element,
+        role,
+        plainText,
+        innerHtml: element.innerHTML,
+    });
+}
+
+/**
+ * Validation + sanitization for a translated HTML payload. Builds a detached
+ * container with the model's output, removes anything dangerous, then walks the
+ * original element to restore critical structural attributes (href, src, alt,
+ * srcset, id, class, data-*, style) on matching tags. The returned container
+ * holds the safe-to-apply innerHTML; null means the payload is unusable.
+ */
+function buildSafeTranslatedHtml(originalElement, translatedHtml) {
+    if (!originalElement || !translatedHtml) return null;
+    const trimmed = stripLeadingNonHtmlEcho(String(translatedHtml).trim());
+    if (!trimmed) return null;
+
+    const container = originalElement.ownerDocument.createElement(originalElement.tagName);
+    try {
+        container.innerHTML = trimmed;
+    } catch {
+        return null;
+    }
+    if (!sanitizeTranslatedHtmlContainer(container)) return null;
+    restoreHtmlCriticalAttributes(originalElement, container);
+    return container;
+}
+
+/**
+ * Some models (especially smaller ones) prepend a sentence like
+ * "Here is the translated HTML:" or echo the instruction header before the
+ * actual HTML payload. Detect that prefix and drop it so the parsed DOM
+ * doesn't include the echoed text as a real text node in the translated block.
+ */
+// Leaf-level block tags used for per-paragraph original-text registration. A
+// section's children may be a single wrapper (e.g. <div class="newsArea">) that
+// itself contains many block-level descendants — registering the original text
+// only on the wrapper makes the hover tooltip display the entire article as one
+// blob. We descend into these tags to capture/restore per-paragraph instead.
+const LEAF_BLOCK_TAGS = new Set([
+    "P",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "LI",
+    "BLOCKQUOTE",
+    "FIGCAPTION",
+    "CAPTION",
+    "TH",
+    "TD",
+    "LABEL",
+    "BUTTON",
+    "SUMMARY",
+    "DD",
+    "DT",
+    "PRE",
+]);
+
+const LEAF_BLOCK_TAG_SELECTOR = Array.from(LEAF_BLOCK_TAGS)
+    .map((tag) => tag.toLowerCase())
+    .join(",");
+
+/**
+ * Returns the leaf-level block-text elements inside `element` in document order.
+ * A "leaf" is a block element that contains no nested LEAF_BLOCK_TAGS — exactly
+ * the granularity we want for per-paragraph hover/original-text mapping.
+ *
+ * If `element` itself is a leaf block (no block-level descendants), returns
+ * [element] so callers can treat it uniformly.
+ */
+function findLeafBlocksInElement(element) {
+    if (!element || !element.querySelectorAll) return [];
+    const descendants = element.querySelectorAll(LEAF_BLOCK_TAG_SELECTOR);
+    if (descendants.length === 0) {
+        // No block descendants — treat the element itself as the leaf.
+        const text = String(element.textContent || "").trim();
+        return text ? [element] : [];
+    }
+    const leaves = [];
+    for (const node of descendants) {
+        if (!LEAF_BLOCK_TAGS.has(node.tagName)) continue;
+        // Skip nodes that themselves contain a leaf-block descendant — only the
+        // innermost leaf earns a tooltip mapping.
+        if (node.querySelector(LEAF_BLOCK_TAG_SELECTOR)) continue;
+        if (!String(node.textContent || "").trim()) continue;
+        leaves.push(node);
+    }
+    return leaves;
+}
+
+/**
+ * Companion to findLeafBlocksInElement that returns the normalized leaf text in
+ * the same document order. Used to snapshot original text before the section
+ * apply swaps children, so the after-apply registration can pair leaves
+ * positionally.
+ */
+function captureLeafTextsFromElement(element) {
+    const leaves = findLeafBlocksInElement(element);
+    return leaves.map((leaf) =>
+        String(leaf.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim()
+    );
+}
+
+/**
+ * Split a leaf element's child nodes into logical line segments using <br>
+ * elements as separators. Returns an array of segment descriptors:
+ *   { startIndex, endIndex, text }
+ * where startIndex/endIndex are indices into the original childNodes list and
+ * text is the segment's normalized visible text. <br>s themselves and pure-
+ * whitespace segments are omitted from the result.
+ *
+ * Pages that pack many visual paragraphs into a single <p> + <br> structure
+ * (extremely common in legacy news markup) need this granularity for hover
+ * tooltips to work per-line instead of dumping the entire blob.
+ */
+function splitLeafByLineBreaks(element) {
+    if (!element || !element.childNodes) return [];
+    const children = Array.from(element.childNodes);
+    const segments = [];
+    let segStart = 0;
+    const flush = (endIndex) => {
+        if (endIndex <= segStart) {
+            segStart = endIndex + 1;
+            return;
+        }
+        const slice = children.slice(segStart, endIndex);
+        const text = slice
+            .map((node) => String(node.textContent || ""))
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (text) {
+            segments.push({ startIndex: segStart, endIndex, text });
+        }
+        segStart = endIndex + 1;
+    };
+    for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        const isBr = child && child.nodeType === Node.ELEMENT_NODE && child.tagName === "BR";
+        if (isBr) flush(i);
+    }
+    flush(children.length);
+    return segments;
+}
+
+/**
+ * In-place wrap each <br>-separated segment of `element`'s inline content in a
+ * <span data-edge-translate-segment>. Returns the array of created span
+ * elements in document order so callers can pair them with captured original
+ * texts. Pure-whitespace segments and <br>s themselves are left untouched.
+ *
+ * Returns an empty array when the leaf has fewer than 2 segments — wrapping is
+ * only useful for differentiating between segments.
+ */
+function wrapLeafLineSegmentsInSpans(element) {
+    if (!element || !element.ownerDocument) return [];
+    const segments = splitLeafByLineBreaks(element);
+    if (segments.length < 2) return [];
+
+    const ownerDocument = element.ownerDocument;
+    const originalChildren = Array.from(element.childNodes);
+    const fragment = ownerDocument.createDocumentFragment();
+    const spans = [];
+    let pos = 0;
+    for (const seg of segments) {
+        // Carry over any nodes between previous segment and this one (typically
+        // empty since flush boundaries are <br>s; defensive in case of weird
+        // whitespace-only segments).
+        while (pos < seg.startIndex) {
+            const node = originalChildren[pos];
+            if (node) fragment.appendChild(node);
+            pos += 1;
+        }
+        const span = ownerDocument.createElement("span");
+        span.setAttribute("data-edge-translate-segment", "");
+        for (let i = seg.startIndex; i < seg.endIndex; i += 1) {
+            const node = originalChildren[i];
+            if (node) span.appendChild(node);
+        }
+        fragment.appendChild(span);
+        spans.push(span);
+        pos = seg.endIndex;
+    }
+    while (pos < originalChildren.length) {
+        const node = originalChildren[pos];
+        if (node) fragment.appendChild(node);
+        pos += 1;
+    }
+    // Replace element's children with the wrapped version. appendChild during
+    // the loop above already detached nodes from element, so the firstChild
+    // loop is effectively a noop — kept defensive.
+    while (element.firstChild) element.removeChild(element.firstChild);
+    element.appendChild(fragment);
+    return spans;
+}
+
+/**
+ * Combined per-leaf capture: for each leaf inside `child`, return
+ *   { leafIndex, segmentTexts: [text1, text2, ...] }
+ * Single-line leaves carry a one-element segmentTexts array; <br>-heavy leaves
+ * carry one entry per logical line. The output is what registerAiPageSection
+ * OriginalTexts uses to pair (and span-wrap) translated leaves on apply.
+ */
+function captureLeafSegmentTexts(child) {
+    const leaves = findLeafBlocksInElement(child);
+    const out = [];
+    for (const leaf of leaves) {
+        const brSegments = splitLeafByLineBreaks(leaf);
+        if (brSegments.length >= 2) {
+            out.push({ segmentTexts: brSegments.map((seg) => seg.text) });
+        } else {
+            const text = String(leaf.textContent || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            if (text) out.push({ segmentTexts: [text] });
+            else out.push({ segmentTexts: [] });
+        }
+    }
+    return out;
+}
+
+function stripLeadingNonHtmlEcho(text) {
+    if (!text) return "";
+    // Strip a leading Markdown code fence (```html ... ```), if present.
+    let result = text
+        .replace(/^\s*```(?:html|xml)?\s*\n?/i, "")
+        .replace(/\n?```\s*$/, "")
+        .trim();
+    // If the response starts with prose that isn't HTML, advance to the first
+    // angle bracket. We keep the original string when no tag is found (it may
+    // be a plain-text translation).
+    const firstAngle = result.indexOf("<");
+    if (firstAngle > 0) {
+        const prefix = result.slice(0, firstAngle).trim();
+        // Only strip when the prefix looks like commentary (no quotes/code
+        // markers and contains a colon or ends mid-sentence). Conservative —
+        // we'd rather over-include than nuke a legitimate fragment.
+        if (/^(?:[A-Za-z][^<>"]{0,200})$/.test(prefix) && /[.:!?]$/.test(prefix)) {
+            result = result.slice(firstAngle);
+        }
+    }
+    return result;
+}
+
+/**
+ * Strip dangerous descendants + `on*` handlers + `javascript:` URLs from a
+ * detached container holding translated HTML. Returns false when the container
+ * has no visible text after sanitize (i.e. the payload was unusable).
+ */
+function sanitizeTranslatedHtmlContainer(container) {
+    if (!container) return false;
+    const translatedText = normalizeBlockText(container.textContent);
+    if (!translatedText) return false;
+
+    // DOMParser-style innerHTML assignment never executes <script>, but the
+    // markup could still propagate dangerous DOM if we hand it back to the page.
+    container.querySelectorAll(HTML_DANGEROUS_TAG_SELECTOR).forEach((el) => el.remove());
+
+    const walker = container.ownerDocument.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
+    let node = walker.currentNode;
+    while (node) {
+        if (node !== container) sanitizeHtmlElementAttributes(node);
+        node = walker.nextNode();
+    }
+    return Boolean(normalizeBlockText(container.textContent));
+}
+
+/**
+ * Walk the content tree under each root and yield SECTIONS — contiguous runs of
+ * sibling elements whose combined plain text fits within [minChars, maxChars].
+ * Each section translates as a single LLM call so the model sees full context
+ * (no per-block context loss, no marker batching fragility).
+ *
+ * Section descriptor: { parent, children, plainText, role }
+ *   parent   – the common parent element that holds the section's children
+ *   children – the contiguous run of element children to translate
+ *   plainText – concatenated visible text (for cache keys + suspicious checks)
+ *   role     – the best-guess role of the leading child (used for hints)
+ */
+function collectHtmlPageSections(roots, options = {}) {
+    const minChars = options.minChars || 600;
+    const maxChars = options.maxChars || 12000;
+    const isEligibleElement =
+        typeof options.isEligibleElement === "function" ? options.isEligibleElement : null;
+    const recurseNestedContainers = options.recurseNestedContainers !== false;
+    const sections = [];
+    const sourceList = Array.isArray(roots) ? roots : [roots];
+    const seenContainers = new WeakSet();
+    for (const root of sourceList) {
+        if (!root || root.nodeType !== Node.ELEMENT_NODE) continue;
+        if (seenContainers.has(root)) continue;
+        seenContainers.add(root);
+        gatherSectionsFromContainer(root, sections, {
+            minChars,
+            maxChars,
+            isEligibleElement,
+            recurseNestedContainers,
+        });
+    }
+    return sections;
+}
+
+function shouldRecurseIntoSectionChild(child, options) {
+    if (!options.recurseNestedContainers) return false;
+    if (!child || child.nodeType !== Node.ELEMENT_NODE) return false;
+    if (HTML_BLOCK_LEAF_TAGS.has(child.tagName)) return false;
+    if (!HTML_SECTION_CONTAINER_TAGS.has(child.tagName)) return false;
+    return elementHasNestedTranslatableBlock(child);
+}
+
+function gatherSectionsFromContainer(container, out, options) {
+    if (!container || !container.children || isExcludedHtmlSubtree(container)) return;
+
+    let buffer = [];
+    let bufferChars = 0;
+
+    const flush = () => {
+        if (!buffer.length) return;
+        const plainText = buffer
+            .map((el) => normalizeBlockText(el.textContent))
+            .filter(Boolean)
+            .join(" ");
+        if (plainText) {
+            out.push({
+                parent: container,
+                children: buffer.slice(),
+                plainText,
+                role: inferDomPageTextRole(buffer[0]),
+            });
+        }
+        buffer = [];
+        bufferChars = 0;
+    };
+
+    const children = Array.from(container.children);
+    for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        if (!child || child.nodeType !== Node.ELEMENT_NODE) continue;
+        if (isExcludedHtmlSubtree(child)) {
+            flush();
+            continue;
+        }
+        if (shouldRecurseIntoSectionChild(child, options)) {
+            flush();
+            gatherSectionsFromContainer(child, out, options);
+            continue;
+        }
+        const childText = normalizeBlockText(child.textContent);
+        if (!childText) continue;
+        if (options.isEligibleElement && !options.isEligibleElement(child)) {
+            flush();
+            continue;
+        }
+
+        // Oversized single child: flush current buffer, recurse into the child
+        // so it gets broken up into smaller sections.
+        if (childText.length > options.maxChars) {
+            flush();
+            if (child.children && child.children.length) {
+                gatherSectionsFromContainer(child, out, options);
+            } else {
+                buffer.push(child);
+                bufferChars += childText.length;
+                flush();
+            }
+            continue;
+        }
+
+        // Soft break at top-level semantic boundaries when the buffer already has
+        // real content. Keeps headings at the start of their section so the model
+        // sees the heading as the section's anchor.
+        const isSemanticBreak =
+            bufferChars >= options.minChars &&
+            (child.tagName === "ARTICLE" ||
+                child.tagName === "SECTION" ||
+                child.tagName === "H1" ||
+                child.tagName === "H2");
+        if (isSemanticBreak) flush();
+
+        if (bufferChars > 0 && bufferChars + childText.length > options.maxChars) {
+            flush();
+        }
+
+        buffer.push(child);
+        bufferChars += childText.length;
+    }
+    flush();
+}
+
+// ---------------------------------------------------------------------------
+// Same-language detection — skip API calls when source text is already in the
+// target writing system. Cheap script-based heuristic: count code-point ranges
+// that uniquely identify a writing system, divide by total letter-like chars,
+// and declare "already target" if the dominant script ratio is high enough.
+// ---------------------------------------------------------------------------
+
+const SCRIPT_RANGES = {
+    hangul: /[가-힯ᄀ-ᇿ㄰-㆏]/g,
+    kana: /[぀-ゟ゠-ヿ]/g,
+    han: /[㐀-䶿一-鿿豈-﫿]/g,
+    cyrillic: /[Ѐ-ӿ]/g,
+    arabic: /[؀-ۿݐ-ݿࢠ-ࣿ]/g,
+    devanagari: /[ऀ-ॿ]/g,
+    thai: /[฀-๿]/g,
+    hebrew: /[֐-׿]/g,
+    greek: /[Ͱ-Ͽ]/g,
+    latinLetters: /[A-Za-zÀ-ÖØ-öø-ÿĀ-žƀ-ɏ]/g,
+};
+
+function countScript(text, regex) {
+    const matches = text.match(regex);
+    return matches ? matches.length : 0;
+}
+
+function isAlreadyInTargetLanguage(text, targetLanguage) {
+    const sample = String(text || "").slice(0, 600);
+    if (sample.length < 8) return false;
+    const target = String(targetLanguage || "")
+        .toLowerCase()
+        .split("-")[0];
+    if (!target) return false;
+
+    const hangul = countScript(sample, SCRIPT_RANGES.hangul);
+    const kana = countScript(sample, SCRIPT_RANGES.kana);
+    const han = countScript(sample, SCRIPT_RANGES.han);
+    const cyrillic = countScript(sample, SCRIPT_RANGES.cyrillic);
+    const arabic = countScript(sample, SCRIPT_RANGES.arabic);
+    const devanagari = countScript(sample, SCRIPT_RANGES.devanagari);
+    const thai = countScript(sample, SCRIPT_RANGES.thai);
+    const hebrew = countScript(sample, SCRIPT_RANGES.hebrew);
+    const greek = countScript(sample, SCRIPT_RANGES.greek);
+    const latin = countScript(sample, SCRIPT_RANGES.latinLetters);
+    const totalLetterLike =
+        hangul + kana + han + cyrillic + arabic + devanagari + thai + hebrew + greek + latin;
+    if (totalLetterLike < 4) return false;
+    const ratio = (n) => n / totalLetterLike;
+
+    if (target === "ko") return ratio(hangul) >= 0.6;
+    if (target === "ja") return ratio(kana) >= 0.15 || (kana >= 4 && ratio(han + kana) >= 0.6);
+    if (target === "zh") return ratio(han) >= 0.55 && ratio(kana) < 0.05 && ratio(hangul) < 0.05;
+    if (["ru", "uk", "bg", "be", "sr", "mk"].includes(target)) return ratio(cyrillic) >= 0.6;
+    if (target === "ar") return ratio(arabic) >= 0.5;
+    if (target === "hi") return ratio(devanagari) >= 0.5;
+    if (target === "th") return ratio(thai) >= 0.5;
+    if (target === "iw" || target === "he") return ratio(hebrew) >= 0.5;
+    if (target === "el") return ratio(greek) >= 0.5;
+    const latinTargets = new Set([
+        "en",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "nl",
+        "pl",
+        "sv",
+        "no",
+        "da",
+        "fi",
+        "cs",
+        "sk",
+        "hr",
+        "hu",
+        "ro",
+        "tr",
+        "id",
+        "vi",
+        "et",
+        "lt",
+        "lv",
+        "sl",
+        "ms",
+        "ca",
+        "gl",
+    ]);
+    if (latinTargets.has(target)) {
+        return ratio(latin) >= 0.7 && ratio(hangul + kana + han + cyrillic + arabic) < 0.1;
+    }
+    return false;
+}
+
+/**
+ * Merge consecutive sections that share the same parent and whose combined
+ * plainText fits under `mergeUntilChars`. Pages with lots of label-sized
+ * sections (nav, settings, small cards) end up as one combined LLM request
+ * instead of 10-20 round-trips.
+ */
+function coalesceTinySections(sections, options = {}) {
+    if (!sections || sections.length < 2) return sections || [];
+    const mergeUntilChars = options.mergeUntilChars || 1800;
+    const tinyThreshold = options.tinyThreshold || 400;
+    const out = [];
+    let buffer = null;
+    let bufferChars = 0;
+    const flush = () => {
+        if (!buffer) return;
+        out.push(buffer);
+        buffer = null;
+        bufferChars = 0;
+    };
+    for (const section of sections) {
+        if (!section) continue;
+        const sectionChars = String(section.plainText || "").length;
+        const canMerge =
+            buffer &&
+            buffer.parent === section.parent &&
+            bufferChars + sectionChars <= mergeUntilChars;
+        if (canMerge) {
+            buffer = {
+                parent: buffer.parent,
+                children: [...buffer.children, ...section.children],
+                plainText: [buffer.plainText, section.plainText].filter(Boolean).join(" "),
+                role: buffer.role || section.role,
+            };
+            bufferChars += sectionChars;
+            continue;
+        }
+        if (sectionChars <= tinyThreshold) {
+            flush();
+            buffer = { ...section, children: section.children.slice() };
+            bufferChars = sectionChars;
+        } else {
+            flush();
+            out.push(section);
+        }
+    }
+    flush();
+    return out;
+}
+
+// Attributes the LLM doesn't need to see. Stripping these from outgoing HTML cuts prompt
+// size sharply on real pages (especially Tailwind/framework-heavy markup) without losing
+// semantic content. The originals are restored on apply via restoreHtmlCriticalAttributes,
+// so the live DOM keeps every class/id/style/data-*/href/src/etc.
+const PRESENTATION_ATTR_NAMES = new Set([
+    "class",
+    "id",
+    "style",
+    "tabindex",
+    "role",
+    "draggable",
+    "contenteditable",
+    "hidden",
+    "spellcheck",
+    "translate",
+    "autocapitalize",
+    "autocorrect",
+    "autofocus",
+    "inert",
+    "is",
+    "itemid",
+    "itemprop",
+    "itemref",
+    "itemscope",
+    "itemtype",
+    "slot",
+    "part",
+    "exportparts",
+    "popover",
+    "nonce",
+    "elementtiming",
+]);
+const PRESENTATION_ATTR_PREFIXES = ["data-", "aria-"];
+const LLM_ATTR_ALLOWLIST_BY_TAG = {
+    TD: new Set(["colspan", "rowspan", "headers", "scope"]),
+    TH: new Set(["colspan", "rowspan", "headers", "scope", "abbr"]),
+    OL: new Set(["start", "type", "reversed"]),
+    LI: new Set(["value"]),
+};
+
+function isPresentationAttr(name) {
+    if (PRESENTATION_ATTR_NAMES.has(name)) return true;
+    return PRESENTATION_ATTR_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+function shouldKeepAttrForLlmPayload(element, name) {
+    const lowered = String(name || "").toLowerCase();
+    const allowedForTag = LLM_ATTR_ALLOWLIST_BY_TAG[element?.tagName];
+    if (allowedForTag && allowedForTag.has(lowered)) return true;
+    return false;
+}
+
+/**
+ * Strip restorable attributes from a clone of the element tree so the LLM only
+ * sees structural tags + translatable content. The originals are preserved in
+ * the live DOM and re-applied on the response side.
+ */
+function stripPresentationAttrs(rootElement) {
+    if (!rootElement) return;
+    const queue = [rootElement];
+    while (queue.length) {
+        const node = queue.shift();
+        if (!node || !node.attributes) continue;
+        for (const attr of Array.from(node.attributes)) {
+            if (isPresentationAttr(attr.name) || !shouldKeepAttrForLlmPayload(node, attr.name)) {
+                node.removeAttribute(attr.name);
+            }
+        }
+        for (const child of node.children) queue.push(child);
+    }
+}
+
+function nodeContainsPayloadText(node) {
+    if (!node) return false;
+    if (node.nodeType === Node.TEXT_NODE) return Boolean(normalizeBlockText(node.nodeValue));
+    if (node.nodeType === Node.ELEMENT_NODE) return Boolean(normalizeBlockText(node.textContent));
+    return false;
+}
+
+function hasPayloadTextSibling(node, direction) {
+    if (!node) return false;
+    let sibling = direction === "previous" ? node.previousSibling : node.nextSibling;
+    while (sibling) {
+        if (nodeContainsPayloadText(sibling)) return true;
+        sibling = direction === "previous" ? sibling.previousSibling : sibling.nextSibling;
+    }
+    return false;
+}
+
+function compactPayloadTextNode(node) {
+    const raw = String(node.nodeValue || "");
+    if (!raw) return;
+    const collapsed = raw.replace(/\s+/g, " ");
+    const hasText = Boolean(collapsed.trim());
+    const keepLeadingSpace = /^\s/.test(raw) && hasPayloadTextSibling(node, "previous");
+    const keepTrailingSpace = /\s$/.test(raw) && hasPayloadTextSibling(node, "next");
+
+    if (!hasText) {
+        node.nodeValue = keepLeadingSpace && keepTrailingSpace ? " " : "";
+        return;
     }
 
-    return Array.from(node.childNodes || [])
-        .map((child) => serializeInlineLinkBlock(child, links))
-        .join("");
+    let compacted = collapsed.trim();
+    if (keepLeadingSpace) compacted = ` ${compacted}`;
+    if (keepTrailingSpace) compacted = `${compacted} `;
+    node.nodeValue = compacted;
+}
+
+function compactHtmlForLlmPayload(rootElement) {
+    if (!rootElement) return;
+    const filter =
+        (typeof NodeFilter !== "undefined" ? NodeFilter.SHOW_TEXT : 4) |
+        (typeof NodeFilter !== "undefined" ? NodeFilter.SHOW_COMMENT : 128);
+    const walker = rootElement.ownerDocument.createTreeWalker(rootElement, filter);
+    const remove = [];
+    let node;
+    while ((node = walker.nextNode())) {
+        if (node.nodeType === Node.COMMENT_NODE) {
+            remove.push(node);
+        } else if (node.nodeType === Node.TEXT_NODE) {
+            compactPayloadTextNode(node);
+            if (!node.nodeValue) remove.push(node);
+        }
+    }
+    remove.forEach((n) => n.parentNode && n.parentNode.removeChild(n));
+}
+
+/**
+ * Build the outgoing HTML payload for a section: clone children, strip
+ * presentation attrs, concatenate. The model gets a clean, low-token view of
+ * the page while every styling attribute survives on the live DOM.
+ */
+function buildStrippedSectionHtml(children) {
+    if (!children || !children.length) return "";
+    const ownerDocument = children[0].ownerDocument || document;
+    const wrapper = ownerDocument.createElement("div");
+    for (const child of children) wrapper.appendChild(child.cloneNode(true));
+    stripPresentationAttrs(wrapper);
+    compactHtmlForLlmPayload(wrapper);
+    return Array.from(wrapper.children)
+        .map((c) => c.outerHTML)
+        .join("\n");
+}
+
+function topLevelChildrenMatch(originalChildren, translatedChildren) {
+    if (!originalChildren || !translatedChildren) return false;
+    if (originalChildren.length !== translatedChildren.length) return false;
+    for (let i = 0; i < originalChildren.length; i += 1) {
+        const original = originalChildren[i];
+        const translated = translatedChildren[i];
+        if (!original || !translated || original.tagName !== translated.tagName) return false;
+    }
+    return true;
+}
+
+/**
+ * Streaming partial-section apply. Each time the SSE buffer grows, scan for the
+ * latest closing tag matching one of the section's expected top-level child tags
+ * and treat everything up to that point as "completed children". Apply newly
+ * completed children one-by-one with full attribute restoration so the reader
+ * sees translations popcorn into place as the model generates them.
+ *
+ * Returns the new applied-count so the caller can persist it across stream
+ * chunks. The function never re-applies an index it has already touched.
+ */
+function applyStreamedSectionChildren(entry, accumulatedHtml, alreadyAppliedCount = 0) {
+    if (!entry || !entry.section || !accumulatedHtml) return alreadyAppliedCount;
+    const { parent, children } = entry.section;
+    if (!parent || !parent.isConnected) return alreadyAppliedCount;
+    if (alreadyAppliedCount >= children.length) return alreadyAppliedCount;
+
+    const expectedTags = Array.from(new Set(children.map((c) => c && c.tagName).filter(Boolean)));
+    if (!expectedTags.length) return alreadyAppliedCount;
+
+    // Find the furthest closing tag that matches a known top-level child tag —
+    // everything up to that point is structurally safe to parse.
+    let lastSafeEnd = -1;
+    for (const tag of expectedTags) {
+        const re = new RegExp(`</${tag}\\s*>`, "gi");
+        let match;
+        while ((match = re.exec(accumulatedHtml)) !== null) {
+            const end = match.index + match[0].length;
+            if (end > lastSafeEnd) lastSafeEnd = end;
+        }
+    }
+    if (lastSafeEnd <= 0) return alreadyAppliedCount;
+
+    const safeSlice = accumulatedHtml.slice(0, lastSafeEnd);
+    const ownerDocument = parent.ownerDocument;
+    const tempContainer = ownerDocument.createElement(parent.tagName);
+    try {
+        tempContainer.innerHTML = safeSlice;
+    } catch {
+        return alreadyAppliedCount;
+    }
+
+    const translatedChildren = Array.from(tempContainer.children);
+    if (translatedChildren.length <= alreadyAppliedCount) return alreadyAppliedCount;
+
+    if (!sanitizeTranslatedHtmlContainer(tempContainer)) return alreadyAppliedCount;
+
+    const refreshedChildren = Array.from(tempContainer.children);
+    const targetCount = Math.min(refreshedChildren.length, children.length);
+
+    let applied = alreadyAppliedCount;
+    for (let i = alreadyAppliedCount; i < targetCount; i += 1) {
+        const original = children[i];
+        if (!original || !original.parentElement) continue;
+        const translated = refreshedChildren[i];
+        if (!translated) continue;
+        if (original.tagName !== translated.tagName) return applied;
+
+        // Restore critical attrs onto the translated child by mirroring the
+        // original child's subtree. We wrap both in matching mini-containers so
+        // restoreHtmlCriticalAttributes can walk them uniformly.
+        const sourceMirror = ownerDocument.createElement(parent.tagName);
+        sourceMirror.appendChild(original.cloneNode(true));
+        const translatedMirror = ownerDocument.createElement(parent.tagName);
+        translatedMirror.appendChild(translated);
+        copyPreservedAttributes(original, translated);
+        restoreHtmlCriticalAttributes(sourceMirror, translatedMirror);
+
+        // Swap into the live DOM.
+        original.parentElement.replaceChild(translated, original);
+        children[i] = translated;
+        applied = i + 1;
+    }
+    return applied;
+}
+
+/**
+ * Apply a translated HTML payload to an existing section (a contiguous run of
+ * children under one parent). Parses + sanitizes the payload, restores critical
+ * structural attributes from the original children, then atomically replaces
+ * the children with the translated nodes. Returns false (without mutating the
+ * DOM) on any structural violation so the original section stays intact.
+ *
+ * If `skipCount` is set, the first N children of the section are assumed to be
+ * already stream-applied; this function only swaps the remaining tail children.
+ */
+function applyHtmlPageSection(entry, translatedHtml, skipCount = 0) {
+    if (!entry || !translatedHtml) return false;
+    const trimmed = stripLeadingNonHtmlEcho(String(translatedHtml).trim());
+    if (!trimmed) return false;
+
+    const parent = entry.parent;
+    if (!parent || !parent.isConnected) return false;
+    const childrenStillInDom = entry.children.every(
+        (c) => c && c.parentElement === parent && c.isConnected
+    );
+    if (!childrenStillInDom) return false;
+
+    const tempContainer = parent.ownerDocument.createElement(parent.tagName);
+    try {
+        tempContainer.innerHTML = trimmed;
+    } catch {
+        return false;
+    }
+    if (!sanitizeTranslatedHtmlContainer(tempContainer)) return false;
+    const translatedElementChildren = Array.from(tempContainer.children);
+    if (!topLevelChildrenMatch(entry.children, translatedElementChildren)) return false;
+
+    // Restore attributes from the source SECTION (a virtual container holding
+    // the original children) onto the translated container. We wrap the original
+    // children in a detached clone so the restorer can walk both trees uniformly.
+    const sourceMirror = parent.ownerDocument.createElement(parent.tagName);
+    for (const child of entry.children) sourceMirror.appendChild(child.cloneNode(true));
+    restoreHtmlCriticalAttributes(sourceMirror, tempContainer);
+
+    // Stream path already swapped children[0..skipCount-1] into place. Apply only the
+    // remaining tail so we don't double-swap and lose what's been rendered.
+    if (skipCount > 0) {
+        const allTranslated = translatedElementChildren;
+        if (allTranslated.length < skipCount) return false;
+        const tailTranslated = allTranslated.slice(skipCount);
+        const remainingOriginals = entry.children.slice(skipCount);
+        if (!remainingOriginals.length) return true;
+        if (!tailTranslated.length) return false;
+        const lastOriginal = remainingOriginals[remainingOriginals.length - 1];
+        const insertAfter = lastOriginal ? lastOriginal.nextSibling : null;
+        for (const child of remainingOriginals) {
+            if (child.parentElement === parent) parent.removeChild(child);
+        }
+        for (const node of tailTranslated) parent.insertBefore(node, insertAfter);
+        // CRITICAL: update entry.children to point at the NEW translated nodes for the
+        // tail too. Without this, future re-scan filters (keyed on element identity in
+        // a WeakSet) won't recognize the swapped DOM as already translated, and the
+        // MutationObserver-driven rescan loop will retranslate the same section over
+        // and over, burning tokens.
+        for (let i = skipCount; i < entry.children.length && i < allTranslated.length; i += 1) {
+            entry.children[i] = allTranslated[i];
+        }
+        return true;
+    }
+
+    // Replace the children atomically: insertAfter the last original child's
+    // next sibling, then remove the originals. Snapshot the translated nodes
+    // BEFORE moving them out of the temp container so we can update entry.children
+    // to point at the live DOM nodes after the swap.
+    const lastChild = entry.children[entry.children.length - 1];
+    const insertAfter = lastChild ? lastChild.nextSibling : null;
+    const newElementChildren = translatedElementChildren;
+    const newNodes = Array.from(tempContainer.childNodes);
+    for (const child of entry.children) parent.removeChild(child);
+    for (const node of newNodes) parent.insertBefore(node, insertAfter);
+    // Replace entry.children references with the new translated elements. Same
+    // rationale as the skipCount > 0 branch above — see comment there.
+    entry.children.length = 0;
+    for (const el of newElementChildren) entry.children.push(el);
+    return true;
+}
+
+function sanitizeHtmlElementAttributes(element) {
+    if (!element || !element.attributes) return;
+    const toRemove = [];
+    for (const attr of Array.from(element.attributes)) {
+        if (HTML_DANGEROUS_ATTR_PREFIX.test(attr.name)) {
+            toRemove.push(attr.name);
+            continue;
+        }
+        const lowered = String(attr.value || "")
+            .trim()
+            .toLowerCase();
+        if (
+            (attr.name === "href" || attr.name === "src" || attr.name === "xlink:href") &&
+            (lowered.startsWith("javascript:") || lowered.startsWith("data:text/html"))
+        ) {
+            toRemove.push(attr.name);
+        }
+    }
+    toRemove.forEach((name) => element.removeAttribute(name));
+}
+
+/**
+ * For each element in the translated subtree, copy critical attributes (href,
+ * src, alt, srcset, id, class, style, data-*) from the corresponding original
+ * element. Matching is done by tag-position-among-siblings, which is robust to
+ * the model adding wrapper tags or reordering inline elements within a single
+ * sentence (a common case for natural-sounding translations).
+ */
+function restoreHtmlCriticalAttributes(originalElement, translatedElement) {
+    if (!originalElement || !translatedElement) return;
+    const originalByTag = new Map();
+    for (const el of originalElement.querySelectorAll("*")) {
+        const tag = el.tagName;
+        if (!originalByTag.has(tag)) originalByTag.set(tag, []);
+        originalByTag.get(tag).push(el);
+    }
+
+    const usedIndices = new Map();
+    for (const el of translatedElement.querySelectorAll("*")) {
+        const tag = el.tagName;
+        const candidates = originalByTag.get(tag);
+        if (!candidates || !candidates.length) continue;
+        const used = usedIndices.get(tag) || 0;
+        const source = candidates[Math.min(used, candidates.length - 1)];
+        usedIndices.set(tag, used + 1);
+        if (!source) continue;
+        copyPreservedAttributes(source, el);
+    }
+}
+
+function copyPreservedAttributes(source, target) {
+    if (!source || !target) return;
+    const universal = ["id", "class", "style", "dir", "lang", "role", "tabindex"];
+    universal.forEach((name) => {
+        if (source.hasAttribute(name)) target.setAttribute(name, source.getAttribute(name));
+    });
+    for (const attr of Array.from(source.attributes)) {
+        if (/^data-/i.test(attr.name) || /^aria-/i.test(attr.name)) {
+            target.setAttribute(attr.name, attr.value);
+        }
+    }
+    const tagSpecific = HTML_PRESERVED_ATTRS_BY_TAG[source.tagName];
+    if (tagSpecific) {
+        tagSpecific.forEach((name) => {
+            if (source.hasAttribute(name)) {
+                target.setAttribute(name, source.getAttribute(name));
+            }
+        });
+    }
 }
 
 function splitTranslatedContext(translatedText, expectedCount) {
@@ -338,13 +1239,14 @@ const SEGMENT_ROLE_CODES = {
     title: "t",
 };
 
-function getSegmentMarker(index, role) {
+function getSegmentMarker(index, role, options = {}) {
+    if (options.compactMarkers) return `[[${index + 1}]]`;
     const normalizedRole = sanitizeSegmentRole(role);
     const roleCode = SEGMENT_ROLE_CODES[normalizedRole] || normalizedRole.slice(0, 3) || "x";
     return `[[${index + 1}:${roleCode}]]`;
 }
 
-function buildSegmentedTranslationText(items) {
+function buildSegmentedTranslationText(items, options = {}) {
     return (items || [])
         .map((item, index) => {
             const text =
@@ -352,7 +1254,7 @@ function buildSegmentedTranslationText(items) {
                     ? item.text || item.sourceText || ""
                     : String(item || "");
             const role = item && typeof item === "object" ? item.role : "text";
-            return [getSegmentMarker(index, role), String(text || "").trim()].join("\n");
+            return [getSegmentMarker(index, role, options), String(text || "").trim()].join("\n");
         })
         .join("\n");
 }
@@ -362,7 +1264,7 @@ function splitSegmentedTranslationText(translatedText, expectedCount) {
     if (!translated || expectedCount <= 0) return null;
 
     const markerPattern =
-        /\[\[(\d+):[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
+        /\[\[(\d+)(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
     const matches = Array.from(translated.matchAll(markerPattern));
     if (matches.length !== expectedCount) return null;
 
@@ -384,10 +1286,23 @@ function splitSegmentedTranslationText(translatedText, expectedCount) {
 }
 
 export {
+    applyHtmlPageSection,
+    applyStreamedSectionChildren,
     buildContextTranslationGroups,
+    buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
-    createReadableBlockReplacement,
+    buildStrippedSectionHtml,
+    captureLeafSegmentTexts,
+    captureLeafTextsFromElement,
+    coalesceTinySections,
+    collectHtmlPageBlocks,
+    collectHtmlPageSections,
+    findLeafBlocksInElement,
     inferDomPageTextRole,
+    isAlreadyInTargetLanguage,
+    splitLeafByLineBreaks,
     splitSegmentedTranslationText,
     splitTranslatedContext,
+    stripPresentationAttrs,
+    wrapLeafLineSegmentsInSpans,
 };

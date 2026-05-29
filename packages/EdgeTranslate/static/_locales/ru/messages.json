@@ -1342,17 +1342,9 @@
         "message": "AI-модель",
         "description": "Название модели Google AI Studio."
     },
-    "LocalTranslatorReasoningLevel": {
-        "message": "Уровень рассуждений",
-        "description": "Настройка thinking level для Google AI Studio."
-    },
     "LocalTranslatorOpenAIModel": {
         "message": "Модель OpenAI",
         "description": "Название модели OpenAI."
-    },
-    "LocalTranslatorOpenAIReasoningEffort": {
-        "message": "Уровень рассуждений",
-        "description": "Настройка OpenAI reasoning_effort."
     },
     "TranslateNormal": {
         "message": "Normal translation",
@@ -1405,6 +1397,10 @@
     "PreciseTranslatorConfig": {
         "message": "Precise translation model",
         "description": "Settings for the precise translation profile."
+    },
+    "PreciseTranslatorEnabled": {
+        "message": "Использовать точный перевод",
+        "description": "Toggle to enable precise translation."
     },
     "PreciseTranslatorMode": {
         "message": "Precise mode",

@@ -17,24 +17,17 @@ export default function Loading() {
 
     return (
         <LoadingEffect ref={loadingElRef} role="status" aria-live="polite" aria-label="Loading">
-            <div class="expressive-loader" aria-hidden="true">
-                <span class="expressive-loader__bead expressive-loader__bead--one" />
-                <span class="expressive-loader__bead expressive-loader__bead--two" />
-                <span class="expressive-loader__bead expressive-loader__bead--three" />
-                <span class="expressive-loader__bead expressive-loader__bead--four" />
-                <span class="expressive-loader__glide" />
+            <div class="glass-loader" aria-hidden="true">
+                <span class="glass-loader__bead glass-loader__bead--one" />
+                <span class="glass-loader__bead glass-loader__bead--two" />
+                <span class="glass-loader__bead glass-loader__bead--three" />
+                <div class="glass-loader__ambient" />
             </div>
         </LoadingEffect>
     );
 }
 
 const LoadingEffect = styled.div`
-    --et-loader-primary: #0b57d0;
-    --et-loader-secondary: #146c43;
-    --et-loader-tertiary: #7a4d00;
-    --et-loader-surface: rgba(255, 255, 255, 0.72);
-    --et-loader-track: rgba(211, 227, 253, 0.58);
-
     width: 100%;
     min-height: 152px;
     display: flex;
@@ -42,79 +35,71 @@ const LoadingEffect = styled.div`
     justify-content: center;
     padding: 28px 0;
 
-    .expressive-loader {
-        width: 92px;
-        height: 46px;
+    .glass-loader {
         position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 7px;
-        border-radius: 999px;
-        background: radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.94), transparent 38%),
-            linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 253, 0.42));
-        box-shadow: 0 16px 38px rgba(30, 47, 72, 0.13), 0 4px 12px rgba(30, 47, 72, 0.07),
-            inset 0 1px 0 rgba(255, 255, 255, 0.8);
-        backdrop-filter: blur(18px) saturate(155%);
-        -webkit-backdrop-filter: blur(18px) saturate(155%);
-        animation: et-loader-arrive 180ms cubic-bezier(0.2, 0, 0, 1) both;
+        gap: 12px;
+        width: 120px;
+        height: 60px;
+        border-radius: 20px;
+        background: transparent;
+        animation: et-loader-arrive 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
     }
 
-    .expressive-loader:before {
-        content: "";
-        position: absolute;
-        inset: 7px 10px;
-        border-radius: 999px;
-        background: var(--et-loader-track);
-        opacity: 0.7;
-    }
-
-    .expressive-loader__bead {
+    .glass-loader__bead {
         position: relative;
-        z-index: 1;
-        width: 10px;
-        height: 10px;
-        border-radius: 999px;
-        background: var(--et-loader-primary);
-        opacity: 0.46;
-        transform: scale(0.78);
-        animation: et-loader-bead 1080ms cubic-bezier(0.2, 0, 0, 1) infinite;
-    }
-
-    .expressive-loader__bead--two {
-        background: var(--et-loader-secondary);
-        animation-delay: 120ms;
-    }
-
-    .expressive-loader__bead--three {
-        background: var(--et-loader-tertiary);
-        animation-delay: 240ms;
-    }
-
-    .expressive-loader__bead--four {
-        background: var(--et-loader-primary);
-        animation-delay: 360ms;
-    }
-
-    .expressive-loader__glide {
-        position: absolute;
         z-index: 2;
-        left: 18px;
-        top: 15px;
-        width: 24px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, rgba(11, 87, 208, 0.86), rgba(15, 109, 88, 0.82));
+        box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.45),
+            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(11, 87, 208, 0.16);
+        transform: translateY(0) scale(0.88);
+        opacity: 0.78;
+        animation: et-loader-bead 1.4s infinite ease-in-out;
+    }
+
+    .glass-loader__bead--one {
+        animation-delay: 0s;
+    }
+
+    .glass-loader__bead--two {
+        animation-delay: 0.16s;
+        background: linear-gradient(135deg, rgba(15, 109, 88, 0.86), rgba(11, 87, 208, 0.82));
+        box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.45),
+            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(15, 109, 88, 0.16);
+    }
+
+    .glass-loader__bead--three {
+        animation-delay: 0.32s;
+        background: linear-gradient(135deg, rgba(11, 87, 208, 0.86), rgba(15, 109, 88, 0.82));
+        box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.45),
+            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(11, 87, 208, 0.16);
+    }
+
+    .glass-loader__ambient {
+        position: absolute;
+        z-index: 1;
+        inset: 4px 12px;
         border-radius: 999px;
-        background: linear-gradient(135deg, var(--et-loader-primary), #4c8df6);
-        box-shadow: 0 4px 12px rgba(11, 87, 208, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.34);
-        animation: et-loader-glide 1080ms cubic-bezier(0.2, 0, 0, 1) infinite;
+        background: radial-gradient(
+            circle,
+            rgba(11, 87, 208, 0.12) 0%,
+            rgba(15, 109, 88, 0.05) 50%,
+            transparent 80%
+        );
+        filter: blur(12px);
+        animation: et-loader-ambient 1.4s ease-in-out infinite alternate;
     }
 
     @keyframes et-loader-arrive {
         from {
             opacity: 0;
-            transform: translateY(3px) scale(0.97);
+            transform: translateY(6px) scale(0.96);
         }
-
         to {
             opacity: 1;
             transform: translateY(0) scale(1);
@@ -124,60 +109,76 @@ const LoadingEffect = styled.div`
     @keyframes et-loader-bead {
         0%,
         100% {
-            opacity: 0.38;
-            transform: scale(0.72);
+            transform: translateY(0) scale(0.88);
+            opacity: 0.7;
         }
-
-        50% {
-            opacity: 0.82;
-            transform: scale(1);
+        40% {
+            transform: translateY(-8px) scale(1.12);
+            opacity: 1;
+            filter: brightness(1.08);
+        }
+        70% {
+            transform: translateY(2px) scale(0.92);
+            opacity: 0.8;
         }
     }
 
-    @keyframes et-loader-glide {
-        0%,
+    @keyframes et-loader-ambient {
+        0% {
+            transform: scale(0.9);
+            opacity: 0.5;
+        }
         100% {
-            transform: translateX(0) scaleX(0.9);
-        }
-
-        45% {
-            transform: translateX(32px) scaleX(1.16);
-        }
-
-        56% {
-            transform: translateX(32px) scaleX(0.94);
+            transform: scale(1.15);
+            opacity: 0.92;
         }
     }
 
     @media (prefers-color-scheme: dark) {
-        --et-loader-primary: #a8c7fa;
-        --et-loader-secondary: #81c995;
-        --et-loader-tertiary: #fdd663;
-        --et-loader-surface: rgba(32, 38, 45, 0.66);
-        --et-loader-track: rgba(31, 59, 104, 0.56);
-
-        .expressive-loader {
-            background: radial-gradient(
-                    circle at 30% 22%,
-                    rgba(255, 255, 255, 0.14),
-                    transparent 38%
-                ),
-                linear-gradient(145deg, rgba(35, 42, 50, 0.68), rgba(22, 27, 32, 0.34));
-            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42), 0 5px 14px rgba(0, 0, 0, 0.28),
-                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        .glass-loader__bead {
+            background: linear-gradient(
+                135deg,
+                rgba(168, 199, 250, 0.86),
+                rgba(147, 216, 193, 0.82)
+            );
+            box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.25),
+                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(168, 199, 250, 0.18);
         }
 
-        .expressive-loader__glide {
-            background: linear-gradient(135deg, var(--et-loader-primary), #669df6);
-            box-shadow: 0 4px 12px rgba(168, 199, 250, 0.22),
-                inset 0 1px 0 rgba(255, 255, 255, 0.16);
+        .glass-loader__bead--two {
+            background: linear-gradient(
+                135deg,
+                rgba(147, 216, 193, 0.86),
+                rgba(168, 199, 250, 0.82)
+            );
+            box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.25),
+                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(147, 216, 193, 0.18);
+        }
+
+        .glass-loader__bead--three {
+            background: linear-gradient(
+                135deg,
+                rgba(168, 199, 250, 0.86),
+                rgba(147, 216, 193, 0.82)
+            );
+            box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.25),
+                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(168, 199, 250, 0.18);
+        }
+
+        .glass-loader__ambient {
+            background: radial-gradient(
+                circle,
+                rgba(168, 199, 250, 0.16) 0%,
+                rgba(147, 216, 193, 0.06) 50%,
+                transparent 80%
+            );
         }
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .expressive-loader,
-        .expressive-loader__bead,
-        .expressive-loader__glide {
+        .glass-loader,
+        .glass-loader__bead,
+        .glass-loader__ambient {
             animation-duration: 1ms !important;
             animation-iteration-count: 1 !important;
         }

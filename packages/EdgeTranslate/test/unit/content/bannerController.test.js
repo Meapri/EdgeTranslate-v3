@@ -163,6 +163,311 @@ describe("DOM page translation banner", () => {
         });
     });
 
+    it("starts AI page translation through the section dispatcher without a pre-scan", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+        controller.dispatchAiPageSections = jest.fn();
+        controller.collectDomPageTextNodes = jest.fn();
+
+        controller.startFullPageBatchTranslation();
+
+        expect(controller.dispatchAiPageSections).toHaveBeenCalledTimes(1);
+        expect(controller.collectDomPageTextNodes).not.toHaveBeenCalled();
+    });
+
+    it("keeps visible AI sections streaming and batches offscreen sections", () => {
+        document.body.innerHTML = `
+            <article>
+                <p id="visible">Visible source paragraph long enough.</p>
+                <h2 id="offHead">Offscreen heading</h2>
+                <p id="offBody">Offscreen source paragraph long enough.</p>
+            </article>
+        `;
+        document.getElementById("visible").getBoundingClientRect = () => ({
+            top: 10,
+            bottom: 40,
+            width: 200,
+            height: 30,
+        });
+        document.getElementById("offHead").getBoundingClientRect = () => ({
+            top: 5000,
+            bottom: 5030,
+            width: 200,
+            height: 30,
+        });
+
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openai", model: "gpt-5.4-mini", sl: "en", tl: "ko" };
+        controller._domResolvedSourceLanguage = "en";
+        controller._domPageRootElements = [document.body];
+        controller.getAiPageSectionMinChars = () => 10;
+        controller.enqueueAiPageSectionTranslation = jest.fn();
+        controller.enqueueAiPageSectionBatchTranslation = jest.fn();
+
+        controller.dispatchAiPageSections();
+
+        expect(controller.enqueueAiPageSectionTranslation).toHaveBeenCalledTimes(1);
+        expect(controller.enqueueAiPageSectionBatchTranslation).toHaveBeenCalledTimes(1);
+        expect(controller.enqueueAiPageSectionTranslation.mock.calls[0][0].plainText).toContain(
+            "Visible source"
+        );
+        expect(controller.enqueueAiPageSectionBatchTranslation.mock.calls[0][0]).toHaveLength(1);
+        expect(controller.enqueueAiPageSectionBatchTranslation.mock.calls[0][0][0].plainText).toContain(
+            "Offscreen heading"
+        );
+    });
+
+    it("streams only the leading visible AI section and batches the rest", () => {
+        document.body.innerHTML = `
+            <article>
+                <p id="one">${"First visible source paragraph. ".repeat(3)}</p>
+                <p id="two">${"Second visible source paragraph. ".repeat(3)}</p>
+                <p id="three">${"Third visible source paragraph. ".repeat(3)}</p>
+            </article>
+        `;
+        document.querySelectorAll("p").forEach((element) => {
+            element.getBoundingClientRect = () => ({
+                top: 10,
+                bottom: 40,
+                width: 200,
+                height: 30,
+            });
+        });
+
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", model: "local", sl: "en", tl: "ko" };
+        controller._domResolvedSourceLanguage = "en";
+        controller._domPageRootElements = [document.body];
+        controller.getAiPageSectionMinChars = () => 10;
+        controller.getAiPageSectionMaxChars = () => 120;
+        controller.enqueueAiPageSectionTranslation = jest.fn();
+        controller.enqueueAiPageSectionBatchTranslation = jest.fn();
+
+        controller.dispatchAiPageSections();
+
+        expect(controller.enqueueAiPageSectionTranslation).toHaveBeenCalledTimes(1);
+        expect(controller.enqueueAiPageSectionBatchTranslation).toHaveBeenCalledTimes(1);
+        expect(controller.enqueueAiPageSectionBatchTranslation.mock.calls[0][0]).toHaveLength(2);
+    });
+
+    it("splits AI page batches by estimated token budget, not just characters", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+        const batches = controller.buildAiPageSectionBatches([
+            { sourceHtml: "가".repeat(900), inputTokens: 720 },
+            { sourceHtml: "나".repeat(900), inputTokens: 720 },
+        ]);
+
+        expect(batches.map((batch) => batch.length)).toEqual([1, 1]);
+    });
+
+    it("splits AI page batches by estimated output budget for long visible text", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+        const batches = controller.buildAiPageSectionBatches([
+            {
+                sourceHtml: "<p>Short markup.</p>",
+                plainText: "Short source text.",
+                inputTokens: 80,
+                outputTokens: 900,
+            },
+            {
+                sourceHtml: "<p>Another short markup.</p>",
+                plainText: "Another short source text.",
+                inputTokens: 80,
+                outputTokens: 900,
+            },
+        ]);
+
+        expect(batches.map((batch) => batch.length)).toEqual([1, 1]);
+    });
+
+    it("adapts AI page batch size from response telemetry", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+        const baseOptions = controller.getAiPageSectionBatchOptions();
+
+        controller.recordAiPageSectionBatchTelemetry({
+            durationMs: 900,
+            inputTokens: 600,
+            entries: 2,
+        });
+        expect(controller.getAiPageSectionBatchOptions()).toEqual(baseOptions);
+
+        controller.recordAiPageSectionBatchTelemetry({
+            durationMs: 850,
+            inputTokens: 620,
+            entries: 2,
+        });
+        const grownOptions = controller.getAiPageSectionBatchOptions();
+        expect(grownOptions.maxInputTokens).toBeGreaterThan(baseOptions.maxInputTokens);
+        expect(grownOptions.maxChars).toBeGreaterThan(baseOptions.maxChars);
+        expect(grownOptions.maxItems).toBeGreaterThan(baseOptions.maxItems);
+
+        controller.recordAiPageSectionBatchTelemetry({ failed: true, entries: 2 });
+        const backedOffOptions = controller.getAiPageSectionBatchOptions();
+        expect(backedOffOptions.maxInputTokens).toBeLessThan(grownOptions.maxInputTokens);
+        expect(backedOffOptions.maxChars).toBeLessThan(grownOptions.maxChars);
+        expect(backedOffOptions.maxItems).toBeLessThanOrEqual(grownOptions.maxItems);
+    });
+
+    it("adapts AI page concurrency from measured latency", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        controller.resetAiPageSectionBatchTuning();
+
+        expect(controller.getDomPageMaxConcurrentTranslations()).toBe(32);
+
+        controller.recordAiPageConcurrencyTelemetry({
+            durationMs: 12000,
+            queueWaitMs: 2000,
+            entries: 4,
+        });
+        const reduced = controller.getDomPageMaxConcurrentTranslations();
+        expect(reduced).toBeLessThan(32);
+
+        controller.recordAiPageConcurrencyTelemetry({ durationMs: 900, entries: 4 });
+        controller.recordAiPageConcurrencyTelemetry({ durationMs: 850, entries: 4 });
+
+        expect(controller.getDomPageMaxConcurrentTranslations()).toBeGreaterThan(reduced);
+    });
+
+    it("adjusts visible streaming slots from recent page latency", () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        controller.resetAiPageSectionBatchTuning();
+
+        expect(controller.getAiPageVisibleStreamingLimit(5)).toBe(3);
+
+        controller.recordAiPageConcurrencyTelemetry({ durationMs: 900, entries: 4 });
+        controller.recordAiPageConcurrencyTelemetry({ durationMs: 850, entries: 4 });
+        expect(controller.getAiPageVisibleStreamingLimit(5)).toBe(4);
+
+        controller.recordAiPageConcurrencyTelemetry({
+            durationMs: 12000,
+            queueWaitMs: 2200,
+            entries: 4,
+        });
+        expect(controller.getAiPageVisibleStreamingLimit(5)).toBe(1);
+
+        controller.recordAiPageConcurrencyTelemetry({
+            durationMs: 850,
+            queueWaitMs: 0,
+            entries: 4,
+        });
+        controller.recordAiPageConcurrencyTelemetry({
+            durationMs: 850,
+            queueWaitMs: 0,
+            entries: 4,
+        });
+        expect(controller.getAiPageVisibleStreamingLimit(5)).toBeGreaterThan(1);
+    });
+
+    it("applies batched offscreen AI section translations from marker-preserving output", async () => {
+        document.body.innerHTML = `
+            <article id="article">
+                <p id="first">First source paragraph.</p>
+                <p id="second">Second source paragraph.</p>
+            </article>
+        `;
+        const article = document.getElementById("article");
+        const first = document.getElementById("first");
+        const second = document.getElementById("second");
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+        controller._domResolvedSourceLanguage = "en";
+        controller._domMaxConcurrentTranslations = 1;
+        controller._aiSectionTranslatedChildren = new WeakSet([first, second]);
+        controller.channel.request = jest.fn().mockResolvedValue({
+            mainMeaning: ["[[1]]", "<p>첫 번째 문단입니다.</p>", "[[2]]", "<p>두 번째 문단입니다.</p>"].join(
+                "\n"
+            ),
+        });
+
+        controller.enqueueAiPageSectionBatchTranslation([
+            {
+                section: { parent: article, children: [first], role: "paragraph" },
+                sourceHtml: "<p>First source paragraph.</p>",
+                cacheKey: "first",
+            },
+            {
+                section: { parent: article, children: [second], role: "paragraph" },
+                sourceHtml: "<p>Second source paragraph.</p>",
+                cacheKey: "second",
+            },
+        ]);
+        await Promise.resolve();
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(article.textContent).toContain("첫 번째 문단입니다.");
+        expect(article.textContent).toContain("두 번째 문단입니다.");
+        expect(controller.channel.request.mock.calls[0][1].text).toContain("[[1]]");
+        expect(controller.channel.request.mock.calls[0][1].text).toContain("[[2]]");
+        expect(controller.channel.request.mock.calls[0][1].text).not.toContain("[[1:p]]");
+    });
+
+    it("streams completed AI section batch segments before the final response", async () => {
+        document.body.innerHTML = `
+            <article id="article">
+                <p id="first">First source paragraph.</p>
+                <p id="second">Second source paragraph.</p>
+            </article>
+        `;
+        const article = document.getElementById("article");
+        const first = document.getElementById("first");
+        const second = document.getElementById("second");
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+        controller._domResolvedSourceLanguage = "en";
+        controller._domMaxConcurrentTranslations = 1;
+        controller._aiSectionTranslatedChildren = new WeakSet([first, second]);
+        let resolveRequest;
+        controller.channel.request = jest.fn(
+            () =>
+                new Promise((resolve) => {
+                    resolveRequest = resolve;
+                })
+        );
+
+        controller.enqueueAiPageSectionBatchTranslation([
+            {
+                section: { parent: article, children: [first], role: "paragraph" },
+                sourceHtml: "<p>First source paragraph.</p>",
+                cacheKey: "first",
+            },
+            {
+                section: { parent: article, children: [second], role: "paragraph" },
+                sourceHtml: "<p>Second source paragraph.</p>",
+                cacheKey: "second",
+            },
+        ]);
+        await Promise.resolve();
+
+        const streamHandler = controller.channel.on.mock.calls.find(
+            ([eventName]) => eventName === "translation_stream_progress"
+        )[1];
+        const streamId = controller.channel.request.mock.calls[0][1].streamId;
+        streamHandler({
+            streamId,
+            text: "[[1]]\n<p>첫 번째 문단입니다.</p>\n[[2]]\n<p>두 번째",
+        });
+
+        expect(article.textContent).toContain("첫 번째 문단입니다.");
+        expect(article.textContent).toContain("Second source paragraph.");
+
+        resolveRequest({
+            mainMeaning: ["[[1]]", "<p>첫 번째 문단입니다.</p>", "[[2]]", "<p>두 번째 문단입니다.</p>"].join(
+                "\n"
+            ),
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(article.textContent).toContain("첫 번째 문단입니다.");
+        expect(article.textContent).toContain("두 번째 문단입니다.");
+    });
+
     it("uses smaller DOM-ordered page batches for OpenAI models", () => {
         const controller = new BannerController();
         controller._domPageTranslateOptions = {
@@ -177,7 +482,6 @@ describe("DOM page translation banner", () => {
 
         expect(controller.getDomPageMaxConcurrentTranslations()).toBe(16);
         expect(controller.getDomPageTranslationGroupOptions()).toEqual({ maxChars: 12000 });
-        expect(controller.getReadableBlockReplacementOptions()).toEqual({ maxChars: 12000 });
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 12000, maxItems: 64 });
         expect(
             controller.buildDomPageTranslationBatches(entries).map((batch) => batch.length)
@@ -209,6 +513,7 @@ describe("DOM page translation banner", () => {
                 tl: "ko",
             };
             controller.translateBatchNodes = jest.fn();
+            controller.dispatchAiPageSections = jest.fn();
             controller.startDomFallback();
 
             const paragraph = document.createElement("p");
@@ -218,11 +523,83 @@ describe("DOM page translation banner", () => {
             window.dispatchEvent(new Event("scroll"));
             jest.advanceTimersByTime(500);
 
-            const translatedNodes = controller.translateBatchNodes.mock.calls.flatMap(
-                ([nodes]) => nodes || []
-            );
-            expect(translatedNodes).toContain(paragraph.firstChild);
+            expect(controller.dispatchAiPageSections).toHaveBeenCalled();
 
+            controller.cancelDomPageTranslate();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("runs AI coverage scans through the section dispatcher without text-node collection", () => {
+        jest.useFakeTimers();
+        try {
+            const controller = new BannerController();
+            controller.currentTranslator = "dom";
+            controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+            controller._domPageRootElements = [document.body];
+            controller.dispatchAiPageSections = jest.fn();
+            controller.collectDomPageTextNodes = jest.fn(() => []);
+
+            controller.scheduleDomPageCoverageScan();
+            jest.advanceTimersByTime(150);
+
+            expect(controller.dispatchAiPageSections).toHaveBeenCalledTimes(1);
+            expect(controller.collectDomPageTextNodes).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("stops automatic coverage scans after a stable completed pass", () => {
+        jest.useFakeTimers();
+        try {
+            const controller = new BannerController();
+            controller.currentTranslator = "dom";
+            controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "en", tl: "ko" };
+            controller._domPageRootElements = [document.body];
+            controller._domTotalTranslationEntries = 2;
+            controller._domCompletedTranslationEntries = 2;
+            controller.dispatchAiPageSections = jest.fn(() => 0);
+
+            controller.scheduleDomPageCoverageScan();
+            jest.advanceTimersByTime(150);
+            controller.scheduleDomPageCoverageScan();
+            jest.advanceTimersByTime(150);
+
+            expect(controller.dispatchAiPageSections).toHaveBeenCalledTimes(1);
+            expect(controller._domCoverageStableScanCount).toBe(1);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("ignores its own translated DOM mutations after completion", async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = `
+                <article>
+                    <p id="line">Original source paragraph that is long enough.</p>
+                </article>
+            `;
+            const controller = new BannerController();
+            controller.currentTranslator = "dom";
+            controller._domPageTranslateOptions = { engine: "openaiCompatible", sl: "ko", tl: "en" };
+            controller._domPageRootElements = [document.body];
+            controller._domTotalTranslationEntries = 1;
+            controller._domCompletedTranslationEntries = 1;
+            controller._aiSectionTranslatedChildren = new WeakSet([document.getElementById("line")]);
+            controller.dispatchAiPageSections = jest.fn(() => 0);
+            controller.startDomFallback();
+
+            controller.noteDomPageOwnMutation();
+            document.getElementById("line").textContent =
+                "Translated English text that would otherwise look like a fresh Latin target.";
+            await Promise.resolve();
+            jest.advanceTimersByTime(250);
+            await Promise.resolve();
+
+            expect(controller.dispatchAiPageSections).not.toHaveBeenCalled();
             controller.cancelDomPageTranslate();
         } finally {
             jest.useRealTimers();
@@ -2081,7 +2458,6 @@ describe("DOM page translation banner", () => {
             tl: "ko",
         };
         expect(controller.getDomPageTranslationGroupOptions()).toEqual({ maxChars: 12000 });
-        expect(controller.getReadableBlockReplacementOptions()).toEqual({ maxChars: 12000 });
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 12000, maxItems: 64 });
         expect(
             controller.buildDomPageTranslationBatches(entries).map((batch) => batch.length)
@@ -2094,7 +2470,6 @@ describe("DOM page translation banner", () => {
             tl: "ko",
         };
         expect(controller.getDomPageTranslationGroupOptions()).toEqual({ maxChars: 12000 });
-        expect(controller.getReadableBlockReplacementOptions()).toEqual({ maxChars: 12000 });
         expect(controller.getDomPageBatchOptions()).toEqual({ maxChars: 12000, maxItems: 64 });
         expect(
             controller.buildDomPageTranslationBatches(entries).map((batch) => batch.length)
@@ -2243,7 +2618,7 @@ describe("DOM page translation banner", () => {
             </article>
         `;
         const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        controller._domPageTranslateOptions = { engine: "textNodeBatch", sl: "en", tl: "ko" };
         controller._domResolvedSourceLanguage = "en";
         controller._domMaxConcurrentTranslations = 1;
         controller.channel.request
@@ -2365,10 +2740,10 @@ describe("DOM page translation banner", () => {
         expect(controller.isMeaningfulDomPageTextNode(secondNode)).toBe(false);
     });
 
-    it("skips non-article dynamic widget text while keeping article text collectible", () => {
+    it("collects comment-like text instead of treating comments as token-skipped widgets", () => {
         document.body.innerHTML = `
             <section class="article-comments">
-                <p id="comment">This late comment widget should not spend page translation tokens.</p>
+                <p id="comment">This late comment should also be translated.</p>
             </section>
             <article>
                 <p id="body">This article paragraph should remain eligible for translation.</p>
@@ -2378,9 +2753,9 @@ describe("DOM page translation banner", () => {
         const commentNode = document.getElementById("comment").firstChild;
         const bodyNode = document.getElementById("body").firstChild;
 
-        expect(controller.isMeaningfulDomPageTextNode(commentNode)).toBe(false);
+        expect(controller.isMeaningfulDomPageTextNode(commentNode)).toBe(true);
         expect(controller.isMeaningfulDomPageTextNode(bodyNode)).toBe(true);
-        expect(controller.collectDomPageTextNodes([document.body])).toEqual([bodyNode]);
+        expect(controller.collectDomPageTextNodes([document.body])).toEqual([commentNode, bodyNode]);
     });
 
     it("does not collect retry-exhausted nodes during coverage scans", () => {
@@ -2410,7 +2785,7 @@ describe("DOM page translation banner", () => {
             </article>
         `;
         const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        controller._domPageTranslateOptions = { engine: "textNodeBatch", sl: "en", tl: "ko" };
         controller._domResolvedSourceLanguage = "en";
         controller._domMaxConcurrentTranslations = 2;
         const firstNode = document.getElementById("first").firstChild;
@@ -2473,7 +2848,7 @@ describe("DOM page translation banner", () => {
             </article>
         `;
         const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "openai", sl: "en", tl: "ko" };
+        controller._domPageTranslateOptions = { engine: "textNodeBatch", sl: "en", tl: "ko" };
         controller._domResolvedSourceLanguage = "en";
         controller._domMaxConcurrentTranslations = 1;
         const firstNode = document.getElementById("first").firstChild;
@@ -2496,10 +2871,10 @@ describe("DOM page translation banner", () => {
             })
         );
         controller._domTotalTranslationEntries = 2;
+        controller._domCircuitBreakerActive = true;
 
         controller.enqueueDomPageBatchTranslation([firstEntry]);
         controller.enqueueDomPageBatchTranslation([secondEntry]);
-        controller.triggerDomPageCircuitBreaker();
         await Promise.resolve();
         await Promise.resolve();
 
@@ -2513,7 +2888,7 @@ describe("DOM page translation banner", () => {
     it("does not apply stale page translation responses after article text changes", () => {
         document.body.innerHTML = `<article><p id="line">Old article sentence.</p></article>`;
         const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+        controller._domPageTranslateOptions = { engine: "textNodeBatch", sl: "en", tl: "ko" };
         const node = document.getElementById("line").firstChild;
         controller._domPendingTextNodes.add(node);
         const entry = controller.assignDomPageApplySequence(
@@ -2563,12 +2938,13 @@ describe("DOM page translation banner", () => {
             expect(controller.applyDomPageTranslatedEntry(entry, "번역된 문장.")).toBe(true);
             const paragraph = document.getElementById("line");
             const translatedSpan = paragraph.querySelector(".et-dom-translated-text");
+            const tooltipTarget = translatedSpan || paragraph;
             expect(paragraph.textContent).toBe("번역된 문장.");
-            expect(translatedSpan).not.toBeNull();
-            expect(translatedSpan.classList.contains("et-dom-original-source")).toBe(false);
+            expect(tooltipTarget).not.toBeNull();
+            expect(tooltipTarget.classList.contains("et-dom-original-source")).toBe(false);
             expect(document.getElementById("edge-translate-dom-original-tooltip")).toBeNull();
 
-            translatedSpan.dispatchEvent(
+            tooltipTarget.dispatchEvent(
                 new MouseEvent("mouseover", {
                     bubbles: true,
                     clientX: 120,
@@ -2580,7 +2956,7 @@ describe("DOM page translation banner", () => {
             const tooltip = document.getElementById("edge-translate-dom-original-tooltip");
             expect(tooltip).not.toBeNull();
             expect(tooltip.dataset.visible).toBe("true");
-            expect(translatedSpan.classList.contains("et-dom-original-source")).toBe(true);
+            expect(tooltipTarget.classList.contains("et-dom-original-source")).toBe(true);
             expect(tooltip.textContent).toContain("원문 텍스트");
             expect(tooltip.textContent).toContain("Original sentence.");
 
@@ -2610,7 +2986,7 @@ describe("DOM page translation banner", () => {
         expect(paragraph.textContent).toBe("LM Studio는 내 기본 러너입니다.");
     });
 
-    it("translates paragraphs with inline links as one natural sentence", () => {
+    it("translates HTML-native paragraphs with inline links as one natural sentence", () => {
         jest.useFakeTimers();
         let controller;
         try {
@@ -2630,13 +3006,12 @@ describe("DOM page translation banner", () => {
                 sourceText: "LM Studio\nhas been my default runner for local LLMs.",
             });
 
-            expect(entry.readableBlockReplacement.sourceText).toContain(
-                "[[EDGE_TRANSLATE_LINK_1]]"
-            );
+            expect(entry.htmlMode).toBe(true);
+            expect(entry.sourceText).toContain("<a");
             expect(
                 controller.applyDomPageTranslatedEntry(
                     entry,
-                    "나는 [[EDGE_TRANSLATE_LINK_1]]LM Studio[[/EDGE_TRANSLATE_LINK_1]]를 로컬 LLM의 기본 실행기로 사용해 왔다."
+                    "나는 <a>LM Studio</a>를 로컬 LLM의 기본 실행기로 사용해 왔다."
                 )
             ).toBe(true);
 
@@ -2660,7 +3035,6 @@ describe("DOM page translation banner", () => {
             expect(tooltip.textContent).toContain(
                 "LM Studio has been my default runner for local LLMs."
             );
-            expect(tooltip.textContent).not.toContain("EDGE_TRANSLATE_LINK");
         } finally {
             if (controller) controller.cancelDomPageTranslate();
             jest.useRealTimers();
@@ -2674,7 +3048,7 @@ describe("DOM page translation banner", () => {
         controller._domResolvedSourceLanguage = "en";
         controller.channel.request.mockResolvedValue({
             mainMeaning:
-                "자세한 내용은 [[EDGE_TRANSLATE_LINK_1]]계정 공지[[/EDGE_TRANSLATE_LINK_1]]를 확인해 주세요.",
+                "자세한 내용은 <a>계정 공지</a>를 확인해 주세요.",
         });
         const paragraph = document.getElementById("line");
         const group = {
@@ -2696,7 +3070,7 @@ describe("DOM page translation banner", () => {
         expect(controller._domTranslationCache.size).toBe(1);
     });
 
-    it("falls back from linked block replacement to text-node context on retry", () => {
+    it("uses HTML-native payloads for linked blocks instead of link placeholders", () => {
         document.body.innerHTML = `<p id="line"><a href="https://example.com/account">Account notice</a> is available.</p>`;
         const controller = new BannerController();
         controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
@@ -2710,35 +3084,11 @@ describe("DOM page translation banner", () => {
         };
         const entry = controller.createDomPageTranslationEntry(group);
 
-        expect(entry.readableBlockReplacement).not.toBeNull();
-
-        controller.retryDomPageEntryTranslation(entry, 0);
-        const retryEntry = controller.createDomPageTranslationEntry(group);
-
-        expect(group.forceDomPageContext).toBe(true);
-        expect(retryEntry.readableBlockReplacement).toBeNull();
-        expect(retryEntry.sourceText).toBe("Account notice\nis available.");
+        expect(entry.htmlMode).toBe(true);
+        expect(entry.sourceText).toContain("<a");
     });
 
-    it("strips leaked inline link placeholders in fallback text-node translations", () => {
-        document.body.innerHTML = `<p id="line">See the account notice.</p>`;
-        const controller = new BannerController();
-        controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
-        const node = document.getElementById("line").firstChild;
-
-        controller.applyWithFadeIn(
-            node,
-            "자세한 내용은 [[EDGE_TRANSLATE_LINK_1]]회원 계정 공지[[/EDGE_TRANSLATE_LINK_1]]를 확인해 주세요.",
-            "text",
-            "See the account notice."
-        );
-
-        expect(document.getElementById("line").textContent).toBe(
-            "자세한 내용은 회원 계정 공지를 확인해 주세요."
-        );
-    });
-
-    it("shows the original text for the hovered translated fragment only", () => {
+    it("shows original text for the hovered HTML-native translated block", () => {
         jest.useFakeTimers();
         try {
             document.body.innerHTML = `<p id="line">First original sentence.<br>Second original sentence.</p>`;
@@ -2753,13 +3103,11 @@ describe("DOM page translation banner", () => {
                 texts: ["First original sentence.", "Second original sentence."],
             });
 
-            expect(controller.applyDomPageTranslatedEntry(entry, "첫 문장.\n둘째 문장.")).toBe(
+            expect(controller.applyDomPageTranslatedEntry(entry, "첫 문장.<br>둘째 문장.")).toBe(
                 true
             );
-            const spans = paragraph.querySelectorAll(".et-dom-translated-text");
-            expect(spans).toHaveLength(2);
 
-            spans[0].dispatchEvent(
+            paragraph.dispatchEvent(
                 new MouseEvent("mouseover", {
                     bubbles: true,
                     clientX: 120,
@@ -2769,8 +3117,147 @@ describe("DOM page translation banner", () => {
             jest.advanceTimersByTime(260);
             const tooltip = document.getElementById("edge-translate-dom-original-tooltip");
             expect(tooltip.textContent).toContain("First original sentence.");
-            expect(tooltip.textContent).not.toContain("Second original sentence.");
+            expect(tooltip.textContent).toContain("Second original sentence.");
 
+            controller.cancelDomPageTranslate();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("shows original text for hovered AI section translated children", () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = `
+                <article id="article">
+                    <p id="line">Original <strong>section</strong> sentence.</p>
+                </article>
+            `;
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+            const article = document.getElementById("article");
+            const paragraph = document.getElementById("line");
+            const entry = {
+                cacheKey: "section-tooltip",
+                section: {
+                    parent: article,
+                    children: [paragraph],
+                    plainText: "Original section sentence.",
+                    role: "paragraph",
+                },
+            };
+
+            expect(
+                controller.applyAiPageSectionTranslation(
+                    entry,
+                    `<p id="line">번역된 <strong>섹션</strong> 문장.</p>`
+                )
+            ).toBe(true);
+
+            const translatedParagraph = document.getElementById("line");
+            expect(translatedParagraph.textContent).toBe("번역된 섹션 문장.");
+            translatedParagraph.dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 120,
+                    clientY: 160,
+                })
+            );
+            jest.advanceTimersByTime(260);
+
+            const tooltip = document.getElementById("edge-translate-dom-original-tooltip");
+            expect(tooltip).not.toBeNull();
+            expect(tooltip.textContent).toContain("Original section sentence.");
+            controller.cancelDomPageTranslate();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("keeps original text tooltips for streamed AI section children", async () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = `
+                <article id="article">
+                    <p id="first">First original sentence.</p>
+                    <p id="second">Second original sentence.</p>
+                </article>
+            `;
+            const controller = new BannerController();
+            controller._domPageTranslateOptions = { engine: "googleAiStudio", sl: "en", tl: "ko" };
+            controller._domResolvedSourceLanguage = "en";
+            controller._domMaxConcurrentTranslations = 1;
+            let streamHandler = null;
+            controller.channel.on = jest.fn((event, handler) => {
+                if (event === "translation_stream_progress") streamHandler = handler;
+            });
+            controller.channel.off = jest.fn();
+            controller.channel.request.mockImplementation(async (_service, payload) => {
+                streamHandler({
+                    streamId: payload.streamId,
+                    text: `<p id="first">첫 문장.</p>`,
+                });
+                return {
+                    mainMeaning: `<p id="first">첫 문장.</p><p id="second">둘째 문장.</p>`,
+                };
+            });
+            const article = document.getElementById("article");
+            const entry = {
+                cacheKey: "streamed-section-tooltip",
+                sourceHtml:
+                    `<p id="first">First original sentence.</p>` +
+                    `<p id="second">Second original sentence.</p>`,
+                plainText: "First original sentence. Second original sentence.",
+                attempt: 0,
+                sessionId: controller._domTranslationSessionId,
+                section: {
+                    parent: article,
+                    children: [
+                        document.getElementById("first"),
+                        document.getElementById("second"),
+                    ],
+                    plainText: "First original sentence. Second original sentence.",
+                    role: "paragraph",
+                },
+            };
+
+            controller.enqueueAiPageSectionTranslation(entry);
+            for (let i = 0; i < 5; i += 1) await Promise.resolve();
+
+            const first = document.getElementById("first");
+            const second = document.getElementById("second");
+            expect(first.textContent).toBe("첫 문장.");
+            expect(second.textContent).toBe("둘째 문장.");
+            expect(controller.getDomOriginalTooltipTarget(first)).toBe(first);
+            expect(controller.getDomOriginalTooltipTarget(second)).toBe(second);
+
+            first.dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 120,
+                    clientY: 160,
+                })
+            );
+            jest.advanceTimersByTime(260);
+            let tooltip = document.getElementById("edge-translate-dom-original-tooltip");
+            expect(tooltip.textContent).toContain("First original sentence.");
+
+            first.dispatchEvent(
+                new MouseEvent("mouseout", {
+                    bubbles: true,
+                    relatedTarget: null,
+                })
+            );
+            second.dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 120,
+                    clientY: 160,
+                })
+            );
+            jest.advanceTimersByTime(260);
+            tooltip = document.getElementById("edge-translate-dom-original-tooltip");
+            expect(tooltip.textContent).toContain("Second original sentence.");
             controller.cancelDomPageTranslate();
         } finally {
             jest.useRealTimers();

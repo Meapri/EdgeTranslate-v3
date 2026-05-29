@@ -147,7 +147,7 @@ describe("LocalTranslator", () => {
         expect(body.systemInstruction.parts[0].text).toContain("long webpage text");
         expect(body.generationConfig.temperature).toBe(0);
         expect(body.generationConfig.maxOutputTokens).toBe(512);
-        expect(body.generationConfig.thinkingConfig).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
         expect(body.generationConfig.candidateCount).toBeUndefined();
         expect(body.generationConfig.topK).toBeUndefined();
         expect(body.contents[0].parts[0].text).toContain("Source language: English");
@@ -366,7 +366,7 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
     });
 
-    test("starts Google AI Studio models with minimal generation config", async () => {
+    test("uses minimum required thinking config for Gemini 3 Flash models", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -389,12 +389,12 @@ describe("LocalTranslator", () => {
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.topK).toBeUndefined();
         expect(body.generationConfig.candidateCount).toBeUndefined();
-        expect(body.generationConfig.thinkingConfig).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
         expect(body.generationConfig.temperature).toBe(0);
         expect(body.generationConfig.maxOutputTokens).toBeUndefined();
     });
 
-    test("uses compact page-translation guidance for proper nouns and inline links", async () => {
+    test("uses compact page-translation guidance for proper nouns and inline HTML", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -416,29 +416,54 @@ describe("LocalTranslator", () => {
             apiKey: "studio-test-key",
         });
         await translator.translate(
-            "[[1:p]]\nLM Studio supports [[EDGE_TRANSLATE_LINK_1]]llama.cpp[[/EDGE_TRANSLATE_LINK_1]].",
+            "[[1:p]]\n<p>LM Studio supports <a>llama.cpp</a>.</p>",
             "en",
             "ko"
         );
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         const prompt = body.contents[0].parts[0].text;
-        expect(body.systemInstruction.parts[0].text).toContain("Translate page segments only");
-        expect(body.systemInstruction.parts[0].text).toContain("Keep every [[n:r]] marker once");
-        expect(body.systemInstruction.parts[0].text).toContain(
-            "Keep each segment's payload line count"
-        );
+        expect(body.systemInstruction.parts[0].text).toContain("Translate page segments.");
+        expect(body.systemInstruction.parts[0].text).toContain("Keep each [[n]]/[[n:r]] marker");
         expect(body.systemInstruction.parts[0].text).not.toContain(
             "subtitle cue numbers, timestamps"
         );
-        expect(prompt).toContain("Translate English -> Korean.");
-        expect(prompt).toContain("Keep link markers; translate visible link text.");
+        expect(prompt).toContain("English>Korean");
+        expect(prompt).toContain("Keep markers.");
         expect(prompt).not.toContain("same number of translated payload lines");
         expect(prompt).not.toContain("Use neighboring segments only to keep terminology");
-        expect(prompt).toContain("[[EDGE_TRANSLATE_LINK_1]]llama.cpp[[/EDGE_TRANSLATE_LINK_1]]");
+        expect(prompt).toContain("<a>llama.cpp</a>");
     });
 
-    test("uses official Gemini 3 Pro thinking levels when configured", async () => {
+    test("uses the shortest page prompt for raw HTML sections", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ message: { content: "<p>안녕하세요.</p>" }, finish_reason: "stop" }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:5000/v1",
+            openaiCompatibleModel: "Hy-MT2-1.8B",
+        });
+        await translator.translate("<p>Hello.</p>", "en", "ko", {
+            translationProfile: "page",
+        });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.messages[0].content).toBe(
+            "Translate visible HTML text only. Preserve tags, attrs, order exactly. Output translated HTML only."
+        );
+        expect(body.messages[1].content).toBe("English>Korean\n<p>Hello.</p>");
+        expect(body.max_tokens).toBe(256);
+    });
+
+    test("uses minimum required Gemini 3 Pro thinking level", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -465,7 +490,7 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.maxOutputTokens).toBeUndefined();
     });
 
-    test("uses official Gemini 3 Flash thinking levels when configured", async () => {
+    test("ignores configured Gemini 3 Flash reasoning and uses the minimum", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -485,10 +510,10 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "high" });
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
     });
 
-    test("uses official Gemini 2.5 thinking budget mappings when configured", async () => {
+    test("ignores configured Gemini 2.5 reasoning and turns thinking off", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -508,7 +533,7 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
     });
 
     test("uses the official Gemini 2.5 thinking-off value when supported", async () => {
@@ -918,7 +943,7 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.thinkingConfig).toBeUndefined();
     });
 
-    test("omits Google AI Studio thinking config in auto mode", async () => {
+    test("ignores Google AI Studio auto reasoning and uses the minimum", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -938,7 +963,7 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.generationConfig.thinkingConfig).toBeUndefined();
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
     });
 
     test("does not advertise Google AI Studio support when API key is missing", () => {
@@ -1000,7 +1025,7 @@ describe("LocalTranslator", () => {
         });
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.model).toBe("gpt-5.5");
-        expect(body.reasoning_effort).toBeUndefined();
+        expect(body.reasoning_effort).toBe("none");
         expect(body.temperature).toBeUndefined();
         expect(body.response_format).toBeUndefined();
         expect(body.max_completion_tokens).toBeGreaterThan(0);
@@ -1063,7 +1088,7 @@ describe("LocalTranslator", () => {
         expect(body.response_format).toBeUndefined();
     });
 
-    test("honors explicit OpenAI reasoning effort", async () => {
+    test("ignores explicit OpenAI reasoning effort and uses no reasoning", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -1083,7 +1108,7 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.reasoning_effort).toBe("high");
+        expect(body.reasoning_effort).toBe("none");
     });
 
     test("retries OpenAI page segment translations when the model omits segments", async () => {
@@ -1150,7 +1175,7 @@ describe("LocalTranslator", () => {
         expect(secondBody.max_completion_tokens).toBeGreaterThan(firstBody.max_completion_tokens);
     });
 
-    test("uses OpenAI GPT 5.4 mini official reasoning values", async () => {
+    test("uses no reasoning for OpenAI GPT 5.4 mini even when xhigh is configured", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -1170,10 +1195,10 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.reasoning_effort).toBe("xhigh");
+        expect(body.reasoning_effort).toBe("none");
     });
 
-    test("does not send unsupported minimal reasoning to OpenAI GPT 5.4 mini", async () => {
+    test("uses no reasoning for OpenAI GPT 5.4 mini even when minimal is configured", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -1193,10 +1218,10 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.reasoning_effort).toBeUndefined();
+        expect(body.reasoning_effort).toBe("none");
     });
 
-    test("keeps legacy GPT-5 minimal reasoning but blocks xhigh", async () => {
+    test("uses minimum legacy GPT-5 reasoning regardless of configured value", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -1227,10 +1252,10 @@ describe("LocalTranslator", () => {
         const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
         const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
         expect(firstBody.reasoning_effort).toBe("minimal");
-        expect(secondBody.reasoning_effort).toBeUndefined();
+        expect(secondBody.reasoning_effort).toBe("minimal");
     });
 
-    test("uses xhigh for OpenAI o-series reasoning models", async () => {
+    test("uses minimum OpenAI o-series reasoning", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -1250,7 +1275,7 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.reasoning_effort).toBe("xhigh");
+        expect(body.reasoning_effort).toBe("low");
     });
 
     test("does not send OpenAI reasoning effort to non-reasoning models", async () => {
@@ -1308,7 +1333,7 @@ describe("LocalTranslator", () => {
 
         const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
         const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-        expect(firstBody.reasoning_effort).toBe("high");
+        expect(firstBody.reasoning_effort).toBe("none");
         expect(retryBody.reasoning_effort).toBeUndefined();
     });
 

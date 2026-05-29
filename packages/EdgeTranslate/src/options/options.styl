@@ -1,11 +1,29 @@
 @import '../common/style/input.styl';
 
+font-stack = 'Plus Jakarta Sans', Roboto, "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif
+
 options-max-width = 1180px
 options-gap = 20px
 glass-panel-light = linear-gradient(145deg, rgba(255, 255, 255, .82), rgba(248, 250, 253, .56))
 glass-panel-dark = linear-gradient(145deg, rgba(30, 36, 44, .82), rgba(20, 24, 29, .58))
 glass-card-light = linear-gradient(145deg, rgba(255, 255, 255, .9), rgba(248, 250, 253, .68))
 glass-card-dark = linear-gradient(145deg, rgba(36, 42, 49, .88), rgba(23, 28, 34, .64))
+
+@keyframes mesh-pulse-1
+    0%
+        transform: translate(0, 0) scale(1)
+    50%
+        transform: translate(60px, -40px) scale(1.12)
+    100%
+        transform: translate(0, 0) scale(1)
+
+@keyframes mesh-pulse-2
+    0%
+        transform: translate(0, 0) scale(1)
+    50%
+        transform: translate(-80px, 50px) scale(1.08)
+    100%
+        transform: translate(0, 0) scale(1)
 
 html,
 body
@@ -34,19 +52,24 @@ body:after
     position: fixed
     pointer-events: none
     z-index: 0
-    filter: blur(16px)
+    border-radius: 50%
+    filter: blur(80px)
 
 body:before
-    inset: 0
-    opacity: .86
-    filter: none
-    background: radial-gradient(120% 70% at 86% 0%, rgba(211, 227, 253, .7), rgba(211, 227, 253, 0) 56%), radial-gradient(90% 74% at 0% 100%, rgba(204, 232, 221, .58), rgba(204, 232, 221, 0) 62%), linear-gradient(135deg, rgba(255, 255, 255, .48), rgba(241, 244, 248, .18))
+    width: 600px
+    height: 600px
+    top: -100px
+    right: -100px
+    background: radial-gradient(circle, rgba(11, 87, 208, 0.12) 0%, rgba(11, 87, 208, 0) 70%)
+    animation: mesh-pulse-1 25s ease-in-out infinite
 
 body:after
-    inset: 0
-    opacity: .12
-    filter: none
-    background-image: linear-gradient(115deg, rgba(11, 87, 208, .38) 0 1px, transparent 1px 18px)
+    width: 700px
+    height: 700px
+    bottom: -150px
+    left: -150px
+    background: radial-gradient(circle, rgba(15, 109, 88, 0.08) 0%, rgba(15, 109, 88, 0) 70%)
+    animation: mesh-pulse-2 30s ease-in-out infinite
 
 [hidden]
     display: none !important
@@ -67,7 +90,8 @@ body:after
     backdrop-filter: blur(30px) saturate(170%)
     -webkit-backdrop-filter: blur(30px) saturate(170%)
     box-shadow: 0 22px 64px rgba(30, 47, 72, .16), 0 7px 20px rgba(30, 47, 72, .07), inset 0 1px 0 rgba(255, 255, 255, .88)
-    animation: expressive-enter 360ms motion-emphasized both
+    will-change: transform, opacity
+    animation: option-enter 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both
 
 #option:before
     content: ''
@@ -91,8 +115,15 @@ header
     font-size: 23px
     font-weight: 760
     letter-spacing: 0
-    background: rgba(255, 255, 255, .7)
-    border-bottom: 1px solid rgba(255, 255, 255, .72)
+    background: transparent
+    box-shadow: none
+    backdrop-filter: none
+    -webkit-backdrop-filter: none
+    transition: background-color motion-standard, box-shadow motion-standard, backdrop-filter motion-standard
+
+header.scrolled
+    background: rgba(255, 255, 255, .72)
+    box-shadow: 0 4px 12px rgba(30, 47, 72, .04)
     backdrop-filter: blur(28px) saturate(180%)
     -webkit-backdrop-filter: blur(28px) saturate(180%)
 
@@ -109,7 +140,7 @@ header img
     flex: 1 1 auto
     width: 100%
     box-sizing: border-box
-    padding: 22px 26px 8px
+    padding: 24px 32px 12px
 
 .main-layout
     display: grid
@@ -124,7 +155,7 @@ header img
     flex-direction: column
     gap: 6px
     min-width: 0
-    padding: 8px
+    padding: 18px 12px
     box-sizing: border-box
     border: 1px solid rgba(255, 255, 255, .78)
     border-radius: 22px
@@ -132,7 +163,8 @@ header img
     backdrop-filter: blur(24px) saturate(170%)
     -webkit-backdrop-filter: blur(24px) saturate(170%)
     box-shadow: 0 10px 28px rgba(30, 47, 72, .1), inset 0 1px 0 rgba(255, 255, 255, .82)
-    animation: sidebar-fade 280ms motion-emphasized both
+    will-change: transform, opacity
+    animation: sidebar-fade 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both
 
 .tab-content
     min-width: 0
@@ -142,13 +174,15 @@ header img
 
 .tab-pane.active
     display: block
-    animation: tab-fade-in 240ms motion-emphasized both
+    will-change: transform, opacity
+    animation: tab-fade-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both
 
 .nav-tab
     position: relative
+    z-index: 1
     width: 100%
     min-height: 46px
-    padding: 11px 13px
+    padding: 11px 16px 11px 36px
     box-sizing: border-box
     display: flex
     align-items: center
@@ -163,27 +197,60 @@ header img
     letter-spacing: 0
     text-align: left
     cursor: pointer
-    transition: transform motion-standard, background-color motion-fast, color motion-fast, box-shadow motion-fast
+    transition: transform motion-standard, color motion-fast
 
 .nav-tab:hover
     color: color-on-surface
-    background: rgba(255, 255, 255, .62)
+    background: rgba(255, 255, 255, 0.32)
 
 .nav-tab:active
-    transform: scale(.97)
+    transform: scale(0.98)
 
 .nav-tab.active
     color: color-primary
-    background: linear-gradient(135deg, rgba(211, 227, 253, .96), rgba(232, 240, 254, .76))
-    box-shadow: 0 8px 18px rgba(11, 87, 208, .12), inset 0 0 0 1px rgba(11, 87, 208, .08)
+    background: transparent
+    box-shadow: none
 
+.nav-tab:before,
 .nav-tab.active:before
+    content: none !important
+    display: none !important
+
+.nav-indicator
+    position: absolute
+    top: 0
+    left: 12px
+    right: 12px
+    width: calc(100% - 24px)
+    height: 46px
+    border-radius: 17px
+    background: linear-gradient(135deg, rgba(211, 227, 253, 0.96), rgba(232, 240, 254, 0.76))
+    box-shadow: 0 8px 18px rgba(11, 87, 208, 0.12), inset 0 0 0 1px rgba(11, 87, 208, 0.08)
+    pointer-events: none
+    z-index: 0
+    opacity: 0
+    transform: translateY(0)
+    transition: transform 340ms cubic-bezier(0.2, 0.8, 0.2, 1), height 340ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 150ms ease
+
+    @media (prefers-color-scheme: dark)
+        background: linear-gradient(135deg, rgba(31, 59, 104, 0.9), rgba(27, 32, 38, 0.7))
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24), inset 0 0 0 1px rgba(168, 199, 250, 0.12)
+
+.nav-indicator:before
     content: ''
+    position: absolute
+    left: 10px
+    top: 50%
+    transform: translateY(-50%)
     width: 4px
     height: 24px
     border-radius: radius-pill
     background: color-primary
-    box-shadow: 0 0 0 6px rgba(11, 87, 208, .08)
+    box-shadow: 0 0 0 6px rgba(11, 87, 208, 0.08)
+
+    @media (prefers-color-scheme: dark)
+        background: color-primary-dark
+        box-shadow: 0 0 0 6px rgba(168, 199, 250, 0.1)
 
 .nav-icon
     width: 20px
@@ -211,16 +278,18 @@ header img
 .card-container
     position: relative
     overflow: hidden
-    margin: 0 0 16px
-    padding: 20px
+    margin: 0 0 20px
+    padding: 24px 26px
     border: 1px solid rgba(255, 255, 255, .82)
-    border-radius: 22px
+    border-radius: 24px
     background: glass-card-light
     backdrop-filter: blur(24px) saturate(165%)
     -webkit-backdrop-filter: blur(24px) saturate(165%)
-    box-shadow: 0 12px 34px rgba(30, 47, 72, .1), 0 2px 8px rgba(30, 47, 72, .05), inset 0 1px 0 rgba(255, 255, 255, .88)
+    box-shadow: inset 1px 1.5px 0 rgba(255,255,255,.4), inset -1px -1px 0 rgba(0,0,0,.04), 0 12px 34px rgba(30, 47, 72, .1), 0 2px 8px rgba(30, 47, 72, .05)
     transition: transform motion-standard, box-shadow motion-standard, border-color motion-fast, background-color motion-fast
-    animation: card-slide-in 300ms motion-emphasized both
+
+    .row + .row
+        margin-top: 16px
 
 .card-container:before
     content: ''
@@ -229,11 +298,26 @@ header img
     pointer-events: none
     border-radius: inherit
     background: linear-gradient(135deg, rgba(255, 255, 255, .54), rgba(255, 255, 255, 0) 42%)
+    z-index: 1
+
+.card-container:after
+    content: ''
+    position: absolute
+    inset: 0
+    pointer-events: none
+    border-radius: inherit
+    background: radial-gradient(circle 220px at var(--et-mouse-x, 50%) var(--et-mouse-y, 50%), light-dark(rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05)), transparent 80%)
+    z-index: 1
+    opacity: 0
+    transition: opacity 280ms cubic-bezier(0.2, 0, 0, 1)
 
 .card-container:hover
-    transform: translateY(-1px)
+    transform: translateY(-2px) scale(1.002)
     border-color: rgba(255, 255, 255, .95)
-    box-shadow: 0 16px 44px rgba(30, 47, 72, .13), 0 5px 14px rgba(30, 47, 72, .07), inset 0 1px 0 rgba(255, 255, 255, .92)
+    box-shadow: inset 1px 1.5px 0 rgba(255,255,255,.5), inset -1px -1px 0 rgba(0,0,0,.06), 0 16px 44px rgba(30, 47, 72, .13), 0 5px 14px rgba(30, 47, 72, .07)
+
+.card-container:hover:after
+    opacity: 1
 
 .setting-title
     position: relative
@@ -241,7 +325,7 @@ header img
     display: flex
     align-items: center
     gap: 10px
-    margin: 0 0 16px
+    margin: 0 0 22px
     color: color-on-surface
     font-size: 17px
     font-weight: 760
@@ -272,14 +356,14 @@ header img
 #caption-settings,
 #other-settings
     display: grid
-    gap: 10px
+    gap: 16px
 
 .row
     position: relative
     z-index: 1
     display: grid
     grid-template-columns: repeat(2, minmax(0, 1fr))
-    gap: 10px 12px
+    gap: 12px 16px
     align-items: stretch
     margin: 0
     padding: 0
@@ -302,20 +386,35 @@ header img
     max-width: none
     display: flex
     align-items: center
-    gap: 11px
-    min-height: 58px
-    padding: 11px 13px
+    justify-content: space-between
+    min-height: 60px
+    padding: 12px 18px
     box-sizing: border-box
     border: 1px solid rgba(221, 230, 239, .72)
-    border-radius: 17px
+    border-radius: 20px
     background: rgba(248, 250, 253, .64)
     transition: transform motion-standard, background-color motion-fast, border-color motion-fast, box-shadow motion-fast
 
+.column:has(.checked-label[data-insert-pos="afterBegin"])
+    padding: 20px 22px
+    min-height: 106px
+
+    .switch,
+    .checkbox,
+    .radio
+        order: 2
+
+    .checked-label,
+    .radio-label
+        order: 1
+        flex: 1
+        margin: 0
+
 .column:hover
-    transform: translateY(-1px)
-    border-color: rgba(11, 87, 208, .18)
-    background: rgba(255, 255, 255, .72)
-    box-shadow: 0 8px 18px rgba(30, 47, 72, .08)
+    transform: translateY(-1.5px)
+    border-color: rgba(11, 87, 208, .22)
+    background: rgba(255, 255, 255, .78)
+    box-shadow: 0 10px 24px rgba(30, 47, 72, .09)
 
 .checked-label,
 .radio-label
@@ -323,19 +422,24 @@ header img
     min-width: 0
     display: flex
     align-items: center
+    justify-content: space-between
     gap: 10px
     color: color-on-surface
     cursor: pointer
     font-size: 14px
-    font-weight: 560
+    font-weight: 600
     line-height: 1.45
     word-break: keep-all
     overflow-wrap: anywhere
 
+    input[type="checkbox"],
+    input[type="radio"]
+        order: 2
+
 .checked-label[data-insert-pos="afterBegin"]
     align-items: stretch
     flex-direction: column
-    gap: 9px
+    gap: 10px
     color: color-on-surface-variant
     font-size: 13px
     font-weight: 680
@@ -345,9 +449,9 @@ input[type="password"],
 input[type="number"],
 select
     width: 100%
-    min-height: 44px
+    min-height: 46px
     box-sizing: border-box
-    padding: 10px 14px
+    padding: 11px 16px
     color: color-on-surface
     background-color: rgba(255, 255, 255, .76)
     backdrop-filter: blur(16px) saturate(150%)
@@ -387,7 +491,7 @@ select:focus
     box-shadow: inset 0 0 0 2px color-primary, focus-ring-light
     transform: scale(1.003)
 
-.provider-heading
+.column.provider-heading
     grid-column: 1 / -1
     min-height: 56px
     justify-content: flex-start
@@ -395,7 +499,18 @@ select:focus
     color: color-on-surface
     font-size: 14px
     font-weight: 760
-    background: linear-gradient(135deg, rgba(211, 227, 253, .5), rgba(204, 232, 221, .38))
+    background: linear-gradient(135deg, rgba(211, 227, 253, .45), rgba(204, 232, 221, .32))
+    cursor: default
+    margin-top: 12px
+    margin-bottom: 4px
+    border-color: rgba(221, 230, 239, .54)
+    box-shadow: 0 2px 8px rgba(30, 47, 72, .03)
+
+.column.provider-heading:hover
+    transform: none
+    border-color: rgba(221, 230, 239, .54)
+    background: linear-gradient(135deg, rgba(211, 227, 253, .45), rgba(204, 232, 221, .32))
+    box-shadow: 0 2px 8px rgba(30, 47, 72, .03)
 
 .provider-badge
     width: 34px
@@ -488,8 +603,16 @@ footer a:hover
 
     header
         color: color-on-surface-dark
-        background: rgba(27, 32, 38, .58)
-        border-bottom-color: glass-border-dark
+        background: transparent
+        backdrop-filter: none
+        -webkit-backdrop-filter: none
+        box-shadow: none
+
+    header.scrolled
+        background: rgba(27, 32, 38, .64)
+        box-shadow: 0 4px 12px rgba(0, 0, 0, .2)
+        backdrop-filter: blur(28px) saturate(180%)
+        -webkit-backdrop-filter: blur(28px) saturate(180%)
 
     header img
         box-shadow: 0 8px 18px rgba(0, 0, 0, .34)
@@ -508,21 +631,17 @@ footer a:hover
 
     .nav-tab.active
         color: color-primary-dark
-        background: linear-gradient(135deg, rgba(31, 59, 104, .82), rgba(31, 59, 104, .42))
-        box-shadow: inset 0 0 0 1px rgba(168, 199, 250, .12), 0 8px 18px rgba(0, 0, 0, .2)
-
-    .nav-tab.active:before
-        background: color-primary-dark
-        box-shadow: 0 0 0 6px rgba(168, 199, 250, .1)
+        background: transparent
+        box-shadow: none
 
     .card-container
         border-color: glass-border-dark
         background: glass-card-dark
-        box-shadow: 0 16px 44px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .08)
+        box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, .08), inset -1px -1px 0 rgba(0, 0, 0, .2), 0 16px 44px rgba(0, 0, 0, .28)
 
     .card-container:hover
         border-color: rgba(255, 255, 255, .18)
-        box-shadow: 0 20px 54px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .1)
+        box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, .12), inset -1px -1px 0 rgba(0, 0, 0, .24), 0 20px 54px rgba(0, 0, 0, .34)
 
     .setting-title
         color: color-on-surface-dark
@@ -573,8 +692,16 @@ footer a:hover
         background-color: rgba(27, 32, 38, .98)
         box-shadow: inset 0 0 0 2px color-primary-dark, focus-ring-dark
 
-    .provider-heading
-        background: linear-gradient(135deg, rgba(31, 59, 104, .46), rgba(20, 74, 61, .36))
+    .column.provider-heading
+        border-color: rgba(255, 255, 255, .04)
+        background: linear-gradient(135deg, rgba(31, 59, 104, .38), rgba(20, 74, 61, .28))
+        box-shadow: none
+
+    .column.provider-heading:hover
+        transform: none
+        border-color: rgba(255, 255, 255, .04)
+        background: linear-gradient(135deg, rgba(31, 59, 104, .38), rgba(20, 74, 61, .28))
+        box-shadow: none
 
     .provider-badge
         background: rgba(27, 32, 38, .82)
@@ -651,6 +778,10 @@ footer a:hover
     .nav-tab
         width: auto
         min-width: max-content
+        padding: 10px 18px !important
+
+    .nav-indicator
+        display: none !important
 
 @media (max-width: 680px)
     body
@@ -690,26 +821,38 @@ footer a:hover
         scroll-behavior: auto
         transition-duration: 1ms
 
+@keyframes option-enter
+    from
+        opacity: 0
+        transform: translateY(4px)
+    to
+        opacity: 1
+        transform: translateY(0)
+
 @keyframes tab-fade-in
     from
         opacity: 0
-        transform: translateY(14px) scale(.985)
+        transform: translateX(4px)
     to
         opacity: 1
-        transform: translateY(0) scale(1)
+        transform: translateX(0)
 
 @keyframes card-slide-in
     from
         opacity: 0
-        transform: translateY(18px) scale(.985)
+        transform: translateY(4px)
     to
         opacity: 1
-        transform: translateY(0) scale(1)
+        transform: translateY(0)
 
 @keyframes sidebar-fade
     from
         opacity: 0
-        transform: translateX(-14px)
+        transform: translateX(-4px)
     to
         opacity: 1
         transform: translateX(0)
+
+::view-transition-old(root),
+::view-transition-new(root)
+    animation-duration: 0s

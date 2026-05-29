@@ -260,14 +260,36 @@ function renderButton() {
             "normal"
         )
     );
-    menu.appendChild(
-        makeActionButton(
-            preciseLabel,
-            chrome.i18n.getMessage("TranslatePrecise") || "Precise translation",
-            "precise"
-        )
+    const preciseButton = makeActionButton(
+        preciseLabel,
+        chrome.i18n.getMessage("TranslatePrecise") || "Precise translation",
+        "precise"
     );
+    menu.appendChild(preciseButton);
     parent.appendChild(menu);
+
+    const updateButtonContainerWidth = (enabled) => {
+        if (enabled) {
+            translationButtonContainer.classList.remove("single-button");
+        } else {
+            translationButtonContainer.classList.add("single-button");
+        }
+    };
+
+    // Dynamic precise button display based on setting toggle
+    getOrSetDefaultSettings("PreciseTranslatorConfig", DEFAULT_SETTINGS).then((result) => {
+        const enabled = result.PreciseTranslatorConfig?.enabled;
+        preciseButton.style.display = enabled ? "" : "none";
+        updateButtonContainerWidth(enabled);
+    });
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === "sync" && changes.PreciseTranslatorConfig) {
+            const enabled = changes.PreciseTranslatorConfig.newValue?.enabled;
+            preciseButton.style.display = enabled ? "" : "none";
+            updateButtonContainerWidth(enabled);
+        }
+    });
 
     const CleanStyle = {
         padding: 0,

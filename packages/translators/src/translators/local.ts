@@ -29,7 +29,7 @@ export type LocalTranslationOptions = {
     /**
      * Called from each SSE chunk with the full accumulated text so far. The translator
      * still returns the final aggregated result; this callback only enables progressive
-     * UI updates. When omitted, the request runs without streaming (legacy behavior).
+     * UI updates. When omitted, the request runs without streaming.
      */
     onProgress?: (accumulatedText: string) => void;
 };
@@ -107,47 +107,51 @@ const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_NAMES));
 const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
     Object.keys(CHROME_TRANSLATOR_LANGUAGE_MAP)
 );
-const DEFAULT_TIMEOUT_MS = 90000;
+// Speed-first: fail fast so the retry pipeline routes around a slow connection instead of
+// waiting up to 90s on a stalled request. Real LLM completions for page-translate batches
+// land in 5-15s on cloud APIs; 60s is well past the 99th percentile.
+const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_COMPATIBLE_MODEL = "gpt-oss-20b";
-const DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL = "auto";
-const DEFAULT_OPENAI_REASONING_EFFORT = "auto";
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-28-balanced-v1";
+// Bump whenever the prompts below or the user-message layout changes so cached translations
+// from older prompts are invalidated and rebuilt with the new shape.
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-28-page-compact-v2";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MAX_CONCURRENT_REQUESTS = 16;
+// Speed-first: lift the in-process limiter to 32 to match the page-translate dispatch's
+// max concurrency for googleAiStudio. The per-engine caps in banner_controller still
+// enforce the right ceiling per provider; this just stops the limiter from being the
+// bottleneck.
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 32;
+
+// Static system prompts. We deliberately keep these byte-identical across every request so
+// that prefix-aware KV caches on llama.cpp (`cache_prompt: true`), OpenAI/Anthropic prompt
+// caching, and Gemini context caches can amortize the prefill on every subsequent call.
+// Per-request directives (source/target language, dictionary mode) all live in the user
+// message header — see buildUserMessage. Quality directives that apply uniformly (script
+// rules, proper-noun handling, formatting preservation) live HERE so the cache absorbs them.
 const AI_TRANSLATION_SYSTEM_PROMPT = [
-    "You are a high-fidelity translation engine. Translate faithfully and naturally into the target language, preserving meaning, tone, register, nuance, and the original voice.",
-    "Output ONLY the translation — or only the exact JSON object when JSON is requested. No notes, no labels, no Markdown, no commentary.",
-    "Preserve every structural token exactly: line breaks, whitespace, placeholders, URLs, file paths, code spans, numbers, dates, IDs, and formatting markup. Never invent or drop them.",
-    "Preserve proper nouns and official names by default (people, brands, products, models, places, technical identifiers). Use a localized form only when it is clearly the established convention. Do not phoneticize, gloss, or split named entities; keep official Latin-script names and casing as written.",
-    "For long or batched text, keep terminology and named-entity choices consistent across the entire output. Avoid mojibake, repeated syllables, source-language leftovers, and prompt leakage.",
-    "For inline link placeholders shaped like [[EDGE_TRANSLATE_LINK_1]]…[[/EDGE_TRANSLATE_LINK_1]], copy both bracket tags exactly (keep the same number) and translate only the visible text between them as part of the surrounding sentence.",
-].join(" ");
+    "You are a high-fidelity translation engine. Translate faithfully and naturally; preserve meaning, tone, intent, nuance.",
+    "Keep the same text form (heading stays heading, sentence stays sentence). Do not summarize, explain, or add information.",
+    "Output only the translation, no markdown fence or commentary.",
+    "- For long webpage text and short snippets alike, keep line breaks, spacing, code, URLs, file paths, and inline placeholders intact. Respect the original formatting.",
+    "- Source-language text is forbidden in the output. Before finalizing, rewrite any remaining source-language fragment.",
+    "- Preserve proper nouns and official names — brand names, place names, person names, and official Latin-script names — in their original form. Use a localized or translated proper-name form only when it is clearly established.",
+    "- Preserve numeric literals, dates, units, and code identifiers exactly.",
+    "- Use the target language's customary writing system. For Han-script source text (Chinese, Japanese kanji), translate complete semantic units. Never create mixed-script words by combining source-script characters. Do not partially translate compound nouns. Silently scan the final answer for mixed-script words and rewrite them.",
+    "- Subtitles: keep subtitle cue numbers, timestamps, and speaker labels intact.",
+    "- When structured JSON is requested, return one valid JSON object only.",
+].join("\n");
 
-// PAGE prompt: pages arrive as HTML where each text node is wrapped in <t i="N">…</t>,
-// possibly inside other inline tags (<strong>, <a>, <em>, …). The model must translate only
-// the text inside <t> wrappers and preserve every other tag and attribute exactly.
-const PAGE_TRANSLATION_SYSTEM_PROMPT = [
-    "You translate web page segments. Each segment starts with a [[n:r]] marker on its own line, followed by HTML content.",
-    "Keep every [[n:r]] marker exactly once, in the original order, with the same number and role.",
-    'Inside each segment, translate ONLY the text between <t i="N"> and </t> tags. Keep every <t i="N">…</t> wrapper exactly, including its i="N" attribute and matching number. Do not merge, split, drop, reorder, or invent wrappers.',
-    "Preserve any other HTML tags (<strong>, <em>, <a>, <b>, <i>, <span>, …) exactly as written. Preserve URLs, code, numbers, IDs, and proper nouns.",
-    "Output only the [[n:r]] markers and their translated HTML segments. No Markdown wrapping, no commentary.",
-].join(" ");
+const PAGE_HTML_TRANSLATION_SYSTEM_PROMPT =
+    "Translate visible HTML text only. Preserve tags, attrs, order exactly. Output translated HTML only.";
 
-const REALTIME_CAPTION_SYSTEM_PROMPT = [
-    "You are a subtitle translator. Output only the translation in the target language, concise and natural.",
-    "Preserve cue numbers, timestamps, speaker labels, names, and numeric literals exactly as in the source.",
-].join(" ");
+const PAGE_SEGMENTED_TRANSLATION_SYSTEM_PROMPT =
+    "Translate page segments. Keep each [[n]]/[[n:r]] marker once, in order. Preserve HTML tags/attrs. Translate only visible text. Output only the translated payload.";
 
-const DICTIONARY_OUTPUT_INSTRUCTION = [
-    "Dictionary task: the input is a single word or short term. Return one valid JSON object only, with this exact shape:",
-    '{"translation":"...","detailedMeanings":[{"pos":"...","meaning":"...","synonyms":["..."]}],"definitions":[{"pos":"...","meaning":"...","example":"...","synonyms":["..."]}],"examples":[{"source":"...","target":"..."}]}',
-    "Write translation, meanings, definitions, and target examples in the target language; keep source examples in the source language.",
-    "For ordinary terms, provide at least one detailedMeaning, one definition, and two examples. Use an empty array when a field truly does not apply. No Markdown around the JSON.",
-].join(" ");
+const REALTIME_CAPTION_SYSTEM_PROMPT =
+    "You are a subtitle translator. Return only translated subtitles.";
 
 class RequestLimiter {
     private active = 0;
@@ -229,7 +233,11 @@ async function retryWithBackoff<T>(
             const msg = error?.errorMsg || error?.message || "";
             const isRetryable = /429|500|502|503|rate/i.test(msg);
             if (!isRetryable || attempt === maxRetries) throw error;
-            await new Promise((r) => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
+            // Exponential backoff with full jitter so concurrent retries don't dogpile a
+            // rate-limited endpoint at the exact same instant.
+            const ceiling = baseDelayMs * Math.pow(2, attempt);
+            const delay = Math.floor(Math.random() * ceiling) + Math.floor(baseDelayMs / 2);
+            await new Promise((r) => setTimeout(r, delay));
         }
     }
     throw lastError;
@@ -245,26 +253,6 @@ function normalizeMode(mode?: string): LocalTranslatorMode {
 
 function normalizeModel(model: string | undefined, fallback: string) {
     return (model || fallback).trim() || fallback;
-}
-
-function normalizeGoogleAiStudioReasoningLevel(value: string | undefined) {
-    const normalized = String(value || "")
-        .trim()
-        .toLowerCase();
-    if (["auto", "none", "minimal", "low", "medium", "high"].includes(normalized)) {
-        return normalized;
-    }
-    return DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL;
-}
-
-function normalizeOpenAiReasoningEffort(value: string | undefined) {
-    const normalized = String(value || "")
-        .trim()
-        .toLowerCase();
-    if (["auto", "none", "minimal", "low", "medium", "high", "xhigh"].includes(normalized)) {
-        return normalized;
-    }
-    return DEFAULT_OPENAI_REASONING_EFFORT;
 }
 
 function addNumbers(...values: Array<number | undefined>) {
@@ -555,13 +543,50 @@ function extractOpenAIResponseText(payload: any) {
 
 function countPageSegmentMarkers(text: string) {
     const matches = String(text || "").match(
-        /\[\[\d+:[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g
+        /\[\[\d+(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g
     );
     return matches ? matches.length : 0;
 }
 
 function hasPageTranslationSegments(text: string) {
     return countPageSegmentMarkers(text) > 0;
+}
+
+function estimateTextTokens(text: string) {
+    const value = String(text || "");
+    if (!value) return 0;
+    const compactCjkChars = (value.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) || [])
+        .length;
+    const otherChars = Math.max(0, value.length - compactCjkChars);
+    return Math.ceil(compactCjkChars * 0.8 + otherChars / 3.6);
+}
+
+function stripPagePromptStructure(text: string) {
+    return String(text || "")
+        .replace(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/g, " ")
+        .replace(/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g, " ")
+        .replace(/<[^>]+>/g, " ");
+}
+
+function estimatePageStructuralTokens(text: string) {
+    const value = String(text || "");
+    const visible = stripPagePromptStructure(value);
+    const structuralChars = Math.max(0, value.length - visible.length);
+    return Math.ceil(structuralChars / 5.5) + countPageSegmentMarkers(value) * 3;
+}
+
+function estimatePageOutputTokenBudget(
+    text: string,
+    tokenMultiplier: number,
+    floor: number,
+    ceiling: number
+) {
+    const visibleTokens = estimateTextTokens(stripPagePromptStructure(text));
+    const structuralTokens = estimatePageStructuralTokens(text);
+    const multiplier = tokenMultiplier >= 8 ? 1.85 : 1.28;
+    const safety = tokenMultiplier >= 8 ? 96 : 40;
+    const estimate = Math.ceil(visibleTokens * multiplier + structuralTokens + safety);
+    return Math.min(ceiling, Math.max(floor, estimate));
 }
 
 function buildOpenAiCompletionLimit(model: string, tokenBudget: number) {
@@ -699,10 +724,8 @@ class LocalTranslator {
     private mode: LocalTranslatorMode = "chromeBuiltin";
     private apiKey = "";
     private model = DEFAULT_GOOGLE_AI_STUDIO_MODEL;
-    private reasoningLevel = DEFAULT_GOOGLE_AI_STUDIO_REASONING_LEVEL;
     private openaiApiKey = "";
     private openaiModel = DEFAULT_OPENAI_MODEL;
-    private openaiReasoningEffort = DEFAULT_OPENAI_REASONING_EFFORT;
     private openaiCompatibleBaseUrl = "";
     private openaiCompatibleEndpoint = "";
     private openaiCompatibleApiKey = "";
@@ -721,10 +744,8 @@ class LocalTranslator {
         this.mode = normalizeMode(config.mode);
         this.apiKey = (config.apiKey || "").trim();
         this.model = normalizeModel(config.model, DEFAULT_GOOGLE_AI_STUDIO_MODEL);
-        this.reasoningLevel = normalizeGoogleAiStudioReasoningLevel(config.reasoningLevel);
         this.openaiApiKey = (config.openaiApiKey || "").trim();
         this.openaiModel = normalizeModel(config.openaiModel, DEFAULT_OPENAI_MODEL);
-        this.openaiReasoningEffort = normalizeOpenAiReasoningEffort(config.openaiReasoningEffort);
         this.openaiCompatibleBaseUrl = (config.openaiCompatibleBaseUrl || "").trim();
         this.openaiCompatibleEndpoint = normalizeOpenAiCompatibleEndpoint(
             this.openaiCompatibleBaseUrl
@@ -1044,16 +1065,7 @@ class LocalTranslator {
         to: string,
         options: LocalTranslationOptions = {}
     ) {
-        if (this.isRealtimeCaptionBatchTranslation(options)) {
-            return this.buildRealtimeCaptionBatchPrompt(text, from, to);
-        }
-        if (this.isRealtimeCaptionTranslation(options)) {
-            return this.buildRealtimeCaptionPrompt(text, from, to);
-        }
-        // All instructions, language directives, and the script rule live in the system prompt
-        // (see getTranslationSystemPrompt). The user message contains ONLY the text to translate
-        // so the model never confuses meta-instructions for content to render in the output.
-        return text;
+        return this.buildUserMessage(text, from, to, options);
     }
 
     private buildOpenAiPrompt(
@@ -1062,38 +1074,87 @@ class LocalTranslator {
         to: string,
         options: LocalTranslationOptions = {}
     ) {
-        return this.buildGoogleAiStudioPrompt(text, from, to, options);
+        return this.buildUserMessage(text, from, to, options);
+    }
+
+    /**
+     * Per-request directives (source/target language, dictionary task, page link rules) live
+     * in the user message header — the system prompt stays byte-identical across requests so
+     * KV/prompt caches can amortize the prefill.
+     */
+    private buildUserMessage(
+        text: string,
+        from: string,
+        to: string,
+        options: LocalTranslationOptions = {}
+    ) {
+        if (this.isRealtimeCaptionBatchTranslation(options)) {
+            return this.buildRealtimeCaptionBatchPrompt(text, from, to);
+        }
+        if (this.isRealtimeCaptionTranslation(options)) {
+            return this.buildRealtimeCaptionPrompt(text, from, to);
+        }
+
+        const sourceLanguage = from ? toLanguageName(from) : "";
+        const targetLanguage = to ? toLanguageName(to) : "";
+
+        // Page mode covers both raw-HTML section payloads and marker-batched payloads.
+        // Either way we want the same lean directive header — the system prompt carries the
+        // HTML preservation rules and the structural guarantees.
+        if (options.translationProfile === "page" || hasPageTranslationSegments(text)) {
+            const hasMarkers = hasPageTranslationSegments(text);
+            const header = [
+                sourceLanguage && targetLanguage
+                    ? `${sourceLanguage}>${targetLanguage}`
+                    : "",
+                hasMarkers ? "Keep markers." : "",
+            ]
+                .filter(Boolean)
+                .join("\n");
+            return header ? `${header}\n${text}` : text;
+        }
+
+        const langLine =
+            sourceLanguage && targetLanguage
+                ? `Source language: ${sourceLanguage}. Target language: ${targetLanguage}.`
+                : sourceLanguage
+                ? `Source language: ${sourceLanguage}.`
+                : targetLanguage
+                ? `Target language: ${targetLanguage}.`
+                : "";
+        const headerLines = [
+            "Translate the user's text.",
+            langLine,
+            "Preserve proper nouns and official names. Use the target language's writing system.",
+        ];
+        if (isDictionaryCandidate(text)) {
+            headerLines.push(
+                'Dictionary entry. Return only one valid JSON object: {"translation":"...","detailedMeanings":[{"pos":"","meaning":"","synonyms":[]}],"definitions":[{"pos":"","meaning":"","example":"","synonyms":[]}],"examples":[{"source":"","target":""}]}.',
+                "Provide at least one detailedMeaning, one definition, and two examples for ordinary terms; use empty arrays when truly not applicable.",
+                "Write translation, meanings, definitions, and target examples in the target language; keep source examples in the source language."
+            );
+        }
+        const header = headerLines.filter(Boolean).join("\n");
+        return header ? `${header}\n${text}` : text;
     }
 
     private getTranslationSystemPrompt(
         text: string,
-        from: string = "",
-        to: string = "",
+        _from: string = "",
+        _to: string = "",
         options: LocalTranslationOptions = {}
     ) {
         if (this.isRealtimeCaptionTranslation(options)) return REALTIME_CAPTION_SYSTEM_PROMPT;
-        const base = hasPageTranslationSegments(text)
-            ? PAGE_TRANSLATION_SYSTEM_PROMPT
-            : AI_TRANSLATION_SYSTEM_PROMPT;
-        // Append the per-request directives. Putting them in the system prompt (rather than the
-        // user message) keeps the user message a clean payload — the model can't echo these into
-        // its translation output.
-        const sourceLanguage = from ? toLanguageName(from) : "";
-        const targetLanguage = to ? toLanguageName(to) : "";
-        const scriptRule = to ? getScriptConstraint(to) : "";
-        const dictionaryInstruction =
-            !this.isRealtimeCaptionTranslation(options) && isDictionaryCandidate(text)
-                ? DICTIONARY_OUTPUT_INSTRUCTION
-                : "";
-        const dynamic = [
-            sourceLanguage ? `Source language: ${sourceLanguage}.` : "",
-            targetLanguage ? `Target language: ${targetLanguage}.` : "",
-            scriptRule,
-            dictionaryInstruction,
-        ]
-            .filter(Boolean)
-            .join(" ");
-        return dynamic ? `${base} ${dynamic}` : base;
+        // Page-mode dispatch wins regardless of whether the payload uses [[n:r]] markers.
+        // The section-level path sends raw HTML with no markers and still needs the page
+        // prompt's HTML preservation rules.
+        if (options.translationProfile === "page" || hasPageTranslationSegments(text)) {
+            if (hasPageTranslationSegments(text)) {
+                return PAGE_SEGMENTED_TRANSLATION_SYSTEM_PROMPT;
+            }
+            return PAGE_HTML_TRANSLATION_SYSTEM_PROMPT;
+        }
+        return AI_TRANSLATION_SYSTEM_PROMPT;
     }
 
     private parseGoogleAiStudioResponse(payload: any) {
@@ -1146,45 +1207,30 @@ class LocalTranslator {
         return /^gemini-2\.5/i.test(this.model);
     }
 
-    private isGemini25ProModel() {
-        return /^gemini-2\.5-pro(?:$|-)/i.test(this.model);
-    }
-
     private getEffectiveGoogleAiStudioReasoningLevel(options: LocalTranslationOptions = {}) {
-        if (!this.isRealtimeCaptionTranslation(options)) return this.reasoningLevel;
+        // Reasoning is intentionally not user-configurable. Prefer true off; use only
+        // the lowest provider-required value for models that do not accept off.
+        void options;
         if (this.isGemini3ProModel()) return "low";
         if (this.isGemini3FlashModel()) return "minimal";
-        if (this.isGemini25Model()) return this.isGemini25ProModel() ? "low" : "none";
-        return "auto";
+        return "none";
     }
 
     private buildGoogleAiStudioThinkingConfig(options: LocalTranslationOptions = {}) {
         const level = this.getEffectiveGoogleAiStudioReasoningLevel(options);
-        if (level === "auto") return undefined;
         if (this.isGemini3Model()) {
             if (this.isGemini3ProModel()) {
-                if (level !== "low" && level !== "high") return undefined;
-                return { thinkingLevel: level };
+                return { thinkingLevel: "low" };
             }
             if (this.isGemini3FlashModel()) {
-                if (!["minimal", "low", "medium", "high"].includes(level)) return undefined;
-                return { thinkingLevel: level };
+                return { thinkingLevel: "minimal" };
             }
             return undefined;
         }
-        if (!this.isGemini25Model()) return undefined;
-
-        if (level === "none") {
-            return this.isGemini25ProModel() ? undefined : { thinkingBudget: 0 };
+        if (this.isGemini25Model() && level === "none") {
+            return { thinkingBudget: 0 };
         }
-        const budgetByLevel: Record<string, number> = {
-            minimal: 1024,
-            low: 1024,
-            medium: 8192,
-            high: 24576,
-        };
-        const thinkingBudget = budgetByLevel[level];
-        return typeof thinkingBudget === "number" ? { thinkingBudget } : undefined;
+        return undefined;
     }
 
     private buildGoogleAiStudioGenerationConfig(
@@ -1471,7 +1517,15 @@ class LocalTranslator {
                 throw new Error("Google AI Studio returned an empty translation.");
             }
             try {
-                if (this.isRealtimeCaptionTranslation(options)) {
+                // Skip the optional repair round-trip on profiles where the second call costs
+                // more than the fragments it would fix: realtime captions need low latency,
+                // page batches contain per-segment markers and run dozens of requests so a
+                // second call per batch would multiply token cost.
+                const shouldSkipRepair =
+                    this.isRealtimeCaptionTranslation(options) ||
+                    options.translationProfile === "page" ||
+                    hasPageTranslationSegments(text);
+                if (shouldSkipRepair) {
                     return {
                         originalText: text,
                         mainMeaning: translated,
@@ -1525,41 +1579,16 @@ class LocalTranslator {
     }
 
     private getOpenAiReasoningEffort(options: LocalTranslationOptions = {}) {
-        if (this.isRealtimeCaptionTranslation(options)) {
-            if (!this.shouldUseOpenAiReasoningEffort()) return "";
-            if (/^gpt-5(?:\.\d+)?-pro(?:$|-)/i.test(this.openaiModel)) return "high";
-            if (/^gpt-5\.(?:[1-9]|\d{2,})(?:$|-)/i.test(this.openaiModel)) return "none";
-            if (/^gpt-5/i.test(this.openaiModel)) return "minimal";
-            return "low";
-        }
-        if (this.openaiReasoningEffort === "auto") return "";
+        void options;
         if (!this.shouldUseOpenAiReasoningEffort()) return "";
         if (/^gpt-5(?:\.\d+)?-pro(?:$|-)/i.test(this.openaiModel)) {
-            return this.openaiReasoningEffort === "high" ? "high" : "";
+            return "high";
         }
-        if (/^gpt-5\.(?:[2-9]|\d{2,})(?:$|-)/i.test(this.openaiModel)) {
-            return ["none", "low", "medium", "high", "xhigh"].includes(this.openaiReasoningEffort)
-                ? this.openaiReasoningEffort
-                : "";
-        }
-        if (/^gpt-5\.1-codex-max(?:$|-)/i.test(this.openaiModel)) {
-            return ["none", "medium", "high", "xhigh"].includes(this.openaiReasoningEffort)
-                ? this.openaiReasoningEffort
-                : "";
-        }
-        if (/^gpt-5\.1(?:$|-)/i.test(this.openaiModel)) {
-            return ["none", "low", "medium", "high"].includes(this.openaiReasoningEffort)
-                ? this.openaiReasoningEffort
-                : "";
-        }
+        if (/^gpt-5\.(?:[1-9]|\d{2,})(?:$|-)/i.test(this.openaiModel)) return "none";
         if (/^gpt-5/i.test(this.openaiModel)) {
-            return ["minimal", "low", "medium", "high"].includes(this.openaiReasoningEffort)
-                ? this.openaiReasoningEffort
-                : "";
+            return "minimal";
         }
-        return ["low", "medium", "high", "xhigh"].includes(this.openaiReasoningEffort)
-            ? this.openaiReasoningEffort
-            : "";
+        return "low";
     }
 
     private shouldRetryOpenAiWithoutReasoningConfig(payload: any) {
@@ -1579,8 +1608,13 @@ class LocalTranslator {
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
+            const isPageTranslation =
+                options.translationProfile === "page" || hasPageTranslationSegments(text);
             const reasoningEffort = this.getOpenAiReasoningEffort(options);
             const expectedPageSegments = countPageSegmentMarkers(text);
+            // GPT-5.x and o-series reasoning models only accept the default temperature, so
+            // sending an explicit value triggers a 400 from the API.
+            const supportsTemperature = !this.shouldUseOpenAiReasoningEffort();
             const buildBody = (includeReasoningEffort = true, tokenMultiplier = 4) => ({
                 model: this.openaiModel,
                 messages: [
@@ -1593,6 +1627,7 @@ class LocalTranslator {
                         content: this.buildOpenAiPrompt(text, from, to, options),
                     },
                 ],
+                ...(supportsTemperature ? { temperature: 0 } : {}),
                 ...(!isRealtimeCaption && isDictionaryCandidate(text)
                     ? { response_format: { type: "json_object" } }
                     : {}),
@@ -1603,6 +1638,13 @@ class LocalTranslator {
                     this.openaiModel,
                     isRealtimeCaption
                         ? Math.max(96, text.length * 2)
+                        : isPageTranslation
+                        ? estimatePageOutputTokenBudget(
+                              text,
+                              tokenMultiplier,
+                              tokenMultiplier >= 8 ? 640 : 384,
+                              tokenMultiplier >= 8 ? 8192 : 4096
+                          )
                         : Math.max(
                               512 * Math.max(1, tokenMultiplier / 4),
                               Math.ceil(text.length * (tokenMultiplier >= 8 ? 3 : 2))
@@ -1758,6 +1800,8 @@ class LocalTranslator {
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
+            const isPageTranslation =
+                options.translationProfile === "page" || hasPageTranslationSegments(text);
             const expectedPageSegments = countPageSegmentMarkers(text);
             const buildBody = (tokenMultiplier = 4) => ({
                 model: this.openaiCompatibleModel,
@@ -1771,21 +1815,31 @@ class LocalTranslator {
                         content: this.buildOpenAiPrompt(text, from, to, options),
                     },
                 ],
-                // Remove response_format JSON block for openaiCompatible to ensure high compatibility with local LLM servers (like llama-server).
-                // Cap max_tokens to fit inside a typical local server slot (~4k n_ctx per slot when --parallel > 1).
+                // Skip response_format JSON for openaiCompatible so local LLM servers
+                // (llama-server, vLLM, TGI) that don't implement it stay compatible.
+                // Cap max_tokens to fit inside a typical local server slot (~4k n_ctx per
+                // slot when --parallel > 1). Floor at 512 so short selections still get
+                // enough room for a complete dictionary-style response.
                 max_tokens: isRealtimeCaption
                     ? Math.min(768, Math.max(128, Math.ceil(text.length * 2)))
+                    : isPageTranslation
+                    ? estimatePageOutputTokenBudget(
+                          text,
+                          tokenMultiplier,
+                          tokenMultiplier >= 8 ? 512 : 256,
+                          tokenMultiplier >= 8 ? 2304 : 1536
+                      )
                     : Math.min(
                           tokenMultiplier >= 8 ? 3072 : 1536,
                           Math.max(
-                              384,
+                              512,
                               Math.ceil(text.length * (tokenMultiplier >= 8 ? 2.5 : 1.5))
                           )
                       ),
                 temperature: 0,
                 // llama.cpp / vLLM / TGI honor this; unknown servers ignore unknown fields.
-                // Enables KV-cache reuse for the (identical-across-requests) system prompt prefix,
-                // which makes prefill 5–10x cheaper on each concurrent request.
+                // The stable system prompt prefix (see AI_TRANSLATION_SYSTEM_PROMPT) makes
+                // this 5-10x cheaper per concurrent request because the KV-cache is reused.
                 cache_prompt: true,
             });
             const useStreaming = typeof options.onProgress === "function";

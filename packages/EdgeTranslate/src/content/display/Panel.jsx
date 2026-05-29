@@ -17,6 +17,7 @@ import Dropdown from "./Dropdown.jsx";
 import SettingIcon from "./icons/setting.svg";
 import PinIcon from "./icons/pin.svg";
 import CloseIcon from "./icons/close.svg";
+import { LiquidGlass } from "liquid-glass";
 
 function getI18nMessage(name, fallback = "") {
     const message = chrome.i18n.getMessage(name);
@@ -39,7 +40,7 @@ const transitionEasing = "cubic-bezier(0.25, 1, 0.5, 1)";
 const DarkPrimary = "#a8c7fa";
 const DarkOnSurface = "#e8eaed";
 const DarkOnSurfaceVariant = "#bdc1c6";
-const DarkOutline = "#3d4651";
+// const DarkOutline = "#3d4651";
 const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 const MotionStandard = "280ms cubic-bezier(0.25, 1, 0.5, 1)";
 const MotionFloatingSpotlightIn = "210ms cubic-bezier(0.2, 0, 0, 1)";
@@ -93,6 +94,11 @@ export default function ResultPanel() {
 
     // Indicate whether the native window controller is ready or not.
     const [moveableReady, setMoveableReady] = useState(false);
+    const [scrolled, setScrolled] = useState(false);
+    const handleScroll = useCallback((e) => {
+        const scrollTop = e.currentTarget.scrollTop;
+        setScrolled(scrollTop > 0);
+    }, []);
     const windowControllerRef = useRef(null);
     const frameRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
     const pendingFrameRef = useRef(null);
@@ -100,6 +106,9 @@ export default function ResultPanel() {
     const panelMotionTimerRef = useRef(0);
     const closeTimerRef = useRef(0);
     const simplebarRef = useRef();
+    // Liquid Glass engine instance bound to the panel element (created on open,
+    // destroyed on close). See onDisplayStatusChange.
+    const glassRef = useRef(null);
 
     // 기억된 부동 패널 위치(사용자가 드래그로 이동한 경우)
     const lastFloatingPosRef = useRef(null); // { x: number, y: number }
@@ -1000,6 +1009,8 @@ export default function ResultPanel() {
 
         /* If panel is closed */
         if (!panelEl) {
+            glassRef.current?.destroy();
+            glassRef.current = null;
             windowControllerRef.current?.();
             windowControllerRef.current = null;
             setMoveableReady(false);
@@ -1025,6 +1036,30 @@ export default function ResultPanel() {
 
         windowControllerRef.current?.();
         windowControllerRef.current = setupNativeWindowController(panelEl);
+
+        // Bind the Liquid Glass engine to the panel surface. 'balanced' quality
+        // is the engine's recommended tier for a content-script panel: single
+        // refraction pass + 1× maps over the host page's backdrop, keeping the
+        // specular rim and frost. The engine auto-detects this Shadow DOM root
+        // (getRootNode) and overrides backdrop-filter/background-color inline,
+        // gracefully falling back to the stylesheet blur if construction fails.
+        glassRef.current?.destroy();
+        try {
+            glassRef.current = new LiquidGlass(panelEl, {
+                quality: "high",
+                radius: 24,
+                thickness: 24,
+                refraction: 28,
+                chromaticAberration: 0.5,
+                blur: 4,
+                saturation: 180,
+                specularIntensity: 0.9,
+            });
+            panelEl.dataset.liquidGlass = "on";
+        } catch {
+            glassRef.current = null;
+        }
+
         setMoveableReady(true);
         panelEl.style.opacity = "0";
         requestAnimationFrame(showPanel);
@@ -1330,8 +1365,13 @@ export default function ResultPanel() {
                             // Only show the panel's content when the panel is movable.
                             moveableReady && (
                                 <Fragment>
-                                    <Head ref={headElRef} data-testid="Head">
+                                    <Head
+                                        ref={headElRef}
+                                        data-scrolled={scrolled}
+                                        data-testid="Head"
+                                    >
                                         <SourceOption
+                                            glass
                                             role="button"
                                             title={getI18nMessage(
                                                 `${currentTranslator}Short`,
@@ -1418,7 +1458,12 @@ export default function ResultPanel() {
                                         </HeadIcons>
                                     </Head>
                                     <Body ref={bodyElRef}>
-                                        <SimpleBar ref={simplebarRef}>
+                                        <SimpleBar
+                                            ref={simplebarRef}
+                                            scrollableNodeProps={{
+                                                onScroll: handleScroll,
+                                            }}
+                                        >
                                             {contentType === "LOADING" && <Loading />}
                                             {contentType === "RESULT" && <Result {...content} />}
                                             {contentType === "ERROR" && <Error {...content} />}
@@ -1550,15 +1595,15 @@ const GlobalStyle = createGlobalStyle`
  */
 const Panel = styled.div`
     --et-outline-color: rgba(255, 255, 255, 0.76);
-    --et-glass-top: rgba(255, 255, 255, 0.9);
-    --et-glass-bottom: rgba(248, 250, 253, 0.56);
-    --et-glass-sheen: rgba(255, 255, 255, 0.7);
+    --et-glass-top: rgba(255, 255, 255, 0.38);
+    --et-glass-bottom: rgba(248, 250, 253, 0.18);
+    --et-glass-sheen: rgba(255, 255, 255, 0.46);
 
     @media (prefers-color-scheme: dark) {
         --et-outline-color: rgba(255, 255, 255, 0.1);
-        --et-glass-top: rgba(33, 39, 46, 0.88);
-        --et-glass-bottom: rgba(22, 27, 32, 0.62);
-        --et-glass-sheen: rgba(255, 255, 255, 0.08);
+        --et-glass-top: rgba(33, 39, 46, 0.42);
+        --et-glass-bottom: rgba(22, 27, 32, 0.2);
+        --et-glass-sheen: rgba(255, 255, 255, 0.05);
     }
 
     display: flex;
@@ -1575,8 +1620,8 @@ const Panel = styled.div`
     isolation: isolate;
     box-shadow: 0 24px 64px rgba(30, 47, 72, 0.2), 0 8px 18px rgba(30, 47, 72, 0.1),
         inset 0 1px 0 rgba(255, 255, 255, 0.78);
-    background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.94), transparent 34%),
-        radial-gradient(circle at 92% 8%, rgba(211, 227, 253, 0.52), transparent 32%),
+    background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.46), transparent 34%),
+        radial-gradient(circle at 92% 8%, rgba(211, 227, 253, 0.24), transparent 32%),
         linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
     background-clip: padding-box;
     backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
@@ -1611,9 +1656,9 @@ const Panel = styled.div`
     &[data-display-type="fixed"] {
         box-shadow: 0 28px 70px rgba(30, 47, 72, 0.22), 0 12px 34px rgba(30, 47, 72, 0.14),
             inset 0 1px 0 rgba(255, 255, 255, 0.82);
-        background: radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.94), transparent 34%),
-            radial-gradient(circle at 94% 10%, rgba(211, 227, 253, 0.56), transparent 30%),
-            linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 253, 0.62));
+        background: radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.46), transparent 34%),
+            radial-gradient(circle at 94% 10%, rgba(211, 227, 253, 0.24), transparent 30%),
+            linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
     }
 
     &[data-motion="undocking"] {
@@ -1684,11 +1729,23 @@ const Panel = styled.div`
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
         background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.1), transparent 34%),
-            radial-gradient(circle at 92% 8%, rgba(31, 59, 104, 0.42), transparent 32%),
+            radial-gradient(circle at 92% 8%, rgba(31, 59, 104, 0.18), transparent 32%),
             linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
         border-color: rgba(255, 255, 255, 0.08);
         box-shadow: 0 24px 56px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.36),
             0 1px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    /* When the Liquid Glass engine is bound it owns the surface via an inline
+       backdrop-filter (real refraction) + a translucent tint background-color.
+       Drop the painted gradient fills so the rim refraction and specular read
+       through; border, shadow and the top sheen stay as glass-edge accents. */
+    &[data-liquid-glass="on"] {
+        background-image: none;
+    }
+
+    &[data-liquid-glass="on"]:before {
+        opacity: 0.34;
     }
 `;
 
@@ -1706,16 +1763,43 @@ const Head = styled.div`
     user-select: none;
     -webkit-user-select: none;
     touch-action: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.72);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(248, 250, 253, 0.28));
+    box-shadow: 0 4px 12px rgba(30, 47, 72, 0);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(248, 250, 253, 0.16));
     border-radius: inherit;
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
-    transition: background ${MotionStandard}, border-color ${MotionStandard};
+    transition: background ${MotionStandard}, border-color ${MotionStandard},
+        box-shadow ${MotionStandard};
+
+    &[data-scrolled="true"] {
+        box-shadow: 0 4px 12px rgba(30, 47, 72, 0.04);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(248, 250, 253, 0.28));
+    }
 
     @media (prefers-color-scheme: dark) {
-        border-bottom-color: ${DarkOutline};
-        background: linear-gradient(180deg, rgba(32, 38, 45, 0.7), rgba(27, 32, 38, 0.5));
+        background: linear-gradient(180deg, rgba(32, 38, 45, 0.46), rgba(27, 32, 38, 0.26));
+
+        &[data-scrolled="true"] {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+            background: linear-gradient(180deg, rgba(32, 38, 45, 0.62), rgba(27, 32, 38, 0.38));
+        }
+    }
+
+    /* When the engine owns the surface, thin the head fill so the top-rim
+       refraction + baked specular read through (controls keep their own fills). */
+    [data-liquid-glass="on"] & {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(248, 250, 253, 0.03));
+    }
+    [data-liquid-glass="on"] &[data-scrolled="true"] {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(248, 250, 253, 0.1));
+    }
+    @media (prefers-color-scheme: dark) {
+        [data-liquid-glass="on"] & {
+            background: linear-gradient(180deg, rgba(32, 38, 45, 0.2), rgba(27, 32, 38, 0.05));
+        }
+        [data-liquid-glass="on"] &[data-scrolled="true"] {
+            background: linear-gradient(180deg, rgba(32, 38, 45, 0.38), rgba(27, 32, 38, 0.14));
+        }
     }
 `;
 
@@ -1814,16 +1898,16 @@ const Body = styled.div`
     overflow-x: hidden;
     overflow-y: overlay;
     overscroll-behavior: contain;
-    background: linear-gradient(180deg, rgba(241, 244, 248, 0.34), rgba(248, 250, 253, 0.16)),
-        rgba(248, 250, 253, 0.12);
+    background: linear-gradient(180deg, rgba(241, 244, 248, 0.22), rgba(248, 250, 253, 0.1)),
+        rgba(248, 250, 253, 0.06);
     flex-grow: 1;
     flex-shrink: 1;
     word-break: break-word;
     transition: background ${MotionStandard};
 
     @media (prefers-color-scheme: dark) {
-        background: linear-gradient(180deg, rgba(36, 42, 49, 0.65), rgba(27, 32, 38, 0.35)),
-            rgba(21, 25, 29, 0.35);
+        background: linear-gradient(180deg, rgba(36, 42, 49, 0.42), rgba(27, 32, 38, 0.2)),
+            rgba(21, 25, 29, 0.2);
     }
 `;
 

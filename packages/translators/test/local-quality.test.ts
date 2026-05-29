@@ -115,7 +115,7 @@ describe("LocalTranslator multilingual quality prompts", () => {
             from: "en",
             to: "ko",
             output: "[[1:t]]\n계정 설정\n[[2:p]]\n비밀번호 재설정",
-            promptChecks: ["Translate English -> Korean"],
+            promptChecks: ["English>Korean"],
         },
     ];
 
@@ -139,16 +139,21 @@ describe("LocalTranslator multilingual quality prompts", () => {
 
         expect(result.mainMeaning).toBe(output);
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        const prompt = body.contents[0].parts[0].text;
+        const userPrompt = body.contents[0].parts[0].text;
+        const systemPrompt = body.systemInstruction.parts[0].text;
+        // The new design keeps generic quality directives in the system prompt (cache-friendly
+        // across requests) and per-request directives in the user message. Quality checks pass
+        // when the directive lands in either slot of the request.
+        const combined = `${systemPrompt}\n${userPrompt}`;
         if (/\[\[\d+:[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_\d+/.test(text)) {
-            expect(prompt).toContain(`Translate ${from === "en" ? "English" : from} ->`);
-            expect(body.systemInstruction.parts[0].text).toContain("Translate page segments only");
+            expect(userPrompt).toContain(`${from === "en" ? "English" : from}>`);
+            expect(systemPrompt).toContain("Translate page segments.");
         } else {
-            expect(prompt).toContain("Translate the user's text");
+            expect(userPrompt).toContain("Translate the user's text");
         }
-        expect(prompt).not.toContain("word or short term");
+        expect(combined).not.toContain("word or short term");
         for (const check of promptChecks) {
-            expect(prompt).toContain(check);
+            expect(combined).toContain(check);
         }
     });
 
@@ -209,17 +214,19 @@ describe("LocalTranslator multilingual quality prompts", () => {
 
         expect(result.mainMeaning).toBe("국세조사 사칭 의심스러운 이메일");
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        const prompt = body.contents[0].parts[0].text;
-        expect(prompt).toContain("Translate the user's text");
-        expect(prompt).not.toContain("word or short term");
-        expect(prompt).toContain("Use the target language's customary writing system.");
-        expect(prompt).toContain(
+        const userPrompt = body.contents[0].parts[0].text;
+        const systemPrompt = body.systemInstruction.parts[0].text;
+        const combined = `${systemPrompt}\n${userPrompt}`;
+        expect(userPrompt).toContain("Translate the user's text");
+        expect(combined).not.toContain("word or short term");
+        expect(combined).toContain("Use the target language's customary writing system.");
+        expect(combined).toContain(
             "Never create mixed-script words by combining source-script characters"
         );
-        expect(prompt).toContain("For Han-script source text");
-        expect(prompt).toContain("complete semantic units");
-        expect(prompt).toContain("Do not partially translate compound nouns");
-        expect(prompt).toContain("Silently scan the final answer for mixed-script words");
+        expect(combined).toContain("For Han-script source text");
+        expect(combined).toContain("complete semantic units");
+        expect(combined).toContain("Do not partially translate compound nouns");
+        expect(combined).toContain("Silently scan the final answer for mixed-script words");
     });
 
     test("repairs only mixed-script fragments from Google AI Studio output", async () => {
