@@ -112,9 +112,39 @@ describe("pdfDetection redirect guards", () => {
         await Promise.resolve();
 
         expect(global.chrome.tabs.update).toHaveBeenCalledWith(11, {
-            url:
-                "chrome-extension://edge/web/viewer.html?file=https%3A%2F%2Fexample.com%2Fdocument%2Fviewer%3Fid%3D123&source=https%3A%2F%2Fexample.com%2Fdocument%2Fviewer%3Fid%3D123",
+            url: "chrome-extension://edge/web/viewer.html?file=https%3A%2F%2Fexample.com%2Fdocument%2Fviewer%3Fid%3D123&source=https%3A%2F%2Fexample.com%2Fdocument%2Fviewer%3Fid%3D123",
         });
+        detection.dispose();
+    });
+
+    it("does not redirect when the built-in viewer is disabled (isEnabled=false)", async () => {
+        let navigationListener;
+        global.chrome = {
+            runtime: { getURL: jest.fn((path) => `chrome-extension://edge/${path}`) },
+            tabs: { update: jest.fn() },
+            webRequest: {
+                onHeadersReceived: { addListener: jest.fn(), removeListener: jest.fn() },
+            },
+            webNavigation: {
+                onCommitted: {
+                    addListener: jest.fn((listener) => {
+                        navigationListener = listener;
+                    }),
+                    removeListener: jest.fn(),
+                },
+            },
+        };
+
+        // Listener is still registered (MV3 requires synchronous registration); the redirect is
+        // gated live, so a confirmed PDF navigation is left to the browser's native viewer.
+        const detection = setupPdfDetection({ isEnabled: () => false });
+        await navigationListener({
+            frameId: 0,
+            tabId: 9,
+            url: "file:///Users/me/sample.pdf",
+        });
+
+        expect(global.chrome.tabs.update).not.toHaveBeenCalled();
         detection.dispose();
     });
 });

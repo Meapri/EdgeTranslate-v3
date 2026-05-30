@@ -243,6 +243,10 @@
         "message": "ページ翻訳バナーを非表示",
         "description": "ページ全体の翻訳中に表示されるバナーを非表示にします。"
     },
+    "EnableBuiltinPdfViewer": {
+        "message": "内蔵PDFビューアを使用",
+        "description": "PDFファイルをブラウザの既定のビューアではなく、EdgeTranslate内蔵のpdf.jsビューアで開きます。"
+    },
     "GooglePageTranslate": {
         "message": "Google ページ翻訳",
         "description": "Google翻訳APIで現在のページを翻訳します。"

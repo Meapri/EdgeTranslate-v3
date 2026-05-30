@@ -28,6 +28,11 @@ const DEFAULT_SETTINGS = {
         RealtimeCaptionTranslate: false,
         CancelTextSelection: false,
         UseGoogleAnalytics: false,
+        // When true (default), PDF links open in the bundled pdf.js viewer; when false,
+        // the browser's native PDF handler is used. Nested here so the falsy check in
+        // getOrSetDefaultSettings (which would reset a top-level default-true boolean)
+        // never clobbers a user's "off" choice.
+        EnableBuiltinPdfViewer: true,
     },
     DefaultTranslator: "GoogleTranslate",
     DefaultPageTranslator: "GooglePageTranslate",

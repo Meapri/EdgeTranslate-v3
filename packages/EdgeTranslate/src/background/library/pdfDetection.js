@@ -308,7 +308,7 @@ async function redirectToViewer(tabId, url, config, { logInfo, logWarn }) {
     }
 }
 
-function setupWebRequestListener({ cache, probeCache, config, logInfo, logWarn }) {
+function setupWebRequestListener({ cache, probeCache, config, logInfo, logWarn, isEnabled }) {
     if (
         !chrome?.webRequest?.onHeadersReceived ||
         typeof chrome.webRequest.onHeadersReceived.addListener !== "function"
@@ -318,6 +318,10 @@ function setupWebRequestListener({ cache, probeCache, config, logInfo, logWarn }
 
     const listener = (details) => {
         try {
+            // Gate at call time, not by un/registering the listener: MV3 requires listeners to
+            // be added synchronously at top level, so the built-in-viewer setting is checked
+            // live here instead. Disabled → do nothing, the browser handles the PDF natively.
+            if (isEnabled && !isEnabled()) return;
             if (details.frameId !== 0 || typeof details.url !== "string") return;
             if (!shouldHandlePdfNavigationUrl(details.url, config)) return;
 
@@ -378,7 +382,15 @@ function setupWebRequestListener({ cache, probeCache, config, logInfo, logWarn }
     }
 }
 
-function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, inflightProbes }) {
+function setupNavigationListener({
+    cache,
+    config,
+    logInfo,
+    logWarn,
+    probeCache,
+    inflightProbes,
+    isEnabled,
+}) {
     if (
         !chrome?.webNavigation?.onCommitted ||
         typeof chrome.webNavigation.onCommitted.addListener !== "function"
@@ -388,6 +400,9 @@ function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, 
 
     const listener = async (details) => {
         try {
+            // Live setting check (see setupWebRequestListener) — disabled means leave the PDF
+            // to the browser's native viewer instead of redirecting to the bundled one.
+            if (isEnabled && !isEnabled()) return;
             if (details.frameId !== 0 || typeof details.url !== "string") return;
             const { url, tabId } = details;
 
@@ -454,11 +469,14 @@ function setupNavigationListener({ cache, config, logInfo, logWarn, probeCache, 
     }
 }
 
-export function setupPdfDetection({ config: overrides, logInfo, logWarn } = {}) {
+export function setupPdfDetection({ config: overrides, logInfo, logWarn, isEnabled } = {}) {
     const config = extendConfig(overrides);
     const cache = createCache(config.cacheTtlMs);
     const probeCache = createCache(config.networkProbeCacheTtlMs);
     const inflightProbes = new Map();
+    // Default to always-on; the background passes a getter so the EnableBuiltinPdfViewer
+    // setting can suppress the redirect live without un/registering listeners.
+    const enabledGetter = typeof isEnabled === "function" ? isEnabled : () => true;
 
     const webRequest = setupWebRequestListener({
         cache,
@@ -466,6 +484,7 @@ export function setupPdfDetection({ config: overrides, logInfo, logWarn } = {}) 
         config,
         logInfo,
         logWarn,
+        isEnabled: enabledGetter,
     });
     const navigation = setupNavigationListener({
         cache,
@@ -474,6 +493,7 @@ export function setupPdfDetection({ config: overrides, logInfo, logWarn } = {}) 
         logWarn,
         probeCache,
         inflightProbes,
+        isEnabled: enabledGetter,
     });
 
     return {

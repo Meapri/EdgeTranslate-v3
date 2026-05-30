@@ -247,6 +247,10 @@
         "message": "Hide the page-translation banner",
         "description": "Hide the banner shown while translating a whole page."
     },
+    "EnableBuiltinPdfViewer": {
+        "message": "Use the built-in PDF viewer",
+        "description": "Open PDF files in EdgeTranslate's built-in pdf.js viewer instead of the browser's default viewer."
+    },
     "GooglePageTranslate": {
         "message": "Google Page Trans.",
         "description": "Translate current page with Google translate api."

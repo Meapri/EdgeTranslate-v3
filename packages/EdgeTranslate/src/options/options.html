@@ -29,7 +29,10 @@
                         </button>
                         <button class="nav-tab" data-tab="captions">
                             <span class="nav-icon nav-icon-captions" aria-hidden="true"></span>
-                            <span class="nav-label i18n" data-i18n-name="RealtimeCaptionSettings"></span>
+                            <span
+                                class="nav-label i18n"
+                                data-i18n-name="RealtimeCaptionSettings"
+                            ></span>
                         </button>
                     </aside>
                     <div class="tab-content">
@@ -325,6 +328,23 @@
                                                 for="hide-page-translator-banner"
                                                 class="checked-label i18n"
                                                 data-i18n-name="HidePageTranslatorBanner"
+                                            ></label>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="OtherSettings EnableBuiltinPdfViewer"
+                                                class="switch"
+                                                id="enable-builtin-pdf-viewer"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="enable-builtin-pdf-viewer"
+                                                class="checked-label i18n"
+                                                data-i18n-name="EnableBuiltinPdfViewer"
                                             ></label>
                                         </div>
                                     </div>
@@ -681,10 +701,7 @@
                                         </label>
                                     </div>
                                 </div>
-                                <div
-                                    class="row"
-                                    id="local-translator-openai-compatible-settings"
-                                >
+                                <div class="row" id="local-translator-openai-compatible-settings">
                                     <div
                                         class="column provider-heading"
                                         data-local-mode="openaiCompatible"
@@ -868,10 +885,7 @@
                                         </label>
                                     </div>
                                 </div>
-                                <div
-                                    class="row"
-                                    id="precise-translator-openai-compatible-settings"
-                                >
+                                <div class="row" id="precise-translator-openai-compatible-settings">
                                     <div class="column" data-precise-mode="openaiCompatible">
                                         <label
                                             for="precise-translator-openai-compatible-model"

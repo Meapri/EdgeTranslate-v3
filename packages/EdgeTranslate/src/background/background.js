@@ -31,7 +31,30 @@ import {
 
 initializeBackgroundErrorHandling({ logWarn });
 setupServiceWorkerMocks();
-setupPdfDetection({ logInfo, logWarn });
+
+/**
+ * Built-in pdf.js viewer, gated on the OtherSettings.EnableBuiltinPdfViewer setting
+ * (default on). The PDF-detection listeners are registered ONCE, synchronously, at the top
+ * level — MV3 requires that, and un/registering them from an async storage callback is
+ * unreliable (a navigation could fire before the callback runs, so a disabled viewer could
+ * still redirect and land on a blank viewer page). Instead the redirect is gated live by a
+ * flag the listeners read on every event. Reads storage with `!== false` so an existing user
+ * who never opened options keeps the viewer, and a user who turned it off is respected
+ * (getOrSetDefaultSettings' falsy check can't be used for a default-true boolean).
+ */
+let builtinPdfViewerEnabled = true;
+setupPdfDetection({ logInfo, logWarn, isEnabled: () => builtinPdfViewerEnabled });
+try {
+    chrome.storage.sync.get("OtherSettings", ({ OtherSettings }) => {
+        builtinPdfViewerEnabled = OtherSettings?.EnableBuiltinPdfViewer !== false;
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "sync" || !changes.OtherSettings) return;
+        builtinPdfViewerEnabled = changes.OtherSettings.newValue?.EnableBuiltinPdfViewer !== false;
+    });
+} catch {
+    // Storage unavailable (e.g. test/mocked env) — leave the viewer enabled.
+}
 
 /**
  * Chrome Runtime 오류 처리

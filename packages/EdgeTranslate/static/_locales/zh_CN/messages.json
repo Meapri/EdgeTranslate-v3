@@ -243,6 +243,10 @@
         "message": "隐藏整页翻译横幅",
         "description": "隐藏整页翻译时显示的横幅。"
     },
+    "EnableBuiltinPdfViewer": {
+        "message": "使用内置 PDF 阅读器",
+        "description": "使用 EdgeTranslate 内置的 pdf.js 阅读器打开 PDF 文件，而非浏览器默认阅读器。"
+    },
     "GooglePageTranslate": {
         "message": "Google 网页翻译",
         "description": "使用 Google 翻译当前页面。"

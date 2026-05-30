@@ -243,6 +243,10 @@
         "message": "隱藏整頁翻譯橫幅",
         "description": "隱藏整頁翻譯時顯示的橫幅。"
     },
+    "EnableBuiltinPdfViewer": {
+        "message": "使用內建 PDF 檢視器",
+        "description": "使用 EdgeTranslate 內建的 pdf.js 檢視器開啟 PDF 檔案，而非瀏覽器預設檢視器。"
+    },
     "GooglePageTranslate": {
         "message": "Google 網頁翻譯",
         "description": "使用 Google 翻譯目前頁面。"

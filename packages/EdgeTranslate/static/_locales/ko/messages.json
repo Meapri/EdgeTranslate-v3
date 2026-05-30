@@ -243,6 +243,10 @@
         "message": "페이지 번역 배너 숨기기",
         "description": "전체 페이지 번역 중 표시되는 배너를 숨깁니다."
     },
+    "EnableBuiltinPdfViewer": {
+        "message": "내장 PDF 뷰어 사용",
+        "description": "PDF 파일을 브라우저 기본 뷰어 대신 EdgeTranslate 내장 pdf.js 뷰어로 엽니다."
+    },
     "GooglePageTranslate": {
         "message": "Google 페이지 번역",
         "description": "Google로 현재 페이지 번역"

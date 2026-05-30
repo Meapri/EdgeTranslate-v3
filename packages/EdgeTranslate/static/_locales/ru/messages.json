@@ -243,6 +243,10 @@
         "message": "Скрыть баннер перевода страницы",
         "description": "Скрывать баннер, отображаемый при переводе всей страницы."
     },
+    "EnableBuiltinPdfViewer": {
+        "message": "Использовать встроенный просмотрщик PDF",
+        "description": "Открывать PDF-файлы во встроенном просмотрщике pdf.js EdgeTranslate вместо стандартного браузерного."
+    },
     "GooglePageTranslate": {
         "message": "Перевод страниц Google",
         "description": "Перевод текущей страницы с помощью Google Translate API."
