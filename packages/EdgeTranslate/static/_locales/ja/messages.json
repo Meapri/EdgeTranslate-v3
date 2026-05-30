@@ -239,6 +239,10 @@
         "message": "翻訳後のテキスト選択をキャンセル",
         "description": "翻訳後、テキスト選択を自動的にキャンセルします。"
     },
+    "HidePageTranslatorBanner": {
+        "message": "ページ翻訳バナーを非表示",
+        "description": "ページ全体の翻訳中に表示されるバナーを非表示にします。"
+    },
     "GooglePageTranslate": {
         "message": "Google ページ翻訳",
         "description": "Google翻訳APIで現在のページを翻訳します。"

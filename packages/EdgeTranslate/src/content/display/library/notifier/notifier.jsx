@@ -18,9 +18,7 @@ import CloseIcon from "./icons/close.svg";
  */
 export default function NotifierTemplate(props) {
     return (
-        <div
-            class={`edge-translate-notifier-item edge-translate-notifier-show-animation edge-translate-notifier-${props.type}`}
-        >
+        <div class={`edge-translate-notifier-item edge-translate-notifier-${props.type}`}>
             <div class="edge-translate-notifier-icon">
                 {props.type === "success" && <SuccessIcon />}
                 {props.type === "info" && <InfoIcon />}

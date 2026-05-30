@@ -54,9 +54,9 @@ const LoadingEffect = styled.div`
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        background: linear-gradient(135deg, rgba(11, 87, 208, 0.86), rgba(15, 109, 88, 0.82));
+        background: linear-gradient(135deg, rgba(0, 102, 204, 0.86), rgba(0, 102, 204, 0.82));
         box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.45),
-            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(11, 87, 208, 0.16);
+            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(0, 102, 204, 0.16);
         transform: translateY(0) scale(0.88);
         opacity: 0.78;
         animation: et-loader-bead 1.4s infinite ease-in-out;
@@ -68,16 +68,16 @@ const LoadingEffect = styled.div`
 
     .glass-loader__bead--two {
         animation-delay: 0.16s;
-        background: linear-gradient(135deg, rgba(15, 109, 88, 0.86), rgba(11, 87, 208, 0.82));
+        background: linear-gradient(135deg, rgba(0, 102, 204, 0.86), rgba(0, 102, 204, 0.82));
         box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.45),
-            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(15, 109, 88, 0.16);
+            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(0, 102, 204, 0.16);
     }
 
     .glass-loader__bead--three {
         animation-delay: 0.32s;
-        background: linear-gradient(135deg, rgba(11, 87, 208, 0.86), rgba(15, 109, 88, 0.82));
+        background: linear-gradient(135deg, rgba(0, 102, 204, 0.86), rgba(0, 102, 204, 0.82));
         box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.45),
-            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(11, 87, 208, 0.16);
+            inset -1px -1px 0 rgba(0, 0, 0, 0.08), 0 8px 18px rgba(0, 102, 204, 0.16);
     }
 
     .glass-loader__ambient {
@@ -87,8 +87,8 @@ const LoadingEffect = styled.div`
         border-radius: 999px;
         background: radial-gradient(
             circle,
-            rgba(11, 87, 208, 0.12) 0%,
-            rgba(15, 109, 88, 0.05) 50%,
+            rgba(0, 102, 204, 0.12) 0%,
+            rgba(0, 102, 204, 0.05) 50%,
             transparent 80%
         );
         filter: blur(12px);
@@ -138,18 +138,18 @@ const LoadingEffect = styled.div`
         .glass-loader__bead {
             background: linear-gradient(
                 135deg,
-                rgba(168, 199, 250, 0.86),
+                rgba(41, 151, 255, 0.86),
                 rgba(147, 216, 193, 0.82)
             );
             box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.25),
-                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(168, 199, 250, 0.18);
+                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(41, 151, 255, 0.18);
         }
 
         .glass-loader__bead--two {
             background: linear-gradient(
                 135deg,
                 rgba(147, 216, 193, 0.86),
-                rgba(168, 199, 250, 0.82)
+                rgba(41, 151, 255, 0.82)
             );
             box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.25),
                 inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(147, 216, 193, 0.18);
@@ -158,17 +158,17 @@ const LoadingEffect = styled.div`
         .glass-loader__bead--three {
             background: linear-gradient(
                 135deg,
-                rgba(168, 199, 250, 0.86),
+                rgba(41, 151, 255, 0.86),
                 rgba(147, 216, 193, 0.82)
             );
             box-shadow: inset 1px 1.5px 0 rgba(255, 255, 255, 0.25),
-                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(168, 199, 250, 0.18);
+                inset -1px -1px 0 rgba(0, 0, 0, 0.2), 0 8px 18px rgba(41, 151, 255, 0.18);
         }
 
         .glass-loader__ambient {
             background: radial-gradient(
                 circle,
-                rgba(168, 199, 250, 0.16) 0%,
+                rgba(41, 151, 255, 0.16) 0%,
                 rgba(147, 216, 193, 0.06) 50%,
                 transparent 80%
             );

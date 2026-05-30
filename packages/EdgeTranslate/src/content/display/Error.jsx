@@ -79,16 +79,16 @@ const ErrorInfo = styled.div`
     align-items: flex-start;
     margin: 10% 5%;
     padding: 18px;
-    color: #202124;
+    color: #1d1d1f;
     background: #fff;
-    border: 1px solid #e1e3e1;
+    border: 1px solid #e5e5ea;
     border-radius: 8px;
     box-shadow: 0 1px 2px rgba(60, 64, 67, 0.12);
 
     @media (prefers-color-scheme: dark) {
-        color: #e8eaed;
-        background: #20262d;
-        border-color: #3d4651;
+        color: #f5f5f7;
+        background: #1d1d1f;
+        border-color: #48484a;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
     }
 `;
@@ -114,17 +114,17 @@ const StyledErrorIcon = styled(ErrorIcon)`
 `;
 
 const ErrorType = styled.p`
-    font-weight: 500;
+    font-weight: 600;
     font-size: 18px;
 `;
 
 const ErrorMessage = styled.p`
     margin: 4px 0;
-    color: #5f6368;
+    color: #6e6e73;
     font-size: 13px;
     line-height: 1.45;
 
     @media (prefers-color-scheme: dark) {
-        color: #bdc1c6;
+        color: #aeaeb2;
     }
 `;

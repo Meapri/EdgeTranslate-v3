@@ -105,9 +105,12 @@ class TranslatorManager {
 
         // In-memory caches and options to avoid redundant network requests
         this.cacheOptions = {
-            maxEntries: 300,
+            // Wider + longer-lived so re-translating the same page/section (revisits,
+            // multi-tab, SPA re-renders) is an instant cache hit instead of a round-trip.
+            // ~1000 small JSON results is a few MB — cheap for the speed it buys.
+            maxEntries: 1000,
             detectTtlMs: 10 * 60 * 1000, // 10 minutes
-            translateTtlMs: 30 * 60 * 1000, // 30 minutes
+            translateTtlMs: 60 * 60 * 1000, // 60 minutes
             maxKeyTextLength: 500,
         };
         this.detectCache = new TtlCache({ maxEntries: this.cacheOptions.maxEntries });
@@ -566,8 +569,10 @@ class TranslatorManager {
         const appended = text.slice(previous.length);
         const now = Date.now();
         const elapsed = now - (context.lastTranslationStreamAt || 0);
-        if (appended.length >= 12) return true;
-        if (elapsed < 90 && !/[\n.!?。！？]$/.test(text)) return false;
+        // Snappier reveal in the result panel: surface streamed text a touch sooner.
+        // (The panel coalesces its own DOM writes, so more frequent commits are cheap.)
+        if (appended.length >= 10) return true;
+        if (elapsed < 65 && !/[\n.!?。！？]$/.test(text)) return false;
         if (appended.length >= 4) return true;
         return /[\s\n.!?。！？,，、;；:：)\]}]$/.test(text);
     }
@@ -577,12 +582,12 @@ class TranslatorManager {
         if (text === previous) return false;
         if (previous && !text.startsWith(previous)) {
             const now = Date.now();
-            return now - (context.lastTranslationPreviewAt || 0) >= 240;
+            return now - (context.lastTranslationPreviewAt || 0) >= 200;
         }
         const appended = previous ? text.slice(previous.length) : text;
         const now = Date.now();
-        if (appended.length >= 18) return true;
-        if (now - (context.lastTranslationPreviewAt || 0) < 180) return false;
+        if (appended.length >= 14) return true;
+        if (now - (context.lastTranslationPreviewAt || 0) < 140) return false;
         return appended.length >= 6 || /[\n.!?。！？]$/.test(text);
     }
 
@@ -1110,9 +1115,11 @@ class TranslatorManager {
                 const channel = this.channel;
                 onProgress = (accumulatedText) => {
                     const now = Date.now();
-                    // Throttle: at most every 80ms OR every +120 chars, whichever comes first.
-                    const enoughTime = now - lastEmitAt >= 80;
-                    const enoughChars = accumulatedText.length - lastEmittedLen >= 120;
+                    // Throttle: at most every 50ms OR every +80 chars, whichever comes
+                    // first. The content side rAF-coalesces DOM writes, so emitting more
+                    // often just reveals streamed page text sooner without thrashing.
+                    const enoughTime = now - lastEmitAt >= 50;
+                    const enoughChars = accumulatedText.length - lastEmittedLen >= 80;
                     if (!enoughTime && !enoughChars) return;
                     lastEmitAt = now;
                     lastEmittedLen = accumulatedText.length;

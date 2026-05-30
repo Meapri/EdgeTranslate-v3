@@ -239,6 +239,10 @@
         "message": "翻译后取消文本选择",
         "description": "翻译后自动取消文本选择"
     },
+    "HidePageTranslatorBanner": {
+        "message": "隐藏整页翻译横幅",
+        "description": "隐藏整页翻译时显示的横幅。"
+    },
     "GooglePageTranslate": {
         "message": "Google 网页翻译",
         "description": "使用 Google 翻译当前页面。"

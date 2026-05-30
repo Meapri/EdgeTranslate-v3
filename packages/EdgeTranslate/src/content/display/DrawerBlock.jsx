@@ -75,7 +75,7 @@ const HandleExpandHeight = 28; // Height of the drawer handler when the drawer i
 const Drawer = styled.div`
     --drawer-handle-surface: #fff;
     --drawer-handle-fade: rgba(255, 255, 255, 0.44);
-    --drawer-handle-hover-fade: rgba(211, 227, 253, 0.72);
+    --drawer-handle-hover-fade: rgba(0, 102, 204, 0.72);
     overflow: hidden;
     position: relative;
     transition: height ${MotionStandard};
@@ -86,7 +86,7 @@ const Drawer = styled.div`
     }
 
     @media (prefers-color-scheme: dark) {
-        --drawer-handle-surface: #1b2026;
+        --drawer-handle-surface: #1d1d1f;
         --drawer-handle-fade: rgba(27, 32, 38, 0.48);
         --drawer-handle-hover-fade: rgba(31, 59, 104, 0.72);
     }
@@ -122,7 +122,7 @@ const Handle = styled.div`
     }
 
     &:hover svg {
-        fill: #0b57d0;
+        fill: #0066cc;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -131,17 +131,17 @@ const Handle = styled.div`
 
     @media (prefers-color-scheme: dark) {
         &:hover svg {
-            fill: #a8c7fa;
+            fill: #2997ff;
         }
     }
 `;
 const IconStyle = css`
     width: 20px;
     height: 20px;
-    fill: #5f6368;
+    fill: #6e6e73;
 
     @media (prefers-color-scheme: dark) {
-        fill: #bdc1c6;
+        fill: #aeaeb2;
     }
 `;
 const StyledArrowDownIcon = styled(ArrowDownIcon)`

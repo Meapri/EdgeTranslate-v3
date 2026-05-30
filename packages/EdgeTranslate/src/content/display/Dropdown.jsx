@@ -4,7 +4,6 @@ import { forwardRef } from "preact/compat";
 import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import styled, { css } from "styled-components";
 import ArrowDownIcon from "./icons/arrow-down.svg";
-import { LiquidGlass } from "liquid-glass";
 
 const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 
@@ -44,45 +43,6 @@ const Dropdown = forwardRef((props, ref) => {
     useEffect(() => {
         return () => window.removeEventListener("click", clickAwayHandler);
     }, [clickAwayHandler]);
-
-    // Opt-in Liquid Glass on the menu surface. lazy:true lets the engine build
-    // the filter only while the menu is shown (display toggles intersection) and
-    // drop it when closed. Keep a fairly opaque tint so the menu items stay
-    // legible; the engine adds rim refraction + specular at the 8px corners.
-    useEffect(() => {
-        if (!props.glass || !menuElRef.current) return undefined;
-        const prefersDark = () =>
-            window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-        const tintFor = () =>
-            prefersDark() ? "rgba(32, 38, 45, 0.66)" : "rgba(255, 255, 255, 0.62)";
-        let glass = null;
-        try {
-            glass = new LiquidGlass(menuElRef.current, {
-                quality: "high",
-                lazy: true,
-                scheme: "auto",
-                radius: 8,
-                thickness: 12,
-                refraction: 14,
-                chromaticAberration: 0.45,
-                blur: 6,
-                saturation: 175,
-                specularIntensity: 0.7,
-                tint: tintFor(),
-                applyRadius: false,
-                fallbackFilter: "blur(16px) saturate(160%)",
-            });
-        } catch {
-            glass = null;
-        }
-        const mql = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
-        const onScheme = () => glass && glass.update({ tint: tintFor() });
-        if (mql && mql.addEventListener) mql.addEventListener("change", onScheme);
-        return () => {
-            if (mql && mql.removeEventListener) mql.removeEventListener("change", onScheme);
-            if (glass) glass.destroy();
-        };
-    }, [props.glass]);
 
     return (
         <StyledSelect className={props.className} ref={ref}>
@@ -145,7 +105,15 @@ const StyledSelect = styled.div`
     font-size: 0;
 `;
 const Menu = styled.ul`
+    /* Chromium-native open/close: the open/closed visual states are declared
+       here (driven by the \`open\` prop), \`display ... allow-discrete\` animates
+       the none↔block toggle, and @starting-style gives the first-open from-state.
+       No keyframes — the menu also gets a real close animation for free. */
     display: ${(props) => (props.open ? "block" : "none")};
+    opacity: ${(props) => (props.open ? 1 : 0)};
+    transform: ${(props) =>
+        props.open ? "translateY(0) scale(1)" : "translateY(-8px) scale(0.97)"};
+    transform-origin: top center;
     min-width: 168px;
     margin: 6px 0 0;
     list-style: none;
@@ -154,7 +122,7 @@ const Menu = styled.ul`
     background-color: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(16px) saturate(160%);
     -webkit-backdrop-filter: blur(16px) saturate(160%);
-    border: 1px solid #e1e3e1;
+    border: 1px solid #e5e5ea;
     border-radius: 8px;
     padding: 6px;
     position: absolute;
@@ -163,23 +131,23 @@ const Menu = styled.ul`
     z-index: 6;
     float: left;
     box-shadow: 0 12px 30px rgba(60, 64, 67, 0.16), 0 3px 8px rgba(60, 64, 67, 0.12);
-    animation: et-dropdown-enter 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    transition: opacity 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), display 240ms allow-discrete;
 
-    @keyframes et-dropdown-enter {
-        from {
+    @starting-style {
+        & {
             opacity: 0;
             transform: translateY(-8px) scale(0.97);
         }
+    }
 
-        to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-        }
+    @media (prefers-reduced-motion: reduce) {
+        transition-duration: 1ms;
     }
 
     @media (prefers-color-scheme: dark) {
         background-color: rgba(32, 38, 45, 0.9);
-        border-color: #3d4651;
+        border-color: #48484a;
         box-shadow: 0 16px 34px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.3);
     }
 `;
@@ -205,27 +173,27 @@ const Title = styled.a`
     line-height: 1.5;
     border-radius: 999px;
     transition: color ${MotionFast}, background-color ${MotionFast};
-    color: #0b57d0;
+    color: #0066cc;
     background-color: transparent;
     overflow: hidden;
     &:hover {
-        color: #0b57d0;
-        background: rgba(11, 87, 208, 0.08);
+        color: #0066cc;
+        background: rgba(0, 102, 204, 0.08);
     }
     &:hover svg {
-        fill: #0b57d0;
+        fill: #0066cc;
     }
 
     @media (prefers-color-scheme: dark) {
-        color: #a8c7fa;
+        color: #2997ff;
 
         &:hover {
-            color: #d3e3fd;
-            background: rgba(168, 199, 250, 0.14);
+            color: #e3edfb;
+            background: rgba(41, 151, 255, 0.14);
         }
 
         &:hover svg {
-            fill: #d3e3fd;
+            fill: #e3edfb;
         }
     }
 `;
@@ -237,49 +205,49 @@ const TitleLabel = styled.span`
 `;
 const StyledArrowDownIcon = styled(ArrowDownIcon)`
     flex: 0 0 auto;
-    fill: #0b57d0;
+    fill: #0066cc;
     width: 16px;
     height: 16px;
     margin-left: 0;
 
     @media (prefers-color-scheme: dark) {
-        fill: #a8c7fa;
+        fill: #2997ff;
     }
 `;
 
 /* Style of Item */
 const ActiveStyle = css`
-    color: #0b57d0;
+    color: #0066cc;
     font-weight: 700;
-    background-color: #d3e3fd;
+    background-color: #e3edfb;
     &:hover {
-        color: #0b57d0;
-        background-color: #d3e3fd;
+        color: #0066cc;
+        background-color: #e3edfb;
     }
 
     @media (prefers-color-scheme: dark) {
-        color: #d3e3fd;
-        background-color: #1f3b68;
+        color: #e3edfb;
+        background-color: #173a5e;
 
         &:hover {
-            color: #d3e3fd;
-            background-color: #1f3b68;
+            color: #e3edfb;
+            background-color: #173a5e;
         }
     }
 `;
 const InActiveStyle = css`
-    color: #202124;
+    color: #1d1d1f;
     &:hover {
-        color: #0b57d0;
-        background-color: rgba(11, 87, 208, 0.08);
+        color: #0066cc;
+        background-color: rgba(0, 102, 204, 0.08);
     }
 
     @media (prefers-color-scheme: dark) {
-        color: #e8eaed;
+        color: #f5f5f7;
 
         &:hover {
-            color: #d3e3fd;
-            background-color: rgba(168, 199, 250, 0.14);
+            color: #e3edfb;
+            background-color: rgba(41, 151, 255, 0.14);
         }
     }
 `;

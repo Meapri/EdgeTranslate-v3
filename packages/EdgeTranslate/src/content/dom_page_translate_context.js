@@ -306,7 +306,10 @@ function buildSafeTranslatedHtml(originalElement, translatedHtml) {
         return null;
     }
     if (!sanitizeTranslatedHtmlContainer(container)) return null;
-    restoreHtmlCriticalAttributes(originalElement, container);
+    // Reject when the model reshaped the markup — applying it would break the
+    // layout (e.g. flex/inline widgets collapsing to stacked full-width boxes).
+    // Leaving the element untranslated is far better than mangling the page.
+    if (!restoreHtmlCriticalAttributes(originalElement, container)) return null;
     return container;
 }
 
@@ -972,12 +975,273 @@ function topLevelChildrenMatch(originalChildren, translatedChildren) {
     return true;
 }
 
+// Collect an element's meaningful (non-whitespace-only) text nodes in document order.
+// This is the unit the model actually translates, and the only thing we ever mutate on
+// apply — element structure, attributes and event listeners are never touched.
+function collectMeaningfulTextNodes(element) {
+    const out = [];
+    if (!element) return out;
+    if (element.nodeType === Node.TEXT_NODE) {
+        if (normalizeBlockText(element.nodeValue)) out.push(element);
+        return out;
+    }
+    const ownerDocument = element.ownerDocument;
+    if (!ownerDocument || !ownerDocument.createTreeWalker) return out;
+    const walker = ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!normalizeBlockText(node.nodeValue)) return NodeFilter.FILTER_REJECT;
+            // Skip text inside subtrees the segment payload does NOT map (code-like opaque
+            // tags + embedded/non-text elements) so the node count here matches exactly what
+            // serializeBlockSegment emitted — otherwise a single <code> span would desync the
+            // positional mapping and drop the whole block.
+            for (let p = node.parentElement; p && p !== element; p = p.parentElement) {
+                if (SEGMENT_UNMAPPED_TAGS.has(String(p.tagName || "").toUpperCase())) {
+                    return NodeFilter.FILTER_REJECT;
+                }
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
+    let node;
+    while ((node = walker.nextNode())) out.push(node);
+    return out;
+}
+
+// Keep the original node's leading/trailing whitespace so inline runs ("foo <b>bar</b>")
+// don't lose the spaces that separate them after we overwrite the text.
+function preserveTextNodeBoundaryWhitespace(node, translated) {
+    const raw = String((node && node.nodeValue) || "");
+    const lead = /^\s/.test(raw) ? " " : "";
+    const trail = /\s$/.test(raw) ? " " : "";
+    return `${lead}${translated}${trail}`;
+}
+
+/**
+ * THE fundamental-safety primitive for page translation: copy the model's translated
+ * text onto the ORIGINAL element's text nodes, in document order, without ever touching
+ * its structure or attributes. Because we only write textNode.nodeValue, the layout
+ * literally cannot break — every class, flex container, svg icon and event handler stays
+ * exactly where the page put it, regardless of how the model reshaped its own HTML.
+ *
+ * Returns true when at least one node was written. Bails (writes nothing) when the
+ * text-node counts diverge — that means the model split/merged/dropped text and a
+ * positional mapping would scramble which sentence lands where, so we leave the element
+ * untranslated instead. Worst case is "some text stays in the source language", never a
+ * broken page.
+ */
+function applyTranslatedTextNodes(originalElement, translatedElement) {
+    const originals = collectMeaningfulTextNodes(originalElement);
+    if (!originals.length) return false;
+    const translations = collectMeaningfulTextNodes(translatedElement);
+    if (originals.length !== translations.length) return false;
+    let wrote = false;
+    for (let i = 0; i < originals.length; i += 1) {
+        const value = normalizeBlockText(translations[i].nodeValue);
+        if (!value) continue;
+        originals[i].nodeValue = preserveTextNodeBoundaryWhitespace(originals[i], value);
+        wrote = true;
+    }
+    return wrote;
+}
+
+// ---------------------------------------------------------------------------
+// Google-style segment translation (fast / low-token / stable)
+// ---------------------------------------------------------------------------
+// Instead of round-tripping structural HTML (which costs tokens on every tag and
+// invites the model to reshape the layout), we send a flat numbered list of block
+// texts — plain text plus attribute-free INLINE tags only — and apply each reply by
+// writing text-node values back onto the original block. No structural tag is ever
+// sent or generated, and the live DOM structure is never touched.
+// ---------------------------------------------------------------------------
+
+// Inline tags whose CONTENT is translated and mapped back. They carry sentence flow (so
+// the model translates "click <a>here</a> now" as one sentence) and double as text-node
+// boundaries for the positional apply.
+const SEGMENT_INLINE_TAGS = new Set([
+    "A",
+    "ABBR",
+    "B",
+    "BDI",
+    "BDO",
+    "CITE",
+    "DEL",
+    "DFN",
+    "EM",
+    "FONT",
+    "I",
+    "INS",
+    "MARK",
+    "Q",
+    "S",
+    "SMALL",
+    "SPAN",
+    "STRONG",
+    "SUB",
+    "SUP",
+    "TIME",
+    "U",
+    "WBR",
+    "BR",
+]);
+
+// Inline tags kept verbatim in the payload (boundary + context for the model) but whose
+// content is NEVER translated or mapped — code identifiers must survive untouched.
+const SEGMENT_OPAQUE_TAGS = new Set(["CODE", "KBD", "SAMP", "VAR"]);
+
+// Embedded / non-text elements: their content is dropped from the payload entirely. When
+// one splits a text run we emit a <wbr> in its place so the surrounding text stays as two
+// nodes and the positional mapping keeps aligning.
+const SEGMENT_SKIP_TAGS = new Set([
+    "SCRIPT",
+    "STYLE",
+    "NOSCRIPT",
+    "TEMPLATE",
+    "SVG",
+    "MATH",
+    "IMG",
+    "PICTURE",
+    "INPUT",
+    "SELECT",
+    "OPTION",
+    "TEXTAREA",
+    "IFRAME",
+    "OBJECT",
+    "EMBED",
+    "CANVAS",
+    "VIDEO",
+    "AUDIO",
+    "PRE",
+]);
+
+// Subtrees the apply must NOT collect text from — exactly the payload's opaque + skipped
+// tags — so original and translated text-node counts line up.
+const SEGMENT_UNMAPPED_TAGS = new Set([...SEGMENT_OPAQUE_TAGS, ...SEGMENT_SKIP_TAGS]);
+
+function escapeSegmentHtml(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Serialize a block to the compact segment payload: meaningful text + attribute-free inline
+// tags, code-like spans kept opaque, embedded elements reduced to a <wbr> boundary, and all
+// structural / unknown elements flattened to their text. Returns "" when there's no
+// translatable text.
+function serializeBlockSegment(block) {
+    if (!block) return "";
+    const buf = [];
+    const walk = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const raw = String(node.nodeValue || "");
+            if (!raw) return;
+            const collapsed = raw.replace(/\s+/g, " ");
+            if (collapsed) buf.push(escapeSegmentHtml(collapsed));
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        // SVG/MathML foreign-content elements report a lowercase tagName — uppercase so the
+        // (uppercase) tag sets match them too.
+        const tag = String(node.tagName || "").toUpperCase();
+        if (tag === "BR") {
+            buf.push("<br>");
+            return;
+        }
+        if (SEGMENT_SKIP_TAGS.has(tag)) {
+            // Only emit a boundary when this element actually sits between two text runs.
+            if (hasPayloadTextSibling(node, "previous") && hasPayloadTextSibling(node, "next")) {
+                buf.push("<wbr>");
+            }
+            return;
+        }
+        if (SEGMENT_OPAQUE_TAGS.has(tag)) {
+            const lower = tag.toLowerCase();
+            const inner = String(node.textContent || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            buf.push(`<${lower}>${escapeSegmentHtml(inner)}</${lower}>`);
+            return;
+        }
+        if (SEGMENT_INLINE_TAGS.has(tag)) {
+            const lower = tag.toLowerCase();
+            buf.push(`<${lower}>`);
+            for (const child of node.childNodes) walk(child);
+            buf.push(`</${lower}>`);
+            return;
+        }
+        // Structural / unknown element: drop the tag, keep its translatable text.
+        for (const child of node.childNodes) walk(child);
+    };
+    for (const child of block.childNodes) walk(child);
+    return buf.join("").replace(/\s+/g, " ").trim();
+}
+
+// Forgiving parser for a [[n]] / [[n:role]] segmented reply. Returns Map<number,string>
+// of whatever segments were found — a dropped or malformed marker just means that one
+// block stays in the source language; it never poisons the rest of the batch.
+function parsePageSegmentMap(translatedText) {
+    const map = new Map();
+    const text = String(translatedText || "");
+    if (!text) return map;
+    const markerRe = /\[\[(\d+)(?::[a-z0-9-]+)?]]/gi;
+    const matches = [];
+    let m;
+    while ((m = markerRe.exec(text)) !== null) {
+        matches.push({ n: Number(m[1]), at: m.index, len: m[0].length });
+    }
+    for (let i = 0; i < matches.length; i += 1) {
+        const { n, at, len } = matches[i];
+        if (!Number.isFinite(n) || n < 1) continue;
+        const start = at + len;
+        const end = i + 1 < matches.length ? matches[i + 1].at : text.length;
+        const content = text.slice(start, end).trim();
+        if (content && !map.has(n)) map.set(n, content);
+    }
+    return map;
+}
+
+// Apply one translated segment (plain text + inline tags) onto a block by writing its
+// text-node values. Structure/attributes are never touched, so the layout can't break.
+function applyPageSegmentToBlock(block, translatedSegment) {
+    if (!block || !block.isConnected || !translatedSegment) return false;
+    const ownerDocument = block.ownerDocument;
+    if (!ownerDocument) return false;
+    const container = ownerDocument.createElement("div");
+    try {
+        container.innerHTML = String(translatedSegment);
+    } catch {
+        return false;
+    }
+    if (!sanitizeTranslatedHtmlContainer(container)) {
+        // sanitize emptied it (only dangerous nodes) — nothing usable.
+        if (!normalizeBlockText(container.textContent)) return false;
+    }
+    return applyTranslatedTextNodes(block, container);
+}
+
+// Apply a [[n]] reply (single request or a flat batch) onto an ordered list of blocks.
+// `baseIndex` lets a batch address blocks by a global running index. `appliedSet`, when
+// provided, records which global indices are done so streaming never re-applies one.
+// Returns the number of segments applied this call.
+function applyPageSegments(blocks, segmentMap, baseIndex = 0, appliedSet = null) {
+    if (!blocks || !blocks.length || !segmentMap || !segmentMap.size) return 0;
+    let applied = 0;
+    for (let i = 0; i < blocks.length; i += 1) {
+        const globalIndex = baseIndex + i + 1;
+        if (appliedSet && appliedSet.has(globalIndex)) continue;
+        const segment = segmentMap.get(globalIndex);
+        if (segment == null) continue;
+        if (applyPageSegmentToBlock(blocks[i], segment)) {
+            if (appliedSet) appliedSet.add(globalIndex);
+            applied += 1;
+        }
+    }
+    return applied;
+}
+
 /**
  * Streaming partial-section apply. Each time the SSE buffer grows, scan for the
  * latest closing tag matching one of the section's expected top-level child tags
- * and treat everything up to that point as "completed children". Apply newly
- * completed children one-by-one with full attribute restoration so the reader
- * sees translations popcorn into place as the model generates them.
+ * and treat everything up to that point as "completed children". For each newly
+ * completed child we write the translated text onto the original child's text
+ * nodes (structure untouched) so the reader sees translations popcorn into place.
  *
  * Returns the new applied-count so the caller can persist it across stream
  * chunks. The function never re-applies an index it has already touched.
@@ -1029,19 +1293,12 @@ function applyStreamedSectionChildren(entry, accumulatedHtml, alreadyAppliedCoun
         if (!translated) continue;
         if (original.tagName !== translated.tagName) return applied;
 
-        // Restore critical attrs onto the translated child by mirroring the
-        // original child's subtree. We wrap both in matching mini-containers so
-        // restoreHtmlCriticalAttributes can walk them uniformly.
-        const sourceMirror = ownerDocument.createElement(parent.tagName);
-        sourceMirror.appendChild(original.cloneNode(true));
-        const translatedMirror = ownerDocument.createElement(parent.tagName);
-        translatedMirror.appendChild(translated);
-        copyPreservedAttributes(original, translated);
-        restoreHtmlCriticalAttributes(sourceMirror, translatedMirror);
-
-        // Swap into the live DOM.
-        original.parentElement.replaceChild(translated, original);
-        children[i] = translated;
+        // Write the translated text onto the ORIGINAL child's text nodes. We never
+        // swap the element in, so its structure/attributes/listeners are untouched and
+        // the layout can't break. If the text-node counts diverge (model reshaped its
+        // markup), stop here and leave this + later children untranslated for now —
+        // the final full-section apply will retry the tail once the whole response is in.
+        if (!applyTranslatedTextNodes(original, translated)) return applied;
         applied = i + 1;
     }
     return applied;
@@ -1050,12 +1307,14 @@ function applyStreamedSectionChildren(entry, accumulatedHtml, alreadyAppliedCoun
 /**
  * Apply a translated HTML payload to an existing section (a contiguous run of
  * children under one parent). Parses + sanitizes the payload, restores critical
- * structural attributes from the original children, then atomically replaces
- * the children with the translated nodes. Returns false (without mutating the
- * DOM) on any structural violation so the original section stays intact.
+ * the translated text onto each original child's text nodes. The original
+ * elements are NEVER swapped or restyled — only their text-node values change —
+ * so the page layout cannot break no matter how the model reshaped its HTML.
+ * Returns false (mutating nothing) when nothing could be applied.
  *
- * If `skipCount` is set, the first N children of the section are assumed to be
- * already stream-applied; this function only swaps the remaining tail children.
+ * If `skipCount` is set, the first N children were already written by the stream
+ * path; this function only writes the remaining tail (writes are idempotent, so a
+ * re-write of an already-translated child is harmless either way).
  */
 function applyHtmlPageSection(entry, translatedHtml, skipCount = 0) {
     if (!entry || !translatedHtml) return false;
@@ -1079,54 +1338,20 @@ function applyHtmlPageSection(entry, translatedHtml, skipCount = 0) {
     const translatedElementChildren = Array.from(tempContainer.children);
     if (!topLevelChildrenMatch(entry.children, translatedElementChildren)) return false;
 
-    // Restore attributes from the source SECTION (a virtual container holding
-    // the original children) onto the translated container. We wrap the original
-    // children in a detached clone so the restorer can walk both trees uniformly.
-    const sourceMirror = parent.ownerDocument.createElement(parent.tagName);
-    for (const child of entry.children) sourceMirror.appendChild(child.cloneNode(true));
-    restoreHtmlCriticalAttributes(sourceMirror, tempContainer);
-
-    // Stream path already swapped children[0..skipCount-1] into place. Apply only the
-    // remaining tail so we don't double-swap and lose what's been rendered.
-    if (skipCount > 0) {
-        const allTranslated = translatedElementChildren;
-        if (allTranslated.length < skipCount) return false;
-        const tailTranslated = allTranslated.slice(skipCount);
-        const remainingOriginals = entry.children.slice(skipCount);
-        if (!remainingOriginals.length) return true;
-        if (!tailTranslated.length) return false;
-        const lastOriginal = remainingOriginals[remainingOriginals.length - 1];
-        const insertAfter = lastOriginal ? lastOriginal.nextSibling : null;
-        for (const child of remainingOriginals) {
-            if (child.parentElement === parent) parent.removeChild(child);
-        }
-        for (const node of tailTranslated) parent.insertBefore(node, insertAfter);
-        // CRITICAL: update entry.children to point at the NEW translated nodes for the
-        // tail too. Without this, future re-scan filters (keyed on element identity in
-        // a WeakSet) won't recognize the swapped DOM as already translated, and the
-        // MutationObserver-driven rescan loop will retranslate the same section over
-        // and over, burning tokens.
-        for (let i = skipCount; i < entry.children.length && i < allTranslated.length; i += 1) {
-            entry.children[i] = allTranslated[i];
-        }
-        return true;
+    // Write translated text onto the original children's text nodes. We use the model's
+    // parsed children purely as a source of translated strings — their structure is
+    // discarded, the live DOM keeps its original elements/attributes/listeners.
+    let wroteAny = skipCount > 0;
+    const start = Math.max(0, skipCount);
+    const count = Math.min(entry.children.length, translatedElementChildren.length);
+    for (let i = start; i < count; i += 1) {
+        const original = entry.children[i];
+        const translated = translatedElementChildren[i];
+        if (!original || !original.isConnected || !translated) continue;
+        if (original.tagName !== translated.tagName) continue;
+        if (applyTranslatedTextNodes(original, translated)) wroteAny = true;
     }
-
-    // Replace the children atomically: insertAfter the last original child's
-    // next sibling, then remove the originals. Snapshot the translated nodes
-    // BEFORE moving them out of the temp container so we can update entry.children
-    // to point at the live DOM nodes after the swap.
-    const lastChild = entry.children[entry.children.length - 1];
-    const insertAfter = lastChild ? lastChild.nextSibling : null;
-    const newElementChildren = translatedElementChildren;
-    const newNodes = Array.from(tempContainer.childNodes);
-    for (const child of entry.children) parent.removeChild(child);
-    for (const node of newNodes) parent.insertBefore(node, insertAfter);
-    // Replace entry.children references with the new translated elements. Same
-    // rationale as the skipCount > 0 branch above — see comment there.
-    entry.children.length = 0;
-    for (const el of newElementChildren) entry.children.push(el);
-    return true;
+    return wroteAny;
 }
 
 function sanitizeHtmlElementAttributes(element) {
@@ -1157,8 +1382,45 @@ function sanitizeHtmlElementAttributes(element) {
  * the model adding wrapper tags or reordering inline elements within a single
  * sentence (a common case for natural-sounding translations).
  */
+// Pure text-formatting inline tags the model may freely add/drop without changing
+// layout. Every OTHER element (div, ul, li, a, button, svg, img, table, …) carries
+// or anchors layout, so its count must be preserved for positional attribute
+// restoration to land classes/styles on the right nodes.
+// The attribute restore below walks both trees with querySelectorAll("*") (document
+// preorder) and maps the i-th occurrence of each tag in the translated tree onto the
+// i-th occurrence in the original. That mapping is only correct when the FULL preorder
+// sequence of tag names is identical — every element, including <span>/<svg> that carry
+// layout-critical classes (e.g. GitHub octicons). Counting tags is not enough: a model
+// that keeps the counts but reorders/re-nests/adds-and-drops a pair of tags shifts the
+// positional mapping by one and lands classes on the wrong nodes, collapsing the layout
+// (happens even on larger models that "tidy" markup). So we require an exact signature
+// match and otherwise reject — leaving the element untranslated rather than mangled.
+function structuralTagSignature(root) {
+    const tags = [];
+    for (const el of root.querySelectorAll("*")) tags.push(el.tagName);
+    return tags;
+}
+
+function structuralSignatureMatch(original, translated) {
+    const a = structuralTagSignature(original);
+    const b = structuralTagSignature(translated);
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+/**
+ * Restore class/style/id/aria/data/href/etc. from the original element onto the
+ * translated tree, matched positionally by tag. Returns false (restoring nothing)
+ * when the model reshaped the structure — positional restoration would then land
+ * attributes on the wrong nodes and wreck the layout, so callers must leave the
+ * original element untranslated instead. Returns true when restoration succeeded.
+ */
 function restoreHtmlCriticalAttributes(originalElement, translatedElement) {
-    if (!originalElement || !translatedElement) return;
+    if (!originalElement || !translatedElement) return false;
+    if (!structuralSignatureMatch(originalElement, translatedElement)) return false;
     const originalByTag = new Map();
     for (const el of originalElement.querySelectorAll("*")) {
         const tag = el.tagName;
@@ -1177,6 +1439,7 @@ function restoreHtmlCriticalAttributes(originalElement, translatedElement) {
         if (!source) continue;
         copyPreservedAttributes(source, el);
     }
+    return true;
 }
 
 function copyPreservedAttributes(source, target) {
@@ -1287,6 +1550,8 @@ function splitSegmentedTranslationText(translatedText, expectedCount) {
 
 export {
     applyHtmlPageSection,
+    applyPageSegments,
+    applyPageSegmentToBlock,
     applyStreamedSectionChildren,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
@@ -1300,6 +1565,8 @@ export {
     findLeafBlocksInElement,
     inferDomPageTextRole,
     isAlreadyInTargetLanguage,
+    parsePageSegmentMap,
+    serializeBlockSegment,
     splitLeafByLineBreaks,
     splitSegmentedTranslationText,
     splitTranslatedContext,

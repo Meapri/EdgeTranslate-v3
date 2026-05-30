@@ -277,15 +277,18 @@ describe("HTML-native translation safety pipeline (buildSafeTranslatedHtml)", ()
         expect(container.querySelector("a").getAttribute("href")).toBe("/x");
     });
 
-    it("strips javascript: URLs with no fallback when the original has no anchor", () => {
+    it("rejects a translation that injects structure the original lacks", () => {
+        // The original is plain text with no anchor; the model hallucinated an <a> (with a
+        // dangerous javascript: URL). The strict structural guard rejects the whole payload
+        // (returns null) so the block is left untranslated rather than gaining an injected,
+        // mis-restored element — strictly safer than keeping a model-invented anchor.
         document.body.innerHTML = `<p>Hello world.</p>`;
         const block = document.body.querySelector("p");
         const container = buildSafeTranslatedHtml(
             block,
             '안녕 <a href="javascript:alert(1)">링크</a>.'
         );
-        expect(container).not.toBeNull();
-        expect(container.querySelector("a").hasAttribute("href")).toBe(false);
+        expect(container).toBeNull();
     });
 
     it("restores critical attributes from the original block on matching tags", () => {
@@ -330,7 +333,10 @@ describe("HTML-native page sections (collect + apply)", () => {
                 <p>Second paragraph.</p>
             </article>
         `;
-        const sections = collectHtmlPageSections([document.body], { minChars: 10, maxChars: 12000 });
+        const sections = collectHtmlPageSections([document.body], {
+            minChars: 10,
+            maxChars: 12000,
+        });
         expect(sections).toHaveLength(1);
         // The collector recurses into semantic containers so eligibility filtering can
         // drop already-translated/UI children without moving non-contiguous siblings.
@@ -516,7 +522,9 @@ describe("Presentation attribute stripping (LLM token optimization)", () => {
                 </p>
             </article>
         `;
-        const out = buildStrippedSectionHtml(Array.from(document.querySelector("article").children));
+        const out = buildStrippedSectionHtml(
+            Array.from(document.querySelector("article").children)
+        );
 
         expect(out).toBe("<p>Read the <a>original article</a> before translating.</p>");
     });
@@ -534,7 +542,9 @@ describe("Section maxChars / lead-chunk ttfb tuning", () => {
     it("packs paragraph blocks under the maxChars budget into a single LLM request", () => {
         document.body.innerHTML = `
             <article>
-                ${Array.from({ length: 5 }, (_, i) => `<p>${"para ".repeat(200)} ${i}</p>`).join("")}
+                ${Array.from({ length: 5 }, (_, i) => `<p>${"para ".repeat(200)} ${i}</p>`).join(
+                    ""
+                )}
             </article>
         `;
         const sections = collectHtmlPageSections([document.body], {
@@ -548,7 +558,10 @@ describe("Section maxChars / lead-chunk ttfb tuning", () => {
     it("splits paragraph blocks into multiple sections once maxChars is exceeded", () => {
         document.body.innerHTML = `
             <article>
-                ${Array.from({ length: 20 }, (_, i) => `<p>${"longer text ".repeat(300)} ${i}</p>`).join("")}
+                ${Array.from(
+                    { length: 20 },
+                    (_, i) => `<p>${"longer text ".repeat(300)} ${i}</p>`
+                ).join("")}
             </article>
         `;
         const sections = collectHtmlPageSections([document.body], {
@@ -585,11 +598,7 @@ describe("Streaming partial-section apply (popcorn UX)", () => {
         expect(article.children[1].textContent).toBe("First.");
 
         // Second chunk: h1 + first p complete, second p mid-stream.
-        applied = applyStreamedSectionChildren(
-            entry,
-            "<h1>제목</h1><p>안녕.</p><p>둘째",
-            applied
-        );
+        applied = applyStreamedSectionChildren(entry, "<h1>제목</h1><p>안녕.</p><p>둘째", applied);
         expect(applied).toBe(2);
         expect(article.children[1].textContent).toBe("안녕.");
         expect(article.children[1].getAttribute("class")).toBe("prose");
@@ -631,27 +640,25 @@ describe("Streaming partial-section apply (popcorn UX)", () => {
         expect(after).toBe(2);
     });
 
-    it("applyHtmlPageSection updates entry.children to point at the new translated DOM nodes", () => {
-        // Why this matters: callers (dispatchAiPageSections) register children in a
-        // WeakSet of "already translated" elements to prevent the MutationObserver-driven
-        // rescan from re-translating the same section. The WeakSet is keyed on element
-        // identity, so entry.children MUST reference the live (translated) DOM nodes
-        // after apply — otherwise the rescan re-collects them as fresh content and the
-        // loop never terminates (token bleed).
-        document.body.innerHTML = `<article id="art"><p>Hello.</p><p>World.</p></article>`;
+    it("applyHtmlPageSection translates by writing text nodes, never swapping elements", () => {
+        // The apply writes translated text onto the ORIGINAL child elements — their
+        // structure, attributes and identity are never touched — so the layout cannot break
+        // and the WeakSet of already-translated elements (keyed on identity) keeps matching,
+        // preventing the MutationObserver rescan from re-translating (token bleed).
+        document.body.innerHTML = `<article id="art"><p class="a">Hello.</p><p class="b">World.</p></article>`;
         const article = document.querySelector("#art");
         const originalChildren = Array.from(article.children);
         const entry = { parent: article, children: originalChildren.slice() };
 
         const ok = applyHtmlPageSection(entry, "<p>안녕.</p><p>세계.</p>");
         expect(ok).toBe(true);
-        const liveChildren = Array.from(article.children);
-        // entry.children now points at the live translated nodes, not the discarded
-        // originals. The originals are no longer in the DOM.
-        expect(entry.children).toEqual(liveChildren);
-        expect(entry.children[0]).not.toBe(originalChildren[0]);
-        expect(entry.children[1]).not.toBe(originalChildren[1]);
-        expect(originalChildren[0].isConnected).toBe(false);
+        // Same original elements, still connected, classes intact — only text changed.
+        expect(entry.children[0]).toBe(originalChildren[0]);
+        expect(entry.children[1]).toBe(originalChildren[1]);
+        expect(originalChildren[0].isConnected).toBe(true);
+        expect(originalChildren[0].className).toBe("a");
+        expect(article.children[0].textContent).toBe("안녕.");
+        expect(article.children[1].textContent).toBe("세계.");
     });
 
     it("applyHtmlPageSection respects skipCount and applies only the tail", () => {

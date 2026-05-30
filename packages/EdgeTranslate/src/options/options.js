@@ -424,6 +424,10 @@ function syncLocalTranslatorFields(mode) {
             element.hidden = hidden;
         });
     });
+    // The single shared request-timeout applies to every network AI mode but is
+    // meaningless for the on-device Chrome built-in translator.
+    const timeoutRow = document.getElementById("local-translator-timeout-settings");
+    if (timeoutRow) timeoutRow.hidden = mode === "chromeBuiltin";
 }
 
 function syncPreciseTranslatorFields(mode) {

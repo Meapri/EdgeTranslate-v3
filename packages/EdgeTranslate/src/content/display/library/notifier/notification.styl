@@ -23,8 +23,18 @@ motion-standard = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.
     backdrop-filter: blur(12px) saturate(160%);
     -webkit-backdrop-filter: blur(12px) saturate(160%);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
+    // Visible resting state. Enter/exit are Chromium-native state transitions:
+    // @starting-style animates the first render in; the disappear-animation
+    // class (added by notifier.js) is the exit target, and notifier.js waits on
+    // the native transitionend before removing the element (no hardcoded timer).
     opacity: final-opacity;
-    transition: background-color animation-duration motion-standard, border-color animation-duration motion-standard, box-shadow animation-duration motion-standard;
+    transform: translateY(0) scale(1);
+    transition: transform 320ms motion-spring, opacity 280ms motion-emphasized, background-color animation-duration motion-standard, border-color animation-duration motion-standard, box-shadow animation-duration motion-standard;
+
+    @starting-style {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.92);
+    }
 }
 
 // ─── Color Variants (Light) ─────────────────────────────────────────────────
@@ -108,41 +118,13 @@ motion-standard = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.
     }
 }
 
-// ─── Animations ──────────────────────────────────────────────────────────────
-.edge-translate-notifier-show-animation {
-    animation-name: edge-translate-notifier-show-animation;
-    animation-duration: 320ms;
-    animation-timing-function: motion-spring;
-}
-
+// ─── Exit target ─────────────────────────────────────────────────────────────
+// notifier.js adds this class to start the exit; the base item's transition
+// animates to it, then notifier.js removes the element on transitionend.
 .edge-translate-notifier-disappear-animation {
-    animation-name: edge-translate-notifier-disappear-animation;
-    animation-duration: animation-duration;
-    animation-timing-function: motion-emphasized;
-}
-
-@keyframes edge-translate-notifier-show-animation {
-    from {
-        transform: translateY(-10px) scale(0.92);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateY(0) scale(1);
-        opacity: final-opacity;
-    }
-}
-
-@keyframes edge-translate-notifier-disappear-animation {
-    from {
-        transform: translateY(0) scale(1);
-        opacity: final-opacity;
-    }
-
-    to {
-        transform: translateY(-8px) scale(0.96);
-        opacity: 0;
-    }
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+    pointer-events: none;
 }
 
 // ─── Dark Mode ───────────────────────────────────────────────────────────────
@@ -153,11 +135,11 @@ motion-standard = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.
     }
 
     .edge-translate-notifier-title {
-        color: #e8eaed;
+        color: #f5f5f7;
     }
 
     .edge-translate-notifier-detail {
-        color: #bdc1c6;
+        color: #aeaeb2;
     }
 
     .edge-translate-notifier-close {
@@ -206,9 +188,10 @@ motion-standard = linear(0, 0.005, 0.018 1.5%, 0.066 3.7%, 0.171 7.5%, 0.346 13.
 }
 
 // ─── Reduced Motion ──────────────────────────────────────────────────────────
+// Keep a 1ms transition (not none) so notifier.js still gets a transitionend
+// to drive element removal.
 @media (prefers-reduced-motion: reduce) {
-    .edge-translate-notifier-show-animation,
-    .edge-translate-notifier-disappear-animation {
-        animation-duration: 1ms !important;
+    .edge-translate-notifier-item {
+        transition-duration: 1ms !important;
     }
 }

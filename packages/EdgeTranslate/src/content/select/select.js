@@ -59,7 +59,7 @@ function renderButton() {
             border: 1px solid rgba(255, 255, 255, 0.72);
             background:
                 linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 253, 0.9));
-            color: #202124;
+            color: #1d1d1f;
             font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             font-size: 11.5px;
             font-weight: 700;
@@ -81,7 +81,7 @@ function renderButton() {
             border: 0;
             border-radius: 18px;
             background: rgba(255, 255, 255, 0.58);
-            color: #0b57d0;
+            color: #0066cc;
             cursor: pointer;
             font: inherit;
             white-space: nowrap;
@@ -107,8 +107,8 @@ function renderButton() {
 
         .edge-selection-action:hover {
             transform: translateY(-1px) scale(1.012);
-            background: rgba(211, 227, 253, 0.72);
-            box-shadow: 0 7px 18px rgba(11, 87, 208, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.62);
+            background: rgba(0, 102, 204, 0.72);
+            box-shadow: 0 7px 18px rgba(0, 102, 204, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.62);
         }
 
         .edge-selection-action:active {
@@ -118,16 +118,16 @@ function renderButton() {
         .edge-selection-action--precise {
             background:
                 radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.34), transparent 42%),
-                linear-gradient(145deg, #0b57d0, #1557b0);
+                linear-gradient(145deg, #0066cc, #1557b0);
             color: #ffffff;
-            box-shadow: 0 8px 20px rgba(11, 87, 208, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+            box-shadow: 0 8px 20px rgba(0, 102, 204, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
         }
 
         .edge-selection-action--precise:hover {
             background:
                 radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.4), transparent 42%),
                 linear-gradient(145deg, #1557b0, #0842a0);
-            box-shadow: 0 10px 22px rgba(11, 87, 208, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+            box-shadow: 0 10px 22px rgba(0, 102, 204, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
         }
 
         .edge-selection-icon {
@@ -165,19 +165,19 @@ function renderButton() {
                 border-color: rgba(255, 255, 255, 0.1);
                 background:
                     linear-gradient(180deg, rgba(42, 48, 56, 0.98), rgba(22, 27, 32, 0.94));
-                color: #e8eaed;
+                color: #f5f5f7;
                 box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
             }
 
             .edge-selection-action {
                 background: rgba(36, 42, 49, 0.72);
-                color: #a8c7fa;
+                color: #2997ff;
                 box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
             }
 
             .edge-selection-action:hover {
                 background: rgba(31, 59, 104, 0.58);
-                box-shadow: 0 7px 18px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(168, 199, 250, 0.22);
+                box-shadow: 0 7px 18px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(41, 151, 255, 0.22);
             }
 
             .edge-selection-icon {

@@ -5,25 +5,20 @@ import {
     translateWithChromeOnDevice,
 } from "common/scripts/chrome_builtin_translate.js";
 import {
-    applyHtmlPageSection,
-    applyStreamedSectionChildren,
+    applyPageSegments,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
-    buildStrippedSectionHtml,
     captureLeafSegmentTexts,
     collectHtmlPageSections,
     findLeafBlocksInElement,
     isAlreadyInTargetLanguage,
+    parsePageSegmentMap,
+    serializeBlockSegment,
     splitSegmentedTranslationText,
     splitTranslatedContext,
     wrapLeafLineSegmentsInSpans,
 } from "./dom_page_translate_context.js";
-// Meapri/liquid-glass-web — real GPU/Chromium Liquid Glass engine (feDisplacementMap
-// refraction + baked specular rim, Shadow-DOM aware, quality tiers). Aliased in
-// webpack to the engine's prebuilt ESM. Replaces the earlier hand-rolled CSS/SVG
-// attempts. Used at quality:'balanced' for the page-translate chrome.
-import { LiquidGlass } from "liquid-glass";
 
 /**
  * Low-priority scheduling via the Prioritized Task Scheduling API. Yields to
@@ -214,6 +209,12 @@ class BannerController {
         this._domResolvedSourceLanguage = null;
         this._domTranslationCache = new Map();
         this._domTranslationCacheMax = 2000;
+        // Session-wide per-STRING translation cache: every unique block text is translated
+        // at most once across all sections, batches and scrolls (content-hash keyed, so it
+        // stays valid the whole page lifetime). Cache hits apply instantly — 0 tokens, 0
+        // latency — which is the only way to cut tokens further without translating less.
+        this._domSegmentTextCache = new Map();
+        this._domSegmentTextCacheMax = 6000;
         this._domActiveTranslations = 0;
         this._domMaxConcurrentTranslations = 2;
         this._domPageBanner = null;
@@ -262,6 +263,10 @@ class BannerController {
         this._domOriginalTooltipPendingTarget = null;
         this._domOriginalTooltipPendingEvent = null;
         this._domOriginalTooltipHoverDelayMs = 260;
+        // Grace period when leaving the segment so the cursor can reach the (now
+        // anchored, scrollable) tooltip without it vanishing.
+        this._domOriginalTooltipHideTimer = null;
+        this._domOriginalTooltipHideDelayMs = 180;
         this._captionModeEnabled = false;
         this._captionObserver = null;
         this._captionOverlay = null;
@@ -285,7 +290,10 @@ class BannerController {
         this._captionStabilizeResolve = null;
         this._captionStabilizeTargetSource = "";
         this._captionStabilizeTargetVisibleSource = "";
-        this._captionStabilizeDelayMs = 520;
+        // Speed-first: shorter settle wait shows the translated caption sooner. The
+        // trailing-punctuation cache fold + non-speech skip offset the extra re-translate
+        // cost of occasionally catching a phrase a beat before it finishes growing.
+        this._captionStabilizeDelayMs = 400;
         this._captionStabilizeWindowMs = 2600;
         this._captionStabilizeMaxSources = 3;
         this._captionVisibleHistoryMax = 8;
@@ -301,7 +309,10 @@ class BannerController {
         this._captionHoldAfterMissingMs = 1400;
         this._captionLastVisibleAt = 0;
         this._captionDisplayItems = [];
-        this._captionDisplayMax = 2;
+        // Show only the current caption block — clean, standard-subtitle behavior.
+        // (History is still kept internally for merge/dedup, just not stacked on screen.)
+        this._captionDisplayMax = 1;
+        this._captionSeekHandler = null;
         this._captionPrefetchTimer = null;
         this._captionPrefetchVideoId = "";
         this._captionPrefetchTrackKey = "";
@@ -319,8 +330,10 @@ class BannerController {
         this._captionBatchQueue = new Map();
         this._captionBatchInFlight = new Map();
         this._captionBatchTimer = null;
-        this._captionBatchDelayMs = 120;
-        this._captionBatchMaxSize = 6;
+        // Snappier flush so the first AI-batched caption appears sooner; a slightly
+        // larger max amortizes the shared prompt across more cues when bursts do arrive.
+        this._captionBatchDelayMs = 80;
+        this._captionBatchMaxSize = 8;
         this._captionDebugEventId = 0;
         this._domPageDebugEventId = 0;
         this.handleRealtimeCaptionOverlayPointerMove =
@@ -497,7 +510,34 @@ class BannerController {
         if (pdfViewerRoot && document.getElementById("outerContainer")) {
             return [pdfViewerRoot];
         }
+        // Focus on the page's primary content region so we translate the article/README
+        // rather than the site's global nav, header, sidebar and footer chrome. On a
+        // content-heavy page (e.g. a GitHub repo) the chrome can dwarf the actual content
+        // and quietly cost most of the tokens. Falls back to <body> when there is no clear
+        // single main region.
+        const main = this.getDomPagePrimaryContentRoot();
+        if (main) return [main];
         return [document.body].filter(Boolean);
+    }
+
+    getDomPagePrimaryContentRoot() {
+        const body = document.body;
+        if (!body) return null;
+        const bodyLen = String(body.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim().length;
+        if (bodyLen < 400) return null; // tiny page — nothing to narrow
+        const textLen = (el) =>
+            String((el && el.textContent) || "")
+                .replace(/\s+/g, " ")
+                .trim().length;
+        const mains = Array.from(document.querySelectorAll("main, [role='main']")).filter(
+            (el) => el.isConnected && textLen(el) >= 200
+        );
+        // Only narrow when there is exactly one main region and it holds the bulk of the
+        // page text — otherwise we risk dropping real content on app-shell / multi-pane UIs.
+        if (mains.length === 1 && textLen(mains[0]) / bodyLen >= 0.35) return mains[0];
+        return null;
     }
 
     isYouTubePage() {
@@ -552,6 +592,11 @@ class BannerController {
             characterData: true,
         });
         this._captionPollTimer = setInterval(schedule, 350);
+        // Reset the on-screen caption when the user jumps the timeline so stale lines
+        // don't linger or merge with the post-seek caption. Media 'seeking' doesn't
+        // bubble, but a capture-phase document listener still catches any <video>'s seek.
+        this._captionSeekHandler = () => this.resetRealtimeCaptionDisplayForSeek();
+        document.addEventListener("seeking", this._captionSeekHandler, true);
         schedule();
         this.scheduleYouTubeCaptionPrefetch(0);
     }
@@ -562,6 +607,10 @@ class BannerController {
         if (this._captionObserver) {
             this._captionObserver.disconnect();
             this._captionObserver = null;
+        }
+        if (this._captionSeekHandler) {
+            document.removeEventListener("seeking", this._captionSeekHandler, true);
+            this._captionSeekHandler = null;
         }
         if (this._captionDebounceTimer) {
             clearTimeout(this._captionDebounceTimer);
@@ -607,6 +656,37 @@ class BannerController {
             this._captionOverlay.style.opacity = "0";
             this._captionOverlay.hidden = true;
         }
+    }
+
+    /**
+     * Clear the on-screen caption + sequencing state after a timeline seek so the
+     * post-seek caption starts from a clean slate (no stale lines, no cross-merge,
+     * no out-of-order suppression). The fetched transcript cache is kept — it's still
+     * valid for the same video, so post-seek cues can still be served from it.
+     */
+    resetRealtimeCaptionDisplayForSeek() {
+        if (!this._captionModeEnabled) return;
+        this.clearRealtimeCaptionStabilizeTimer();
+        this.clearRealtimeCaptionHideTimer();
+        if (this._captionDebounceTimer) {
+            clearTimeout(this._captionDebounceTimer);
+            this._captionDebounceTimer = null;
+        }
+        this._captionBatchQueue.clear();
+        this._captionLastSource = "";
+        this._captionRenderedSource = "";
+        this._captionPendingSource = "";
+        this._captionPendingSources = [];
+        this._captionVisibleSources = [];
+        this._captionVisibleSourceSeq = 0;
+        this._captionLastDisplayedVisibleSeq = 0;
+        this._captionMergedReplacementSources.clear();
+        this._captionDisplayItems = [];
+        // Invalidate any in-flight translation so a pre-seek result can't paint over
+        // the new position; its handler will see a stale request id and drop it.
+        this._captionLastRequestId += 1;
+        this.hideRealtimeCaptionOverlayNow();
+        this.logRealtimeCaptionDebug("seek:reset");
     }
 
     isRealtimeCaptionDebugEnabled() {
@@ -961,31 +1041,25 @@ class BannerController {
         if (!translatedText) return false;
         const lastItem = this._captionDisplayItems.at(-1);
         if (lastItem?.source === source && lastItem?.text === translatedText) return false;
+        // Never let a fragment cover the caption that's already shown: if the incoming
+        // source is contained in the current one (i.e. it's an individual cue of the
+        // merged sentence on screen), keep the full sentence and drop the fragment.
+        // This holds even when the group resolution missed and the two translations
+        // come from different engines (fragment text ≠ part of the sentence text).
+        if (lastItem && this.realtimeCaptionSourceIncludes(lastItem.source, source)) return false;
 
         let replacedFragment = false;
-        let replacementIndex = -1;
-        const nextItems = [];
-        this._captionDisplayItems.forEach((item) => {
+        const nextItems = this._captionDisplayItems.filter((item) => {
             const duplicate = item.source === source || item.text === translatedText;
             const replacedByMergedSource =
                 this.realtimeCaptionSourceIncludes(source, item.source) ||
                 this.realtimeCaptionSourceIncludes(translatedText, item.text);
-            if (replacedByMergedSource) {
-                replacedFragment = true;
-                if (replacementIndex < 0) replacementIndex = nextItems.length;
-            }
-            if (!duplicate && !replacedByMergedSource) nextItems.push(item);
+            if (replacedByMergedSource) replacedFragment = true;
+            return !duplicate && !replacedByMergedSource;
         });
-        const nextItem = {
-            source,
-            text: translatedText,
-            expanded: replacedFragment,
-        };
-        if (replacementIndex >= 0) {
-            nextItems.splice(replacementIndex, 0, nextItem);
-        } else {
-            nextItems.push(nextItem);
-        }
+        // The newest caption always goes LAST so it renders as the current line —
+        // never spliced into the middle (that could show a stale line as current).
+        nextItems.push({ source, text: translatedText, expanded: replacedFragment });
         this._captionDisplayItems = nextItems;
         const historyMax = Math.max(
             this._captionDisplayMax + this._captionStabilizeMaxSources + 2,
@@ -1004,10 +1078,9 @@ class BannerController {
     }
 
     getRealtimeCaptionDisplayMax() {
-        const recentItems = this._captionDisplayItems.slice(-Math.max(3, this._captionDisplayMax));
-        return recentItems.some((item) => item.expanded)
-            ? Math.max(3, this._captionDisplayMax)
-            : this._captionDisplayMax;
+        // Always cap at the configured count — no quietly expanding to a taller stack
+        // when a caption merged a fragment (that was the source of the cluttered look).
+        return this._captionDisplayMax;
     }
 
     renderRealtimeCaptionOverlay() {
@@ -1392,7 +1465,9 @@ class BannerController {
                 ? "LocalTranslate"
                 : "GoogleTranslate";
         const engine = translatorId === "LocalTranslate" ? localConfig.mode : "";
-        this._captionOverlayDraggable = captionConfig.draggableOverlay !== false;
+        // The caption overlay is always draggable — there's no downside to it, so
+        // we dropped the toggle rather than carry a needless setting.
+        this._captionOverlayDraggable = true;
         this.applyRealtimeCaptionOverlayPosition();
         const options = {
             sl: result.languageSetting?.sl || "auto",
@@ -1418,10 +1493,34 @@ class BannerController {
     }
 
     normalizeRealtimeCaptionCacheText(text) {
-        return String(text || "")
-            .replace(/[\u200B-\u200D\uFEFF]/g, "")
-            .replace(/\s+/g, " ")
-            .trim();
+        return (
+            String(text || "")
+                .replace(/[\u200B-\u200D\uFEFF]/g, "")
+                .replace(/\s+/g, " ")
+                .trim()
+                // Fold trailing punctuation so a rolling cue and its punctuated close
+                // ("Hello" / "Hello." / "Hello\u2026") map to one cache entry instead of
+                // each re-spending a translation. (\s already covers nbsp.)
+                .replace(
+                    /[\s.,!?;:\u2026\u00B7"'\u201D\u2019\u300D\u300F\uFF09)\]\u2013\u2014-]+$/u,
+                    ""
+                )
+                .trim()
+        );
+    }
+
+    isNonSpeechCaption(text) {
+        const raw = String(text || "").trim();
+        if (!raw) return false;
+        // A cue made up only of bracketed sound descriptors ([Music], (applause))
+        // and/or bare musical notes carries no language to translate. Cues that mix
+        // notes with lyrics ("♪ Hello ♪") keep real text and translate normally.
+        const stripped = raw
+            .replace(/\[[^\]]*\]/g, "")
+            .replace(/\([^)]*\)/g, "")
+            .replace(/[♪♫♬🎵🎶]/gu, "")
+            .replace(/\s+/g, "");
+        return stripped.length === 0;
     }
 
     getRealtimeCaptionCacheKey(text, options) {
@@ -1674,13 +1773,63 @@ class BannerController {
         return compacted;
     }
 
+    // Merge consecutive cues that form one sentence so the prefetch path can
+    // translate (and show) the whole sentence at once — far more natural than
+    // translating each mid-sentence fragment in isolation. Each member cue gets the
+    // shared `groupText`; the warm step caches the sentence translation under every
+    // member's key, so the live display serves it whenever any part is on screen.
     addYouTubeCaptionCueGroups(cues) {
-        return cues.map((cue, index) => {
-            cue.groupText = cue.text;
-            cue.groupId = index;
-            cue.cueIndex = index;
-            return cue;
-        });
+        const sentenceEnd = /[.!?…。！？؟]["'”’」』)\]]*$/;
+        // Only sentence-merge tracks that actually punctuate (manual / quality
+        // captions). Auto-generated tracks usually have no punctuation, where merging
+        // would just glue unrelated cues — leave those one-per-cue.
+        const punctuated = cues.filter((cue) =>
+            sentenceEnd.test(String(cue.text || "").trim())
+        ).length;
+        const useSentenceGroups = cues.length >= 4 && punctuated / cues.length >= 0.15;
+        if (!useSentenceGroups) {
+            return cues.map((cue, index) => {
+                cue.groupText = cue.text;
+                cue.groupId = index;
+                cue.cueIndex = index;
+                cue.normText = this.normalizeRealtimeCaptionCacheText(cue.text);
+                return cue;
+            });
+        }
+        const MAX_GROUP_CUES = 4;
+        const MAX_GROUP_GAP_MS = 1500;
+        const MAX_GROUP_CHARS = 260;
+        let groupId = 0;
+        let i = 0;
+        while (i < cues.length) {
+            let end = i;
+            let chars = 0;
+            for (let j = i; j < cues.length; j++) {
+                const cue = cues[j];
+                chars += String(cue.text || "").length + 1;
+                end = j;
+                const endsSentence = sentenceEnd.test(String(cue.text || "").trim());
+                const next = cues[j + 1];
+                const gap = next ? next.startMs - cue.endMs : Infinity;
+                const reachedCap = j - i + 1 >= MAX_GROUP_CUES || chars >= MAX_GROUP_CHARS;
+                if (endsSentence || reachedCap || gap > MAX_GROUP_GAP_MS) break;
+            }
+            const groupText = cues
+                .slice(i, end + 1)
+                .map((cue) => cue.text)
+                .join(" ")
+                .replace(/\s+/g, " ")
+                .trim();
+            for (let k = i; k <= end; k++) {
+                cues[k].groupText = groupText;
+                cues[k].groupId = groupId;
+                cues[k].cueIndex = k;
+                cues[k].normText = this.normalizeRealtimeCaptionCacheText(cues[k].text);
+            }
+            groupId += 1;
+            i = end + 1;
+        }
+        return cues;
     }
 
     getCurrentVideoTimeMs() {
@@ -1800,6 +1949,7 @@ class BannerController {
         let index = this._captionPrefetchCues.findIndex((cue) => cue.endMs >= currentMs - 500);
         if (index < 0) return;
 
+        const seenGroups = new Set();
         while (
             index < this._captionPrefetchCues.length &&
             started < this._captionPrefetchBatchSize
@@ -1809,8 +1959,21 @@ class BannerController {
             }
             const cue = this._captionPrefetchCues[index];
             if (cue.startMs > windowEndMs) break;
-            const entry = this.createRealtimeCaptionPrefetchEntry(cue.text, options);
+            // Translate one entry per SENTENCE GROUP (not per fragment cue).
+            const groupText = cue.groupText || cue.text;
+            if (seenGroups.has(groupText)) {
+                index += 1;
+                continue;
+            }
+            seenGroups.add(groupText);
+            const entry = this.createRealtimeCaptionPrefetchEntry(groupText, options);
             if (entry) {
+                entry.memberTexts =
+                    cue.groupId != null
+                        ? this._captionPrefetchCues
+                              .filter((other) => other.groupId === cue.groupId)
+                              .map((other) => other.text)
+                        : [cue.text];
                 const nextChars = charCount + entry.sourceText.length + 8;
                 if (entries.length && nextChars > this._captionPrefetchBatchMaxChars) break;
                 entries.push(entry);
@@ -1829,9 +1992,14 @@ class BannerController {
         if (fastOptions) {
             const fastEntries = entries
                 .slice(0, this._captionFastPrefetchBatchSize)
-                .map((entry) =>
-                    this.createRealtimeCaptionPrefetchEntry(entry.sourceText, fastOptions)
-                )
+                .map((entry) => {
+                    const fastEntry = this.createRealtimeCaptionPrefetchEntry(
+                        entry.sourceText,
+                        fastOptions
+                    );
+                    if (fastEntry) fastEntry.memberTexts = entry.memberTexts;
+                    return fastEntry;
+                })
                 .filter(Boolean);
             this.prefetchRealtimeCaptionSourcesIndividually(fastEntries, fastOptions);
         }
@@ -1886,6 +2054,18 @@ class BannerController {
             chars: text.length,
             engine: options.engine || options.translatorId || "",
         });
+        // Cache the sentence translation under the group key AND each member cue's key,
+        // so the display hits the full natural translation for any fragment on screen.
+        const cacheGroupEntry = (entry, value) => {
+            if (!entry || !value) return;
+            this.cacheRealtimeCaptionTranslation(entry.cacheKey, value);
+            (entry.memberTexts || []).forEach((memberText) => {
+                const memberKey = this.getRealtimeCaptionCacheKey(memberText, options);
+                if (memberKey && memberKey !== entry.cacheKey) {
+                    this.cacheRealtimeCaptionTranslation(memberKey, value);
+                }
+            });
+        };
         Promise.resolve(this.channel.request("translate_text_quiet", request))
             .then((result) => {
                 const translated = String(
@@ -1899,7 +2079,7 @@ class BannerController {
                     return;
                 }
                 if (!isBatch) {
-                    this.cacheRealtimeCaptionTranslation(entries[0].cacheKey, translated);
+                    cacheGroupEntry(entries[0], translated);
                     this.logRealtimeCaptionDebug("prefetch:cached", { entries: 1 });
                     return;
                 }
@@ -1910,7 +2090,7 @@ class BannerController {
                 let cachedCount = 0;
                 entries.forEach((entry, index) => {
                     if (parsed[index]) {
-                        this.cacheRealtimeCaptionTranslation(entry.cacheKey, parsed[index]);
+                        cacheGroupEntry(entry, parsed[index]);
                         cachedCount += 1;
                     }
                 });
@@ -1928,6 +2108,59 @@ class BannerController {
                 entries.forEach((entry) => this._captionPrefetchInFlight.delete(entry.cacheKey));
             });
         return true;
+    }
+
+    // Map an on-screen caption fragment to its prefetched sentence-group text, so the
+    // whole sentence is translated/shown as one canonical unit. Returns the original
+    // text when there's no multi-cue group (no transcript, auto-captions, single-cue).
+    //
+    // TEXT-first matching: a small video-time vs caption-display offset used to drop the
+    // ±700ms time window and leave the sentence un-merged. We now find the cue by text
+    // and only use time to disambiguate repeated lines, so the merge is reliable.
+    resolveRealtimeCaptionGroupSource(sourceText) {
+        if (!this._captionPrefetchCues.length) return sourceText;
+        const normSource = this.normalizeRealtimeCaptionCacheText(sourceText);
+        if (!normSource) return sourceText;
+        const matches = this._captionPrefetchCues.filter((cue) => {
+            const cueNorm = cue.normText || this.normalizeRealtimeCaptionCacheText(cue.text);
+            return (
+                cueNorm &&
+                (cueNorm === normSource ||
+                    cueNorm.includes(normSource) ||
+                    normSource.includes(cueNorm))
+            );
+        });
+        if (!matches.length) return sourceText;
+        // Repeated lines: pick the cue nearest the current playback time.
+        if (matches.length > 1) {
+            const currentMs = this.getCurrentVideoTimeMs();
+            matches.sort(
+                (a, b) =>
+                    Math.abs((a.startMs + a.endMs) / 2 - currentMs) -
+                    Math.abs((b.startMs + b.endMs) / 2 - currentMs)
+            );
+        }
+        const best = matches[0];
+        if (best.groupId == null) return sourceText;
+        const groupText = best.groupText;
+        if (!groupText || groupText === best.text) return sourceText;
+        const normGroup = this.normalizeRealtimeCaptionCacheText(groupText);
+        if (!normGroup) return sourceText;
+        // Only override when the on-screen text is genuinely part of the group.
+        return normGroup.includes(normSource) ? groupText : sourceText;
+    }
+
+    dedupeRealtimeCaptionCuesByGroup(cues) {
+        if (!cues || cues.length <= 1) return cues || [];
+        const seen = new Set();
+        const result = [];
+        for (const cue of cues) {
+            const key = cue.groupId != null ? `g${cue.groupId}` : cue.text;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            result.push(cue);
+        }
+        return result;
     }
 
     getActivePrefetchedCaptionCues(sourceText = "") {
@@ -1977,7 +2210,11 @@ class BannerController {
                 };
             }
         }
-        const activeCues = this.getActivePrefetchedCaptionCues(sourceText);
+        // Collapse cues that belong to the same sentence group so a sentence whose
+        // fragments are both on screen isn't joined (and shown) twice.
+        const activeCues = this.dedupeRealtimeCaptionCuesByGroup(
+            this.getActivePrefetchedCaptionCues(sourceText)
+        );
         if (activeCues.length) {
             for (const candidateOptions of lookupOptions) {
                 const translated = activeCues
@@ -2348,6 +2585,40 @@ class BannerController {
             return;
         }
         this.recordRealtimeCaptionVisibleSource(sourceText);
+        // Sound-only cues ([Music], ♪) need no translation — show them verbatim,
+        // instantly, with zero tokens. Dedup so a held note doesn't re-render.
+        if (this.isNonSpeechCaption(sourceText)) {
+            if (sourceText !== this._captionLastSource) {
+                this.clearRealtimeCaptionStabilizeTimer();
+                this.clearRealtimeCaptionHideTimer();
+                this._captionLastSource = sourceText;
+                this.showRealtimeCaptionTranslatedText(sourceText, sourceText);
+            }
+            return;
+        }
+        // If this fragment belongs to a prefetched sentence group, translate and show
+        // the WHOLE sentence as one canonical unit. Both the fast (Google) fallback and
+        // the AI translation then run on the same text, so a fragment translation and
+        // the merged sentence can never both appear (the group is already complete, so
+        // stabilization is unnecessary).
+        const groupSource = this.resolveRealtimeCaptionGroupSource(sourceText);
+        if (groupSource !== sourceText) {
+            this.recordRealtimeCaptionVisibleSource(groupSource);
+            this.clearRealtimeCaptionStabilizeTimer();
+            if (groupSource === this._captionLastSource) {
+                const overlayVisible = this._captionOverlay && !this._captionOverlay.hidden;
+                if (overlayVisible && this._captionRenderedSource === groupSource) return;
+                if (this._captionInFlight && this._captionInFlightSource === groupSource) return;
+            }
+            this.clearRealtimeCaptionHideTimer();
+            this._captionLastSource = groupSource;
+            if (this._captionInFlight) {
+                this.enqueueRealtimeCaptionPendingSource(groupSource);
+                return;
+            }
+            await this.translateRealtimeCaptionSource(groupSource, options);
+            return;
+        }
         const stabilizedCandidate =
             this.buildStabilizedRealtimeCaptionSource(sourceText) || sourceText;
         let requestSourceText = sourceText;
@@ -2543,11 +2814,19 @@ class BannerController {
     scheduleDomPageIncrementalScan(delay = 200) {
         if (this.currentTranslator !== "dom") return;
         if (this._domCircuitBreakerActive) return;
+        const now = Date.now();
+        if (!this._domIncrementalScanTimer) this._domIncrementalScanFirstScheduledAt = now;
+        // Coalesce bursts, but never defer past maxDefer — a page that mutates non-stop
+        // (timers, live regions) must not stall translation by perpetually resetting the timer.
+        const maxDefer = 600;
+        const elapsed = now - (this._domIncrementalScanFirstScheduledAt || now);
+        const effectiveDelay = Math.max(0, Math.min(delay, maxDefer - elapsed));
         if (this._domIncrementalScanTimer) clearTimeout(this._domIncrementalScanTimer);
         this._domIncrementalScanTimer = setTimeout(() => {
             this._domIncrementalScanTimer = null;
+            this._domIncrementalScanFirstScheduledAt = 0;
             this.scanDomPageForNewTextNodes();
-        }, delay);
+        }, effectiveDelay);
     }
 
     scheduleDomPageCoverageScan() {
@@ -2710,6 +2989,39 @@ class BannerController {
         return false;
     }
 
+    // Text inside standard non-content ARIA landmarks (global nav, banner, footer, search)
+    // is repetitive site chrome — skip it so we don't spend tokens re-translating menus and
+    // footers on every page.
+    isDomPageChromeTextNode(node) {
+        const el = node && node.parentElement;
+        if (!el || !el.closest) return false;
+        return Boolean(
+            el.closest(
+                "nav,footer,[role='navigation'],[role='banner'],[role='contentinfo'],[role='search']"
+            )
+        );
+    }
+
+    // Non-linguistic text never needs translation: pure numbers/symbols, and single tokens
+    // that are plainly identifiers — URLs, file names, paths, hex hashes, version strings.
+    // Common on code-host UIs (file lists, commit hashes, counts) and pure waste to send.
+    isLowValueDomPageText(text) {
+        const value = String(text || "").trim();
+        if (!value) return true;
+        // No word-forming letter at all → numbers, dates-as-digits, prices, symbols, hashes.
+        if (!/\p{L}/u.test(value)) return true;
+        // A single whitespace-free token that looks like code, not prose.
+        if (!/\s/.test(value)) {
+            if (/^(?:https?:\/\/|www\.|mailto:)/i.test(value)) return true; // url
+            if (/^[\w-]+\.[a-z]{2,}(?:\/\S*)?$/i.test(value)) return true; // domain / domain/path
+            if (/^[\w.-]+\.[a-z0-9]{1,8}$/i.test(value) && /[._-]/.test(value)) return true; // file.ext
+            if (/^[0-9a-f]{7,40}$/i.test(value)) return true; // hex hash
+            if (/^@?[\w-]+(?:\/[\w.-]+)+$/.test(value)) return true; // path / org/repo / @scope/pkg
+            if (/^v?\d+(?:\.\d+){1,}(?:[-+][\w.]+)?$/i.test(value)) return true; // version
+        }
+        return false;
+    }
+
     isMeaningfulDomPageTextNode(node) {
         if (!node || node.nodeType !== Node.TEXT_NODE) return false;
         if (!this.isNodeInDomPageTranslationRoot(node)) return false;
@@ -2718,6 +3030,8 @@ class BannerController {
         const p = node.parentElement;
         if (!p) return false;
         if (this.isDomPageWidgetTextNode(node)) return false;
+        if (this.isLowValueDomPageText(text)) return false;
+        if (this.isDomPageChromeTextNode(node)) return false;
         const tn = p.tagName;
         if (/^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|SELECT|OPTION)$/i.test(tn)) return false;
         let ancestor = p;
@@ -3130,10 +3444,14 @@ class BannerController {
             return;
         }
 
+        // Only a backed-up LOCAL queue means we have too many requests in flight. A single
+        // request just being slow is expected for big bundled batches and must NOT throttle
+        // parallelism — doing so serialized the big requests and killed completion speed.
+        // (Real server overload still backs off via the `failed` branch on 429/5xx above.)
         const queueIsBackingUp =
             this._domTranslationQueue?.length > 0 &&
-            this._aiPageConcurrencyQueueWaitEmaMs > Math.max(900, fastMs * 0.35);
-        if (measuredDuration >= slowMs || queueIsBackingUp) {
+            this._aiPageConcurrencyQueueWaitEmaMs > Math.max(1200, slowMs * 0.5);
+        if (queueIsBackingUp) {
             this._aiPageConcurrencySuccessStreak = 0;
             this.setAiPageDynamicConcurrency(current - 1);
             return;
@@ -3488,32 +3806,73 @@ class BannerController {
                 }
                 continue;
             }
-            // Strip presentation attrs (class/id/style/data-*/aria-*/etc) before sending so
-            // the LLM sees a clean structural skeleton + translatable text. Cuts prompt
-            // size by 30-80% on typical pages — directly faster prefill and generation.
-            // The originals stay on the live DOM and are restored on apply.
-            const sourceHtml = buildStrippedSectionHtml(untranslatedChildren);
-            if (!sourceHtml) continue;
+            // Google-style payload: flatten the section to its leaf blocks and send each as
+            // a plain-text [[n]] segment (text + attribute-free inline tags only — no
+            // structural HTML). The model never sees or regenerates a single layout tag, so
+            // the payload is small, generation is fast, and the reply can't break the page.
+            const segBlocks = [];
+            const segTexts = [];
+            let cachedApplied = 0;
+            for (const child of untranslatedChildren) {
+                for (const leaf of findLeafBlocksInElement(child)) {
+                    // Per-leaf gate: drop leaves that are pure chrome / non-linguistic /
+                    // already-target-language so a file name or commit hash riding inside an
+                    // otherwise-translatable section never costs a segment.
+                    if (!this.isAiPageSectionElementEligible(leaf)) continue;
+                    const text = serializeBlockSegment(leaf);
+                    if (!text) continue;
+                    // Already translated this session (repeated string, SPA re-render, scroll
+                    // back)? Apply straight from the per-string cache here — 0 tokens, instant —
+                    // and keep it out of the request. This is what stops tokens from climbing as
+                    // dynamic pages keep re-adding the same content.
+                    const cached = this.getCachedSegmentText(text);
+                    if (cached != null && this.applyCachedLeafTranslation(leaf, cached)) {
+                        cachedApplied += 1;
+                        continue;
+                    }
+                    segBlocks.push(leaf);
+                    segTexts.push(text);
+                }
+            }
+            if (!segBlocks.length) {
+                // Whole section came from cache — mark its children done so the rescan loop
+                // stops re-collecting them, then move on with no request at all.
+                if (cachedApplied) {
+                    for (const child of untranslatedChildren) {
+                        this._aiSectionTranslatedChildren.add(child);
+                        markElementTranslatedForRendering(child);
+                    }
+                }
+                continue;
+            }
+            const sourceText = buildSegmentedTranslationText(
+                segTexts.map((text) => ({ text })),
+                { compactMarkers: true }
+            );
             const cacheKey = [
                 this._domPageTranslateOptions.engine,
                 model,
-                "section",
+                "seg",
                 sl,
                 tl,
-                fnv1a32(`${effectiveSection.plainText}\n${sourceHtml}`),
+                fnv1a32(segTexts.join(" ")),
             ].join("|");
             const entry = {
                 sectionMode: true,
                 section: effectiveSection,
-                sourceHtml,
-                sourceText: sourceHtml,
+                segBlocks,
+                segTexts,
+                sourceText,
                 plainText: effectiveSection.plainText,
-                inputTokens: estimateLlmPayloadTokens(sourceHtml),
-                outputTokens: estimateLlmOutputTokens(effectiveSection.plainText, sourceHtml),
+                inputTokens: estimateLlmPayloadTokens(sourceText),
+                outputTokens: estimateLlmOutputTokens(effectiveSection.plainText, sourceText),
                 cacheKey,
                 attempt: 0,
                 sessionId: this._domTranslationSessionId,
             };
+            // Snapshot the per-leaf original text now (before any translation overwrites
+            // it) so the hover-to-see-original tooltip can be wired up on apply.
+            entry.originalCapture = this.captureAiPageSectionOriginalTexts(entry, 0);
             // Mark children as pending so subsequent scans skip them while in flight.
             for (const child of untranslatedChildren) {
                 this._aiSectionTranslatedChildren.add(child);
@@ -3772,11 +4131,17 @@ class BannerController {
                 maxItems: 4,
             };
         } else {
+            // Aggressive bundling by COUNT, not size: pack many small sections into one
+            // request (maxItems 8 -> 24) so a page full of little blocks goes out as a few
+            // batches instead of dozens. maxChars / output-token caps are unchanged, so each
+            // batch's reply stays within the model's output budget — no truncation/retries
+            // (important on Gemini 3, where we don't pin maxOutputTokens). The concurrency cap
+            // runs the batches in parallel, and a slow batch no longer throttles concurrency.
             options = {
                 maxChars: 24000,
                 maxInputTokens: 7000,
                 maxOutputTokens: 9000,
-                maxItems: 8,
+                maxItems: 24,
             };
         }
         return this.scaleAiPageSectionBatchOptions(options);
@@ -3792,12 +4157,12 @@ class BannerController {
         let currentInputTokens = 0;
         let currentOutputTokens = 0;
         for (const entry of entries) {
-            const len = String(entry?.sourceHtml || "").length;
+            const len = String(entry?.sourceText || "").length;
             const inputTokens =
-                entry?.inputTokens || estimateLlmPayloadTokens(entry?.sourceHtml || "");
+                entry?.inputTokens || estimateLlmPayloadTokens(entry?.sourceText || "");
             const outputTokens =
                 entry?.outputTokens ||
-                estimateLlmOutputTokens(entry?.plainText || "", entry?.sourceHtml || "");
+                estimateLlmOutputTokens(entry?.plainText || "", entry?.sourceText || "");
             const wouldOverflowItems = current.length >= maxItems;
             const wouldOverflowChars = current.length > 0 && currentChars + len > maxChars;
             const wouldOverflowTokens =
@@ -3825,21 +4190,122 @@ class BannerController {
         return batches;
     }
 
-    applyAiPageSectionTranslation(entry, translatedHtml, skipCount = 0) {
+    // Apply a [[n]] segment reply onto the entry's leaf blocks by writing text-node
+    // values (structure never touched). `appliedSet` (shared with the stream handler)
+    // de-dupes segments already written so the final apply only fills the remainder.
+    // Marks children translated, registers per-leaf originals for the hover tooltip
+    // (once), and caches — but only after at least one segment has landed.
+    applyAiPageSectionTranslation(entry, translatedText, appliedSet = null) {
+        if (!entry || !entry.segBlocks || !entry.segBlocks.length) return false;
+        const map = parsePageSegmentMap(translatedText);
+        if (!map.size) return false;
+        this.noteDomPageOwnMutation();
+        // Synchronous mutation (optionally inside a View Transition) so `applied` is
+        // settled before we read it.
+        let applied = 0;
+        runWithOptionalViewTransition(() => {
+            applied = applyPageSegments(entry.segBlocks, map, 0, appliedSet);
+        });
+        this.storeEntrySegmentCache(entry, map);
+        return this.finalizeAppliedAiPageEntry(entry, translatedText, applied);
+    }
+
+    // Apply one entry's blocks out of a deduped global batch reply: each block resolves its
+    // translation through its unit index (entry.batchUnitOf), so duplicate strings that were
+    // sent once still land on every block. Caches a renumbered standalone [[n]] payload so a
+    // later single/batch cache hit can re-apply it directly.
+    applyAiPageSectionBatchEntry(entry, globalMap) {
+        if (!entry || !entry.segBlocks || !entry.segBlocks.length) return false;
+        if (!entry._segAppliedSet) entry._segAppliedSet = new Set();
+        const localMap = this.entryLocalSegmentMap(entry, globalMap);
+        let applied = 0;
+        if (localMap.size) {
+            this.noteDomPageOwnMutation();
+            runWithOptionalViewTransition(() => {
+                applied = applyPageSegments(entry.segBlocks, localMap, 0, entry._segAppliedSet);
+            });
+        }
+        this.storeEntrySegmentCache(entry, localMap);
+        const cacheText = this.buildEntrySegmentCacheText(entry, localMap);
+        return this.finalizeAppliedAiPageEntry(entry, cacheText, applied);
+    }
+
+    // Apply a per-string-cache hit straight onto a single leaf at dispatch time — text-node
+    // write only (structure untouched), mark it translated, and wire its hover-original
+    // tooltip. Returns false if the cached text doesn't cleanly map onto the leaf.
+    applyCachedLeafTranslation(leaf, cachedText) {
+        if (!leaf || !leaf.isConnected || cachedText == null) return false;
         if (!this._aiSectionTranslatedChildren) {
             this._aiSectionTranslatedChildren = new WeakSet();
         }
-        const originalTexts = this.captureAiPageSectionOriginalTexts(entry, skipCount);
+        const original = String(leaf.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
         this.noteDomPageOwnMutation();
-        // Run the DOM mutation synchronously so the result is available before
-        // we evaluate it. (Earlier code wrapped this in a View Transition, but
-        // the API's callback fires after a microtask, which means `applied`
-        // was always stale.)
-        let applied = false;
+        let applied = 0;
         runWithOptionalViewTransition(() => {
-            applied = applyHtmlPageSection(entry.section, translatedHtml, skipCount);
+            applied = applyPageSegments([leaf], new Map([[1, cachedText]]), 0, null);
         });
-        if (!applied) {
+        if (!applied) return false;
+        this._aiSectionTranslatedChildren.add(leaf);
+        markElementTranslatedForRendering(leaf);
+        if (original) this.registerDomOriginalText(leaf, original);
+        return true;
+    }
+
+    // Feed each block's (source text -> translation) into the per-string session cache so the
+    // same string is never sent to the model again this page session.
+    storeEntrySegmentCache(entry, map) {
+        if (!entry || !entry.segTexts || !map || !map.size) return;
+        for (let i = 0; i < entry.segBlocks.length; i += 1) {
+            const translation = map.get(i + 1);
+            if (translation != null) this.storeCachedSegmentText(entry.segTexts[i], translation);
+        }
+    }
+
+    // Resolve an entry's blocks against the deduped global map into a local 1:1
+    // [[i+1]] -> translation map. `maxCompleteUnit` drops units still mid-stream.
+    entryLocalSegmentMap(entry, globalMap, maxCompleteUnit = Infinity) {
+        const local = new Map();
+        const unitOf = entry.batchUnitOf;
+        const cached = entry.batchCachedText;
+        for (let i = 0; i < entry.segBlocks.length; i += 1) {
+            // Session-cached block: resolve immediately, independent of the model reply.
+            if (cached && cached[i] != null) {
+                local.set(i + 1, cached[i]);
+                continue;
+            }
+            if (!globalMap || !globalMap.size) continue;
+            const unit = unitOf ? unitOf[i] : i;
+            if (unit < 0) continue; // cache miss recorded but no fallback — skip
+            if (unit + 1 > maxCompleteUnit) continue;
+            const content = globalMap.get(unit + 1);
+            if (content != null) local.set(i + 1, content);
+        }
+        return local;
+    }
+
+    // Reconstruct an entry's own [[1..k]] payload from its resolved local map so it can be
+    // cached and re-applied independently later.
+    buildEntrySegmentCacheText(entry, localMap) {
+        const parts = [];
+        for (let i = 0; i < entry.segBlocks.length; i += 1) {
+            const content = localMap.get(i + 1);
+            if (content == null) continue;
+            parts.push(`[[${i + 1}]]\n${content}`);
+        }
+        return parts.join("\n");
+    }
+
+    // Shared post-apply bookkeeping: mark children translated, register per-leaf originals
+    // for the hover tooltip (once), cache. Returns false (releasing the entry) only when
+    // nothing has ever been applied for it.
+    finalizeAppliedAiPageEntry(entry, cacheText, appliedThisCall) {
+        if (!this._aiSectionTranslatedChildren) {
+            this._aiSectionTranslatedChildren = new WeakSet();
+        }
+        entry._segApplied = (entry._segApplied || 0) + (appliedThisCall || 0);
+        if (!entry._segApplied) {
             this.releaseAiPageSectionEntry(entry);
             return false;
         }
@@ -3850,12 +4316,54 @@ class BannerController {
             // layout/paint until scrolled into view — huge win on long pages.
             markElementTranslatedForRendering(child);
         }
-        this.registerAiPageSectionOriginalTexts(entry, originalTexts, skipCount);
-        this.cacheDomPageTranslation(entry.cacheKey, translatedHtml);
-        // Fire-forget save to the IDB-backed persistent cache so a revisit to
-        // this URL paints instantly without re-translating.
-        this.savePersistentTranslationCacheEntry(entry, translatedHtml);
+        // Register originals exactly once — wrapLeafLineSegmentsInSpans mutates the leaf,
+        // so a second pass would nest spans.
+        if (!entry._registered) {
+            entry._registered = true;
+            this.registerAiPageSectionOriginalTexts(entry, entry.originalCapture || [], 0);
+        }
+        if (cacheText) {
+            this.cacheDomPageTranslation(entry.cacheKey, cacheText);
+            // Fire-forget save to the IDB-backed persistent cache so a revisit to
+            // this URL paints instantly without re-translating.
+            this.savePersistentTranslationCacheEntry(entry, cacheText);
+        }
         return true;
+    }
+
+    // Streaming partial apply for the single-section path: write whatever [[n]] segments
+    // have fully arrived so far. Text-only writes, no marking/caching (the final apply
+    // does that once). `appliedSet` carries across chunks so nothing is written twice.
+    applyStreamedAiPageSegments(entry, accumulatedText, appliedSet) {
+        if (!entry || !entry.segBlocks || !accumulatedText) return;
+        // The last marker's content may still be mid-generation — drop it so we never
+        // apply a half-translated segment (the next chunk / final apply completes it).
+        const maxComplete = this.highestCompletePageSegment(accumulatedText);
+        if (maxComplete < 1) return;
+        const full = parsePageSegmentMap(accumulatedText);
+        if (!full.size) return;
+        const ready = new Map();
+        for (const [n, content] of full) {
+            if (n <= maxComplete) ready.set(n, content);
+        }
+        if (!ready.size) return;
+        this.noteDomPageOwnMutation();
+        applyPageSegments(entry.segBlocks, ready, 0, appliedSet);
+    }
+
+    // Index of the last [[n]] marker that is definitely complete: every marker except the
+    // final one in the buffer (whose content may still be streaming).
+    highestCompletePageSegment(text) {
+        const markerRe = /\[\[(\d+)(?::[a-z0-9-]+)?]]/gi;
+        let last = 0;
+        let prev = 0;
+        let m;
+        while ((m = markerRe.exec(text)) !== null) {
+            prev = last;
+            last = Number(m[1]) || 0;
+        }
+        // `prev` is the second-to-last marker number — the last fully-delimited segment.
+        return prev;
     }
 
     /**
@@ -4010,13 +4518,14 @@ class BannerController {
             this._domActiveTranslations += 1;
             const queueWaitMs = Math.max(0, Date.now() - queuedAt);
             let requestDurationMs = 0;
-            // Streaming partial apply: as the SSE buffer grows, swap completed top-level
-            // children into the live DOM one-by-one. The reader sees translations popcorn
-            // into place instead of waiting 3-8s for the full section response.
+            // Streaming partial apply: as the SSE buffer grows, write each completed [[n]]
+            // segment onto its leaf block. The reader sees translations popcorn into place
+            // instead of waiting 3-8s for the full response. `appliedSegments` is shared
+            // with the final apply so nothing is written twice.
             const streamId = `et-section-${Date.now().toString(36)}-${Math.random()
                 .toString(36)
                 .slice(2, 8)}`;
-            let appliedStreamCount = 0;
+            const appliedSegments = new Set();
             // rAF-throttled stream apply: SSE chunks can arrive 50-100×/second from fast
             // models, but the DOM only paints at 60fps. Coalesce intermediate events into
             // one apply per animation frame so we don't thrash the DOM and so React-like
@@ -4030,33 +4539,7 @@ class BannerController {
                 const accumulated = streamLatestText;
                 if (!accumulated) return;
                 try {
-                    const previousCount = appliedStreamCount;
-                    const originalTexts = this.captureAiPageSectionOriginalTexts(
-                        entry,
-                        previousCount
-                    );
-                    this.noteDomPageOwnMutation();
-                    appliedStreamCount = applyStreamedSectionChildren(
-                        entry,
-                        accumulated,
-                        appliedStreamCount
-                    );
-                    // Register each newly-swapped child in the translated-children set
-                    // immediately so the MutationObserver-driven rescan can't re-detect
-                    // them as fresh content (which would re-translate and burn tokens).
-                    for (let i = previousCount; i < appliedStreamCount; i += 1) {
-                        const newChild = entry.section.children[i];
-                        if (!this._aiSectionTranslatedChildren) {
-                            this._aiSectionTranslatedChildren = new WeakSet();
-                        }
-                        if (newChild) this._aiSectionTranslatedChildren.add(newChild);
-                    }
-                    this.registerAiPageSectionOriginalTexts(
-                        entry,
-                        originalTexts,
-                        previousCount,
-                        appliedStreamCount
-                    );
+                    this.applyStreamedAiPageSegments(entry, accumulated, appliedSegments);
                 } catch {
                     /* stream-apply must never throw — final response still recovers */
                 }
@@ -4081,16 +4564,16 @@ class BannerController {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
                 const cached = this._domTranslationCache.get(entry.cacheKey);
-                let translatedHtml = cached;
-                if (!translatedHtml) {
+                let translatedText = cached;
+                if (!translatedText) {
                     const startedAt = Date.now();
                     this.logDomPageDebug("ai-section:request", {
-                        chars: entry.sourceHtml.length,
+                        chars: entry.sourceText.length,
                         plainChars: entry.plainText.length,
                         inputTokens: entry.inputTokens,
                     });
                     const result = await this.translateWithDomPageEngine(
-                        entry.sourceHtml,
+                        entry.sourceText,
                         sl,
                         tl,
                         streamId
@@ -4100,25 +4583,23 @@ class BannerController {
                     this.logDomPageDebug("ai-section:response", {
                         durationMs: requestDurationMs,
                         failed: Boolean(result && result.translationFailed),
-                        streamApplied: appliedStreamCount,
+                        streamApplied: appliedSegments.size,
                     });
                     if (result && result.translationFailed) {
                         throw new Error(result.errorMsg || "AI page section translation failed.");
                     }
-                    translatedHtml = result.mainMeaning || result.translatedText || "";
-                    if (!translatedHtml || !translatedHtml.trim()) {
+                    translatedText = result.mainMeaning || result.translatedText || "";
+                    if (!translatedText || !translatedText.trim()) {
                         throw new Error("AI page section returned empty translation.");
                     }
                 }
 
                 // Flush any pending throttled stream apply BEFORE the final apply so the
-                // skipCount handed to applyHtmlPageSection reflects everything the stream
-                // path actually swapped. Otherwise an SSE chunk that arrived between the
-                // last rAF tick and the request resolving would be ignored.
+                // shared appliedSegments reflects everything the stream path wrote.
+                // Otherwise an SSE chunk that arrived between the last rAF tick and the
+                // request resolving would be re-applied redundantly.
                 if (streamRafScheduled) flushStreamApply();
-                if (
-                    !this.applyAiPageSectionTranslation(entry, translatedHtml, appliedStreamCount)
-                ) {
+                if (!this.applyAiPageSectionTranslation(entry, translatedText, appliedSegments)) {
                     throw new Error("AI page section apply rejected.");
                 }
 
@@ -4190,14 +4671,9 @@ class BannerController {
             const streamId = `et-section-batch-${Date.now().toString(36)}-${Math.random()
                 .toString(36)
                 .slice(2, 8)}`;
-            const appliedSegmentIndices = new Set();
             const streamHandler = (event) => {
                 if (!event || event.streamId !== streamId) return;
-                this.applyStreamedAiPageSectionBatchSegments(
-                    pendingEntries,
-                    event.text,
-                    appliedSegmentIndices
-                );
+                this.applyStreamedAiPageSectionBatchSegments(pendingEntries, event.text);
             };
             try {
                 this.channel.on("translation_stream_progress", streamHandler);
@@ -4210,19 +4686,26 @@ class BannerController {
                 const uncachedEntries = [];
                 for (const entry of pendingEntries) {
                     const cached = this._domTranslationCache.get(entry.cacheKey);
-                    if (cached && this.applyAiPageSectionTranslation(entry, cached)) continue;
+                    if (cached && this.applyAiPageSectionTranslation(entry, cached, null)) continue;
                     uncachedEntries.push(entry);
                 }
                 pendingEntries = uncachedEntries;
 
                 if (pendingEntries.length) {
-                    const batchedSourceText = buildSegmentedTranslationText(
-                        pendingEntries.map((entry) => ({
-                            text: entry.sourceHtml,
-                            role: entry.section?.role || "text",
-                        })),
-                        { compactMarkers: true }
-                    );
+                    // One deduped [[n]] payload over every unique block text in the batch; each
+                    // entry records batchUnitOf so the reply maps back onto all of its blocks.
+                    // Blocks already in the per-string cache are resolved here and excluded.
+                    const batchedSourceText = this.buildAiPageBatchPayload(pendingEntries);
+                    if (!batchedSourceText) {
+                        // Every block was already translated this session — apply straight from
+                        // the per-string cache with NO request (0 tokens, instant).
+                        const emptyMap = new Map();
+                        for (const entry of pendingEntries) {
+                            this.applyAiPageSectionBatchEntry(entry, emptyMap);
+                        }
+                        this.recordDomPageBatchSuccess();
+                        return;
+                    }
                     batchStartedAt = Date.now();
                     batchInputTokens = estimateLlmPayloadTokens(batchedSourceText);
                     batchEntryCount = pendingEntries.length;
@@ -4252,43 +4735,16 @@ class BannerController {
                         );
                     }
                     const translated = result.mainMeaning || result.translatedText || "";
-                    const translatedParts = splitSegmentedTranslationText(
-                        translated,
-                        pendingEntries.length
-                    );
-                    if (!translatedParts) {
-                        const unappliedEntries = pendingEntries.filter(
-                            (_, index) => !appliedSegmentIndices.has(index)
-                        );
-                        if (!unappliedEntries.length) {
-                            this.recordAiPageSectionBatchTelemetry({
-                                durationMs: batchDurationMs,
-                                inputTokens: batchInputTokens,
-                                queueWaitMs,
-                                entries: batchEntryCount,
-                            });
-                            this.recordDomPageBatchSuccess();
-                            return;
-                        }
-                        this.recordAiPageSectionBatchTelemetry({
-                            failed: true,
-                            durationMs: batchDurationMs,
-                            inputTokens: batchInputTokens,
-                            queueWaitMs,
-                            entries: batchEntryCount,
-                        });
-                        this.recordDomPageBatchFailure();
-                        this.retryAiPageSectionBatchEntries(unappliedEntries, attempt);
-                        return;
-                    }
-
+                    const globalMap = parsePageSegmentMap(translated);
+                    // Forgiving apply: each entry resolves its blocks through batchUnitOf out of
+                    // the deduped global reply. A dropped marker only leaves that one block in
+                    // the source language; it never fails the whole batch.
                     const failedEntries = [];
-                    pendingEntries.forEach((entry, index) => {
-                        if (appliedSegmentIndices.has(index)) return;
-                        if (!this.applyAiPageSectionTranslation(entry, translatedParts[index])) {
+                    for (const entry of pendingEntries) {
+                        if (!this.applyAiPageSectionBatchEntry(entry, globalMap)) {
                             failedEntries.push(entry);
                         }
-                    });
+                    }
                     if (failedEntries.length) {
                         this.recordAiPageSectionBatchTelemetry({
                             failed: true,
@@ -4326,7 +4782,7 @@ class BannerController {
                 });
                 this.recordDomPageBatchFailure();
                 this.retryAiPageSectionBatchEntries(
-                    pendingEntries.filter((_, index) => !appliedSegmentIndices.has(index)),
+                    pendingEntries.filter((entry) => !entry._segApplied),
                     attempt
                 );
             } finally {
@@ -4347,30 +4803,53 @@ class BannerController {
         this.flushDomTranslationQueue();
     }
 
-    applyStreamedAiPageSectionBatchSegments(entries, accumulatedText, appliedSet) {
-        if (!entries?.length || !accumulatedText) return;
-        const markerRe =
-            /\[\[(\d+)(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=[a-z-]+)?>>>|<<S_(\d+)>>/g;
-        const matches = [];
-        let m;
-        while ((m = markerRe.exec(accumulatedText)) !== null) {
-            matches.push({
-                at: m.index,
-                length: m[0].length,
-                n: Number(m[1] || m[2] || m[3]),
+    // Build the batch request payload with DEDUP: identical block texts (repeated UI
+    // strings — "Edit", "Reply", nav labels…) collapse to a single [[n]] unit, so the model
+    // translates each unique string once. Every entry records batchUnitOf (block -> unit)
+    // to resolve the reply back onto all of its blocks.
+    buildAiPageBatchPayload(entries) {
+        const unitTexts = [];
+        const unitIndexByText = new Map();
+        for (const entry of entries) {
+            entry._segAppliedSet = new Set();
+            entry.batchCachedText = new Array((entry.segTexts || []).length);
+            entry.batchUnitOf = (entry.segTexts || []).map((text, i) => {
+                // Already translated this session? Resolve from the per-string cache and keep
+                // it OUT of the request entirely (0 tokens). Marked with unit -1.
+                const cached = this.getCachedSegmentText(text);
+                if (cached != null) {
+                    entry.batchCachedText[i] = cached;
+                    return -1;
+                }
+                let idx = unitIndexByText.get(text);
+                if (idx == null) {
+                    idx = unitTexts.length;
+                    unitTexts.push(text);
+                    unitIndexByText.set(text, idx);
+                }
+                return idx;
             });
         }
-        for (let i = 0; i < matches.length - 1; i += 1) {
-            const entryIndex = matches[i].n - 1;
-            if (entryIndex < 0 || entryIndex >= entries.length) continue;
-            if (appliedSet.has(entryIndex)) continue;
-            const entry = entries[entryIndex];
-            const start = matches[i].at + matches[i].length;
-            const end = matches[i + 1].at;
-            const translatedHtml = accumulatedText.slice(start, end).trim();
-            if (!entry || !translatedHtml) continue;
-            if (this.applyAiPageSectionTranslation(entry, translatedHtml)) {
-                appliedSet.add(entryIndex);
+        return buildSegmentedTranslationText(
+            unitTexts.map((text) => ({ text })),
+            { compactMarkers: true }
+        );
+    }
+
+    // Streaming partial apply for a batch: write whatever global units have fully arrived
+    // onto each entry's leaf blocks (text-only; the final apply marks/caches once).
+    applyStreamedAiPageSectionBatchSegments(entries, accumulatedText) {
+        if (!entries?.length || !accumulatedText) return;
+        const maxComplete = this.highestCompletePageSegment(accumulatedText);
+        if (maxComplete < 1) return;
+        const globalMap = parsePageSegmentMap(accumulatedText);
+        if (!globalMap.size) return;
+        this.noteDomPageOwnMutation();
+        for (const entry of entries) {
+            if (!entry.batchUnitOf || !entry._segAppliedSet) continue;
+            const localMap = this.entryLocalSegmentMap(entry, globalMap, maxComplete);
+            if (localMap.size) {
+                applyPageSegments(entry.segBlocks, localMap, 0, entry._segAppliedSet);
             }
         }
     }
@@ -4767,6 +5246,36 @@ class BannerController {
             if (oldest !== undefined) this._domTranslationCache.delete(oldest);
         }
         this._domTranslationCache.set(cacheKey, translated);
+    }
+
+    // Per-string cache: key by engine|model|sl|tl|hash so a switch of engine/language never
+    // reuses a stale translation.
+    segmentTextCacheKey(text) {
+        const opts = this._domPageTranslateOptions || {};
+        const sl = this._domResolvedSourceLanguage || opts.sl || "";
+        return [opts.engine, opts.model || "", sl, opts.tl || "", fnv1a32(String(text || ""))].join(
+            "|"
+        );
+    }
+
+    getCachedSegmentText(text) {
+        if (!text || !this._domSegmentTextCache) return null;
+        const value = this._domSegmentTextCache.get(this.segmentTextCacheKey(text));
+        return value == null ? null : value;
+    }
+
+    storeCachedSegmentText(text, translation) {
+        if (!text || translation == null || translation === "") return;
+        if (!this._domSegmentTextCache) this._domSegmentTextCache = new Map();
+        const key = this.segmentTextCacheKey(text);
+        // Re-insert to keep most-recent at the tail (simple insertion-order LRU).
+        if (this._domSegmentTextCache.has(key)) {
+            this._domSegmentTextCache.delete(key);
+        } else if (this._domSegmentTextCache.size >= (this._domSegmentTextCacheMax || 6000)) {
+            const oldest = this._domSegmentTextCache.keys().next().value;
+            if (oldest !== undefined) this._domSegmentTextCache.delete(oldest);
+        }
+        this._domSegmentTextCache.set(key, translation);
     }
 
     markDomPageEntryApplied(entry) {
@@ -5357,7 +5866,7 @@ class BannerController {
         if (this._domOriginalTooltipHandlers) return;
         this._domOriginalTooltipHandlers = {
             over: (event) => this.handleDomOriginalTooltipOver(event),
-            move: (event) => this.positionDomOriginalTooltip(event),
+            move: (event) => this.trackDomOriginalTooltipShowPointer(event),
             out: (event) => this.handleDomOriginalTooltipOut(event),
         };
         document.addEventListener("mouseover", this._domOriginalTooltipHandlers.over, true);
@@ -5396,8 +5905,9 @@ class BannerController {
                     position: fixed;
                     z-index: 2147483647;
                     width: min(480px, calc(100vw - 32px));
-                    max-height: min(320px, calc(100vh - 32px));
+                    max-height: min(76vh, calc(100vh - 24px));
                     overflow: hidden auto;
+                    overscroll-behavior: contain;
                     box-sizing: border-box;
                     padding: 0;
                     border-radius: 22px;
@@ -5443,6 +5953,9 @@ class BannerController {
                     opacity: 1;
                     transform: translateY(0) scale(1);
                     filter: blur(0) saturate(210%);
+                    /* Interactive only while shown, so its long content can be hovered
+                       and scrolled; it never blocks the page while hidden. */
+                    pointer-events: auto;
                 }
                 #edge-translate-dom-original-tooltip .et-original-header {
                     position: sticky;
@@ -5508,26 +6021,8 @@ class BannerController {
             `;
             document.documentElement.appendChild(tooltip);
             this._domOriginalTooltip = tooltip;
-            // Real Liquid Glass engine on the tooltip too. 'tinted' variant is a
-            // touch more opaque so the original-text content reads cleanly.
-            try {
-                this._tooltipGlass = new LiquidGlass(tooltip, {
-                    quality: "high",
-                    variant: "tinted",
-                    scheme: "auto",
-                    radius: 22,
-                    thickness: 16,
-                    refraction: 16,
-                    chromaticAberration: 0.5,
-                    blur: 10,
-                    saturation: 180,
-                    specular: true,
-                    applyRadius: false,
-                    fallbackFilter: "blur(40px) saturate(190%) contrast(110%)",
-                });
-            } catch {
-                /* CSS fallback in the injected style block covers failures */
-            }
+            // The tooltip surface is a plain iOS-style frosted blur owned by its
+            // injected CSS (#edge-translate-dom-original-tooltip backdrop-filter).
         }
     }
 
@@ -5542,8 +6037,18 @@ class BannerController {
     }
 
     handleDomOriginalTooltipOver(event) {
+        const tooltip = this._domOriginalTooltip;
+        if (tooltip && tooltip.contains(event.target)) {
+            // Cursor is over the tooltip itself — keep it open so it can be scrolled.
+            this.cancelScheduledHideDomOriginalTooltip();
+            return;
+        }
         const target = this.getDomOriginalTooltipTarget(event.target);
-        if (!target || target === this._domOriginalTooltipTarget) return;
+        if (!target) return;
+        if (target === this._domOriginalTooltipTarget) {
+            this.cancelScheduledHideDomOriginalTooltip();
+            return;
+        }
         if (target === this._domOriginalTooltipPendingTarget) {
             this._domOriginalTooltipPendingEvent = event;
             return;
@@ -5599,8 +6104,45 @@ class BannerController {
         const target = this._domOriginalTooltipTarget;
         if (!target) return;
         const related = event.relatedTarget;
-        if (related && target.contains && target.contains(related)) return;
-        this.hideDomOriginalTooltip();
+        const tooltip = this._domOriginalTooltip;
+        // Keep it open while the cursor is over the source segment OR over the tooltip
+        // itself (entering/scrolling it), so long originals stay reachable. Hide only
+        // when the cursor leaves both — on a short delay so it can cross the gap.
+        if (related) {
+            if (target.contains && target.contains(related)) {
+                this.cancelScheduledHideDomOriginalTooltip();
+                return;
+            }
+            if (tooltip && tooltip.contains && tooltip.contains(related)) {
+                this.cancelScheduledHideDomOriginalTooltip();
+                return;
+            }
+        }
+        this.scheduleHideDomOriginalTooltip();
+    }
+
+    scheduleHideDomOriginalTooltip(delay = this._domOriginalTooltipHideDelayMs) {
+        this.cancelScheduledHideDomOriginalTooltip();
+        this._domOriginalTooltipHideTimer = setTimeout(() => {
+            this._domOriginalTooltipHideTimer = null;
+            this.hideDomOriginalTooltip();
+        }, delay);
+    }
+
+    cancelScheduledHideDomOriginalTooltip() {
+        if (this._domOriginalTooltipHideTimer) {
+            clearTimeout(this._domOriginalTooltipHideTimer);
+            this._domOriginalTooltipHideTimer = null;
+        }
+    }
+
+    // While a show is pending, keep the latest pointer so the tooltip first appears
+    // next to the cursor. Once it's visible it stays put (no cursor-follow) so its
+    // scrollbar is reachable.
+    trackDomOriginalTooltipShowPointer(event) {
+        if (this._domOriginalTooltipPendingTarget) {
+            this._domOriginalTooltipPendingEvent = event;
+        }
     }
 
     positionDomOriginalTooltip(event) {
@@ -5640,6 +6182,7 @@ class BannerController {
 
     hideDomOriginalTooltip() {
         this.cancelPendingDomOriginalTooltipShow();
+        this.cancelScheduledHideDomOriginalTooltip();
         if (!this._domOriginalTooltip) return;
         if (this._domOriginalTooltipTarget) {
             this._domOriginalTooltipTarget.classList.remove("et-dom-original-source");
@@ -5657,10 +6200,6 @@ class BannerController {
             document.removeEventListener("mouseout", this._domOriginalTooltipHandlers.out, true);
             this._domOriginalTooltipHandlers = null;
         }
-        if (this._tooltipGlass) {
-            this._tooltipGlass.destroy();
-            this._tooltipGlass = null;
-        }
         if (this._domOriginalTooltip) {
             this._domOriginalTooltip.remove();
             this._domOriginalTooltip = null;
@@ -5670,6 +6209,7 @@ class BannerController {
             this._domOriginalTooltipMoveRaf = null;
         }
         this.cancelPendingDomOriginalTooltipShow();
+        this.cancelScheduledHideDomOriginalTooltip();
         const style = document.getElementById("edge-translate-dom-original-tooltip-style");
         if (style) style.remove();
         this._domOriginalTooltipTarget = null;
@@ -5858,6 +6398,8 @@ class BannerController {
                 "z-index: 2147483647",
                 "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
                 "pointer-events: none",
+                // iOS-18 fluid collapse of the reserved strip when the bar leaves.
+                "transition: height 360ms cubic-bezier(0.22, 1, 0.36, 1)",
             ].join(";");
             const root = host.attachShadow({ mode: "open" });
             root.innerHTML = `
@@ -5866,10 +6408,11 @@ class BannerController {
                        top-edge highlight, deep saturate+blur, and spring-physics motion. */
                     :host {
                         color-scheme: light dark;
-                        --et-primary: light-dark(#0a84ff, #64d2ff);
-                        --et-on-primary: light-dark(#ffffff, #00264d);
-                        --et-primary-container: light-dark(rgba(10, 132, 255, 0.16), rgba(100, 210, 255, 0.20));
-                        --et-on-primary-container: light-dark(#003e7a, #cce4ff);
+                        /* Apple single accent: Action Blue (#0066cc), Sky Blue on dark. */
+                        --et-primary: light-dark(#0066cc, #2997ff);
+                        --et-on-primary: #ffffff;
+                        --et-primary-container: light-dark(rgba(0, 102, 204, 0.12), rgba(41, 151, 255, 0.20));
+                        --et-on-primary-container: light-dark(#0066cc, #cce4ff);
                         /* Liquid Glass tint. Apple HIG's "Regular" Material aim is for
                            text behind to fade into an unreadable wash. We use ~0.72 opacity
                            in light and ~0.62 in dark — high enough to dominate the backdrop
@@ -5890,138 +6433,129 @@ class BannerController {
                         --et-error: light-dark(#ff3b30, #ff453a);
                         --pulse-color: color-mix(in oklab, var(--et-primary) 36%, transparent);
                         --et-progress-track: light-dark(rgba(120, 120, 128, 0.16), rgba(120, 120, 128, 0.32));
-                        /* Bouncy double-overshoot spring for entrance/morph. */
-                        --ios-bouncy: linear(0, 0.062 1.5%, 0.235 3.3%, 0.482 5.6%, 0.732 8.3%, 0.948 11.3%, 1.106 14.4%, 1.184 18.1%, 1.193 22.2%, 1.146 27.1%, 1.05 33.1%, 0.972 40.2%, 0.949 47.5%, 0.97 54.5%, 1.005 61.6%, 1.019 69.5%, 1.011 78%, 1.001 88%, 1);
+                        /* Apple card radius (DESIGN.md lg = 18px). */
+                        --et-radius: 18px;
+                        /* iOS-18 elevation: soft, layered, never heavy. */
+                        --et-elevation: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+                        --et-elevation-hover: 0 14px 36px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.08);
+                        /* Spotlight enter/exit — byte-identical to the result panel's
+                           MotionFloatingSpotlightIn / MotionFloatingSpotlightOut. */
+                        --et-spotlight-in: 210ms cubic-bezier(0.2, 0, 0, 1);
+                        --et-spotlight-out: 170ms cubic-bezier(0.32, 0, 0.67, 0);
                         /* Soft spring for micro-interactions. */
                         --ios-spring-soft: linear(0, 0.018 1.4%, 0.075 3.2%, 0.183 5.7%, 0.351 8.9%, 0.554 13.2%, 0.762 18.6%, 0.929 25.4%, 1.033 33.2%, 1.077 42.2%, 1.066 53.8%, 1.025 68%, 1.005 81.6%, 1);
                         --ios-glide: linear(0, 0.009, 0.035 2.1%, 0.078 3.6%, 0.182 6.7%, 0.323 10.5%, 0.496 14.9%, 0.679 19.8%, 0.84 25.4%, 0.937 31.5%, 0.984 38.3%, 1);
-                        /* JS sets --mx/--my via pointermove for the spotlight follow. */
-                        --mx: 50%;
-                        --my: -20%;
                     }
-                    /* Liquid Glass capsule. The full-rounded radius + multi-layer
-                       inset shadows (top bright, bottom dark, sides subtle) give the
-                       "curved glass dome" look. The ::before is a moving specular
-                       highlight that follows the cursor; the ::after layers a fine
-                       diagonal sheen so the surface never reads as flat. */
+                    /* iOS-18 header card: a continuous rounded rectangle (not a pill)
+                       on clean thin-material glass. One crisp top-edge highlight + a
+                       hairline separator + soft layered elevation — no "glass dome"
+                       multi-inset stack. The ::after adds a single soft top gloss. */
                     .bar {
                         position: relative;
-                        margin: 10px 20px;
-                        height: 56px;
+                        margin: 10px 18px;
+                        height: 54px;
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
                         gap: 14px;
                         box-sizing: border-box;
-                        padding: 0 18px 6px;
+                        padding: 0 16px 5px;
                         color: var(--et-text);
                         background: var(--et-glass-base);
-                        border-radius: 9999px;
+                        border-radius: var(--et-radius);
                         font-size: 13px;
                         line-height: 1.2;
                         pointer-events: auto;
                         isolation: isolate;
                         overflow: hidden;
-                        /* Heavy frost: blur is the workhorse — at 40px+ text behind
-                           is unreadable. saturate boosts the vibrancy bleed-through,
-                           contrast restores the punch the blur+tint suck out. */
-                        backdrop-filter: blur(40px) saturate(190%) contrast(110%);
-                        -webkit-backdrop-filter: blur(40px) saturate(190%) contrast(110%);
+                        /* Clean thin-material frost — strong blur + a touch of saturation
+                           for vibrancy, without the harsh contrast push. */
+                        backdrop-filter: blur(32px) saturate(185%);
+                        -webkit-backdrop-filter: blur(32px) saturate(185%);
                         box-shadow:
-                            0 1.5px 0 var(--et-glass-edge-top) inset,
-                            0 -1px 0 var(--et-glass-edge-bottom) inset,
-                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            inset 0 1px 0 var(--et-glass-edge-top),
                             0 0 0 0.5px var(--et-glass-outline),
-                            0 16px 48px rgba(0, 0, 0, 0.16),
-                            0 4px 12px rgba(0, 0, 0, 0.08),
-                            0 1px 2px rgba(0, 0, 0, 0.10);
-                        animation: lg-entrance 720ms var(--ios-bouncy) both, lg-idle-drift 8s ease-in-out 720ms infinite;
-                        transition: transform 360ms var(--ios-spring-soft), box-shadow 360ms var(--ios-glide), background 280ms ease;
+                            var(--et-elevation);
+                        /* Chromium-native enter/exit, iPadOS-Spotlight style: the bar
+                           materializes IN PLACE — focusing in from a soft blur with a
+                           gentle scale-up and fade, exactly like the result panel — and
+                           reverses on exit. No slide. @starting-style animates the first
+                           mount; the hidden state (below) is the dismissed target. Pure
+                           CSS — filter none↔blur means no compositing layer at rest. */
+                        transform: none;
+                        opacity: 1;
+                        filter: none;
+                        transition:
+                            transform var(--et-spotlight-in),
+                            opacity var(--et-spotlight-in),
+                            filter var(--et-spotlight-in),
+                            box-shadow 320ms var(--ios-glide),
+                            background 280ms ease;
                     }
-                    /* Specular spotlight that tracks the pointer. inert to layout. */
-                    .bar::before {
-                        content: "";
-                        position: absolute;
-                        inset: 0;
-                        border-radius: inherit;
-                        pointer-events: none;
-                        background: radial-gradient(
-                            420px circle at var(--mx) var(--my),
-                            var(--et-specular) 0%,
-                            transparent 45%
-                        );
-                        opacity: 0;
-                        mix-blend-mode: lighten;
-                        transition: opacity 380ms var(--ios-glide);
-                        z-index: 0;
+                    @starting-style {
+                        .bar {
+                            opacity: 0;
+                            transform: scale(0.98);
+                            filter: blur(12px) saturate(0.86) brightness(1.04);
+                        }
                     }
-                    /* Diagonal sheen — always visible, gives the surface depth. */
+                    /* Single soft top gloss — the glass catches light at the top edge.
+                       Clean and flat, the iOS-18 way (no diagonal corner streak). */
                     .bar::after {
                         content: "";
                         position: absolute;
                         inset: 0;
                         border-radius: inherit;
                         pointer-events: none;
-                        background:
-                            linear-gradient(180deg, light-dark(rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.06)) 0%, transparent 28%),
-                            linear-gradient(135deg, transparent 0%, transparent 55%, light-dark(rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)) 100%);
-                        mix-blend-mode: screen;
+                        background: linear-gradient(180deg, light-dark(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.05)) 0%, transparent 34%);
                         z-index: 0;
                     }
                     .bar > * { position: relative; z-index: 1; }
                     .bar:hover {
-                        transform: translateY(-2px) scale(1.008);
+                        transform: translateY(-2px);
                         background: var(--et-glass-base-hover);
                         box-shadow:
-                            0 1.5px 0 var(--et-glass-edge-top) inset,
-                            0 -1px 0 var(--et-glass-edge-bottom) inset,
-                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
+                            inset 0 1px 0 var(--et-glass-edge-top),
                             0 0 0 0.5px var(--et-glass-outline),
-                            0 24px 60px rgba(0, 0, 0, 0.22),
-                            0 6px 16px rgba(0, 0, 0, 0.12),
-                            0 1px 2px rgba(0, 0, 0, 0.12);
+                            var(--et-elevation-hover);
                     }
-                    .bar:hover::before { opacity: 1; }
-                    /* State outlines — tinted but the glass surface stays unchanged. */
+                    /* State accents — a tinted hairline + a soft colored lift; the glass
+                       surface and top highlight stay constant. */
                     .bar[data-state="starting"],
                     .bar[data-state="running"] {
                         box-shadow:
-                            0 1.5px 0 var(--et-glass-edge-top) inset,
-                            0 -1px 0 var(--et-glass-edge-bottom) inset,
-                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            0 0 0 0.5px color-mix(in oklab, var(--et-primary) 38%, var(--et-glass-outline)),
-                            0 16px 48px color-mix(in oklab, var(--et-primary) 26%, rgba(0, 0, 0, 0.16)),
-                            0 4px 12px rgba(0, 0, 0, 0.08),
-                            0 1px 2px rgba(0, 0, 0, 0.10);
+                            inset 0 1px 0 var(--et-glass-edge-top),
+                            0 0 0 0.5px color-mix(in oklab, var(--et-primary) 45%, var(--et-glass-outline)),
+                            0 8px 24px color-mix(in oklab, var(--et-primary) 22%, rgba(0, 0, 0, 0.12)),
+                            0 2px 8px rgba(0, 0, 0, 0.06);
                     }
                     .bar[data-state="complete"] {
-                        animation: lg-celebrate 900ms var(--ios-bouncy) both;
                         box-shadow:
-                            0 1.5px 0 var(--et-glass-edge-top) inset,
-                            0 -1px 0 var(--et-glass-edge-bottom) inset,
-                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            0 0 0 0.5px color-mix(in oklab, var(--et-success) 36%, var(--et-glass-outline)),
-                            0 16px 48px color-mix(in oklab, var(--et-success) 22%, rgba(0, 0, 0, 0.14)),
-                            0 4px 12px rgba(0, 0, 0, 0.08),
-                            0 1px 2px rgba(0, 0, 0, 0.10);
+                            inset 0 1px 0 var(--et-glass-edge-top),
+                            0 0 0 0.5px color-mix(in oklab, var(--et-success) 45%, var(--et-glass-outline)),
+                            0 8px 24px color-mix(in oklab, var(--et-success) 20%, rgba(0, 0, 0, 0.12)),
+                            0 2px 8px rgba(0, 0, 0, 0.06);
                     }
                     .bar[data-state="error"] {
                         box-shadow:
-                            0 1.5px 0 var(--et-glass-edge-top) inset,
-                            0 -1px 0 var(--et-glass-edge-bottom) inset,
-                            1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            -1px 0 0 -0.5px var(--et-glass-edge-side) inset,
-                            0 0 0 0.5px color-mix(in oklab, var(--et-error) 40%, var(--et-glass-outline)),
-                            0 16px 48px color-mix(in oklab, var(--et-error) 24%, rgba(0, 0, 0, 0.16)),
-                            0 4px 12px rgba(0, 0, 0, 0.08),
-                            0 1px 2px rgba(0, 0, 0, 0.10);
+                            inset 0 1px 0 var(--et-glass-edge-top),
+                            0 0 0 0.5px color-mix(in oklab, var(--et-error) 48%, var(--et-glass-outline)),
+                            0 8px 24px color-mix(in oklab, var(--et-error) 22%, rgba(0, 0, 0, 0.12)),
+                            0 2px 8px rgba(0, 0, 0, 0.06);
                     }
+                    /* Dismissed target — the bar blurs out and eases down in scale in
+                       place (Spotlight dismiss); pointer-events off so it never blocks. */
                     :host([data-visible="false"]) .bar {
-                        display: none;
+                        opacity: 0;
+                        transform: scale(0.98);
+                        filter: blur(10px) saturate(0.88) brightness(1.04);
+                        pointer-events: none;
+                        /* Exit uses the panel's faster out-curve (the rest state's
+                           transition governs the enter direction). */
+                        transition:
+                            transform var(--et-spotlight-out),
+                            opacity var(--et-spotlight-out),
+                            filter var(--et-spotlight-out);
                     }
                     .main {
                         display: flex;
@@ -6121,7 +6655,7 @@ class BannerController {
                         white-space: nowrap;
                         max-width: min(50vw, 520px);
                         font-size: 11px;
-                        font-weight: 500;
+                        font-weight: 600;
                         letter-spacing: -0.05px;
                     }
                     .actions {
@@ -6158,7 +6692,7 @@ class BannerController {
                         background: var(--et-surface-container);
                         color: var(--et-muted);
                         font-size: 11px;
-                        font-weight: 500;
+                        font-weight: 600;
                         font-variant-numeric: tabular-nums;
                         backdrop-filter: blur(16px) saturate(180%);
                         -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -6231,30 +6765,47 @@ class BannerController {
                         background: var(--et-progress-track);
                         border-radius: 9999px;
                     }
-                    /* Liquid wave fill — animated multi-stop gradient that flows. */
+                    /* iOS-18 determinate fill: a clean rounded bar that springs to
+                       its width; a glossy highlight sweeps across while running. */
                     .progress-fill {
                         position: relative;
                         width: 0%;
                         height: 100%;
-                        background:
-                            linear-gradient(90deg,
-                                color-mix(in oklab, var(--et-primary) 80%, white) 0%,
-                                var(--et-primary) 40%,
-                                color-mix(in oklab, var(--et-primary) 65%, white) 60%,
-                                var(--et-primary) 100%);
-                        background-size: 200% 100%;
+                        background: linear-gradient(90deg,
+                            color-mix(in oklab, var(--et-primary) 78%, white),
+                            var(--et-primary));
                         border-radius: 9999px;
+                        overflow: hidden;
                         box-shadow:
-                            0 0 12px color-mix(in oklab, var(--et-primary) 55%, transparent),
+                            0 0 10px color-mix(in oklab, var(--et-primary) 50%, transparent),
                             0 0 0 0.5px rgba(255, 255, 255, 0.30) inset;
-                        animation: liquid-flow 2.4s linear infinite;
-                        transition: width 480ms var(--ios-spring-soft), background 280ms ease;
+                        transition: width 520ms var(--ios-spring-soft), background 280ms ease;
                     }
+                    .progress-fill::after {
+                        content: "";
+                        position: absolute;
+                        inset: 0;
+                        border-radius: inherit;
+                        background: linear-gradient(90deg, transparent 12%, rgba(255, 255, 255, 0.5) 50%, transparent 88%);
+                        transform: translateX(-100%);
+                        opacity: 0;
+                    }
+                    .bar[data-state="running"] .progress-fill::after {
+                        opacity: 1;
+                        animation: progress-sheen 1.9s var(--ios-glide) infinite;
+                    }
+                    /* iOS-18 indeterminate: a short rounded pill glides across the
+                       track on a soft ease while the run spins up. */
                     .bar[data-state="starting"] .progress-fill {
-                        width: 100% !important;
-                        background: linear-gradient(90deg, transparent 0%, var(--et-primary) 50%, transparent 100%);
-                        background-size: 200% 100%;
-                        animation: shimmer 1.6s infinite linear;
+                        width: 42% !important;
+                        background: linear-gradient(90deg,
+                            transparent,
+                            color-mix(in oklab, var(--et-primary) 80%, white) 35%,
+                            var(--et-primary) 50%,
+                            color-mix(in oklab, var(--et-primary) 80%, white) 65%,
+                            transparent);
+                        box-shadow: 0 0 10px color-mix(in oklab, var(--et-primary) 42%, transparent);
+                        animation: progress-indeterminate 1.5s var(--ios-glide) infinite;
                     }
                     .bar[data-state="error"] .status-dot {
                         background: var(--et-error);
@@ -6282,9 +6833,9 @@ class BannerController {
                         display: none;
                         align-items: center;
                         gap: 6px;
-                        height: 32px;
-                        padding: 0 14px;
-                        border-radius: 16px;
+                        height: 34px;
+                        padding: 0 15px;
+                        border-radius: 17px;
                         background: var(--et-glass-base);
                         color: var(--et-primary);
                         font: inherit;
@@ -6292,26 +6843,45 @@ class BannerController {
                         font-weight: 600;
                         letter-spacing: -0.1px;
                         pointer-events: auto;
-                        backdrop-filter: blur(36px) saturate(190%) contrast(110%);
-                        -webkit-backdrop-filter: blur(36px) saturate(190%) contrast(110%);
+                        backdrop-filter: blur(32px) saturate(185%);
+                        -webkit-backdrop-filter: blur(32px) saturate(185%);
                         box-shadow:
-                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08)) inset,
-                            0 -0.5px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.22)) inset,
+                            inset 0 1px 0 var(--et-glass-edge-top),
                             0 0 0 0.5px var(--et-glass-outline),
-                            0 6px 18px rgba(0, 0, 0, 0.12);
-                        transition: transform 320ms var(--ios-spring-soft), box-shadow 320ms var(--ios-glide);
+                            var(--et-elevation);
+                        /* Dismissed resting state; the visible state transitions in
+                           with the same Spotlight blur-scale as the bar. The
+                           "display ... allow-discrete" transition animates the
+                           display none↔inline-flex toggle the Chromium-native way. */
+                        opacity: 0;
+                        transform: scale(0.9);
+                        filter: blur(8px);
+                        transition:
+                            transform var(--et-spotlight-in),
+                            opacity var(--et-spotlight-in),
+                            filter var(--et-spotlight-in),
+                            box-shadow var(--et-spotlight-in),
+                            display 210ms allow-discrete;
                     }
                     :host([data-visible="false"]) .restore {
                         display: inline-flex;
-                        animation: lg-entrance 520ms var(--ios-spring) both;
+                        opacity: 1;
+                        transform: none;
+                        filter: none;
+                    }
+                    @starting-style {
+                        :host([data-visible="false"]) .restore {
+                            opacity: 0;
+                            transform: scale(0.9);
+                            filter: blur(8px);
+                        }
                     }
                     .restore:hover {
-                        transform: translateY(-1px) scale(1.04);
+                        transform: translateY(-1px);
                         box-shadow:
-                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.10)) inset,
-                            0 -0.5px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.22)) inset,
+                            inset 0 1px 0 var(--et-glass-edge-top),
                             0 0 0 0.5px var(--et-glass-outline),
-                            0 10px 28px rgba(0, 0, 0, 0.16);
+                            var(--et-elevation-hover);
                     }
                     .restore:active {
                         transform: scale(0.94);
@@ -6327,49 +6897,16 @@ class BannerController {
                         white-space: nowrap;
                         border: 0;
                     }
-                    /* Liquid Glass entrance: settle from above with a brief blur lift,
-                       saturation surge, and a double-overshoot spring. */
-                    @keyframes lg-entrance {
-                        0% {
-                            transform: translateY(-22px) scale(0.88);
-                            opacity: 0;
-                            filter: blur(12px) saturate(130%);
-                        }
-                        45% {
-                            transform: translateY(2px) scale(1.012);
-                            opacity: 1;
-                            filter: blur(0) saturate(220%);
-                        }
-                        72% {
-                            transform: translateY(-1px) scale(0.997);
-                        }
-                        100% {
-                            transform: translateY(0) scale(1);
-                            opacity: 1;
-                            filter: blur(0) saturate(210%);
-                        }
+                    /* Indeterminate pill travelling across the track. */
+                    @keyframes progress-indeterminate {
+                        0%   { transform: translateX(-120%); }
+                        100% { transform: translateX(280%); }
                     }
-                    /* Subtle 1px vertical breathing while idle so the glass feels alive. */
-                    @keyframes lg-idle-drift {
-                        0%, 100% { transform: translateY(0) scale(1); }
-                        50% { transform: translateY(-1px) scale(1.002); }
-                    }
-                    /* Brief celebration morph when state flips to complete. */
-                    @keyframes lg-celebrate {
-                        0% { transform: scale(1); }
-                        25% { transform: scale(1.025) translateY(-1px); }
-                        55% { transform: scale(0.992) translateY(0.5px); }
-                        80% { transform: scale(1.006); }
-                        100% { transform: scale(1); }
-                    }
-                    @keyframes shimmer {
-                        0% { background-position: 200% 0; }
-                        100% { background-position: -200% 0; }
-                    }
-                    /* Liquid wave gradient flow for the progress fill. */
-                    @keyframes liquid-flow {
-                        0% { background-position: 0% 50%; }
-                        100% { background-position: 200% 50%; }
+                    /* Gloss highlight sweeping across the determinate fill, with a
+                       brief pause at the far edge between passes. */
+                    @keyframes progress-sheen {
+                        0%        { transform: translateX(-100%); }
+                        65%, 100% { transform: translateX(100%); }
                     }
                     @keyframes pulse-breath {
                         0% {
@@ -6404,9 +6941,20 @@ class BannerController {
                         button {
                             transition: none;
                         }
+                        .bar,
+                        .restore,
+                        :host([data-visible="false"]) .bar,
+                        :host([data-visible="false"]) .restore {
+                            transition: none;
+                        }
                         .bar[data-state="starting"] .progress-fill {
                             animation: none;
                             transform: none;
+                            width: 100% !important;
+                        }
+                        .bar[data-state="running"] .progress-fill::after {
+                            animation: none;
+                            opacity: 0;
                         }
                         .bar[data-state="starting"] .status-dot,
                         .bar[data-state="running"] .status-dot {
@@ -6461,98 +7009,20 @@ class BannerController {
             root.querySelector("[data-action='close']").addEventListener("click", () => {
                 this.cancelDomPageTranslate();
             });
-            // Real Liquid Glass engine (Meapri/liquid-glass-web) on Chromium. The
-            // earlier homemade SVG attempt emitted an invalid `filter="blur(N)"` (no px
-            // units) that silently killed the whole backdrop-filter chain; the engine
-            // instead builds a valid FilterChain (feGaussianBlur + feDisplacementMap +
-            // baked specular) and falls back to the CSS backdrop-filter declared on
-            // .bar / .restore on non-Chromium.
-            const bar = root.querySelector("[data-role='bar']");
-            const restore = root.querySelector(".restore");
-            // Keep the HIG glass tint (~0.72 light / 0.62 dark) so the bar's controls
-            // stay legible; the engine adds rim refraction + specular at the pill edge.
-            // Tint follows the scheme since the engine can't read CSS light-dark().
-            const glassTint = () =>
-                window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
-                    ? "rgba(28, 28, 30, 0.38)"
-                    : "rgba(255, 255, 255, 0.4)";
-            if (restore) {
-                try {
-                    this._restoreGlass = new LiquidGlass(restore, {
-                        quality: "high",
-                        scheme: "auto",
-                        radius: "pill",
-                        thickness: 12,
-                        refraction: 14,
-                        chromaticAberration: 0.45,
-                        blur: 10,
-                        saturation: 190,
-                        specularIntensity: 0.6,
-                        tint: glassTint(),
-                        applyRadius: false,
-                        fallbackFilter: "blur(36px) saturate(190%) contrast(110%)",
-                    });
-                } catch {
-                    /* CSS backdrop-filter fallback already on .restore */
-                }
-            }
-            if (!this._glassSchemeBound && window.matchMedia) {
-                this._glassSchemeBound = true;
-                window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-                    const t = glassTint();
-                    this._barGlass?.update({ tint: t });
-                    this._restoreGlass?.update({ tint: t });
-                });
-            }
-            if (bar) {
-                try {
-                    this._barGlass = new LiquidGlass(bar, {
-                        quality: "high",
-                        scheme: "auto",
-                        radius: "pill",
-                        thickness: 22,
-                        refraction: 22,
-                        chromaticAberration: 0.5,
-                        blur: 10,
-                        saturation: 190,
-                        specularIntensity: 0.7,
-                        tint: glassTint(),
-                        applyRadius: false,
-                        fallbackFilter: "blur(40px) saturate(190%) contrast(110%)",
-                    });
-                } catch {
-                    /* CSS backdrop-filter fallback already on .bar */
-                }
-                let mxScheduled = false;
-                let pendingX = "50%";
-                let pendingY = "-20%";
-                const flushMouse = () => {
-                    mxScheduled = false;
-                    bar.style.setProperty("--mx", pendingX);
-                    bar.style.setProperty("--my", pendingY);
-                };
-                bar.addEventListener("pointermove", (event) => {
-                    const rect = bar.getBoundingClientRect();
-                    const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
-                    const y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
-                    pendingX = `${x.toFixed(1)}%`;
-                    pendingY = `${y.toFixed(1)}%`;
-                    if (!mxScheduled) {
-                        mxScheduled = true;
-                        requestAnimationFrame(flushMouse);
-                    }
-                });
-                bar.addEventListener("pointerleave", () => {
-                    // Park the spotlight just above center so it eases out gently.
-                    pendingX = "50%";
-                    pendingY = "-20%";
-                    if (!mxScheduled) {
-                        mxScheduled = true;
-                        requestAnimationFrame(flushMouse);
-                    }
-                });
-            }
+            // The bar and restore pill are plain iOS-style frosted blur surfaces;
+            // their backdrop-filter, edge shadows and sheen live in the injected
+            // CSS above (.bar / .restore). No engine, no pointer-tracking effects.
             (document.documentElement || document.body).appendChild(host);
+            // Ease the page-content shift (movePage drives body { top }) so the
+            // page glides up/down in step with the bar's spring, iOS-18 style.
+            if (!document.getElementById("edge-translate-page-shift-style")) {
+                const shiftStyle = document.createElement("style");
+                shiftStyle.id = "edge-translate-page-shift-style";
+                shiftStyle.textContent =
+                    "body{transition:top 360ms cubic-bezier(0.22,1,0.36,1)!important;}" +
+                    "@media (prefers-reduced-motion:reduce){body{transition:none!important;}}";
+                (document.head || document.documentElement).appendChild(shiftStyle);
+            }
         }
         this._domPageBanner = host;
         return host;
@@ -6563,19 +7033,12 @@ class BannerController {
         this._domPageBannerVisible = visible;
         host.style.display = "block";
         host.dataset.visible = visible ? "true" : "false";
+        // Toggling data-visible drives the bar/restore CSS state transitions; the
+        // host height + page shift ease in step via their own CSS transitions
+        // (host `transition: height`, injected `body { transition: top }`). All
+        // native — no JS timers coordinating the motion.
         host.style.height = visible ? `${this._domPageBannerHeight}px` : "0";
         this.movePage("top", visible ? this._domPageBannerHeight : 0, true);
-        // Liquid Glass is GPU work — only run the filter on whichever element is
-        // actually on screen. suspend()/resume() detach/re-attach the built
-        // filter without rebuilding the (expensive) displacement/specular maps.
-        if (this._barGlass) {
-            if (visible) this._barGlass.resume();
-            else this._barGlass.suspend();
-        }
-        if (this._restoreGlass) {
-            if (visible) this._restoreGlass.suspend();
-            else this._restoreGlass.resume();
-        }
     }
 
     /**
@@ -6753,16 +7216,10 @@ class BannerController {
             this._mo.disconnect();
             this._mo = null;
         }
-        if (this._barGlass) {
-            this._barGlass.destroy();
-            this._barGlass = null;
-        }
-        if (this._restoreGlass) {
-            this._restoreGlass.destroy();
-            this._restoreGlass = null;
-        }
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
+        const shiftStyle = document.getElementById("edge-translate-page-shift-style");
+        if (shiftStyle) shiftStyle.remove();
         this.destroyDomOriginalTooltip();
         this._domPageBanner = null;
         this._domBannerRefs = null;
@@ -6961,14 +7418,19 @@ class BannerController {
             if (!shouldScan) return;
             this._domCoverageStableScanCount = 0;
             this._domPageRootElements = this.getDomPageTranslationRoots();
-            this.scheduleDomPageIncrementalScan(120);
+            // Coalesce mutation bursts (SPA re-renders, lazy-load) into ONE dispatch so newly
+            // added content is bundled into fewer, larger requests instead of a stream of tiny
+            // ones — fewer per-request overheads, fewer tokens.
+            this.scheduleDomPageIncrementalScan(280);
         });
         this._mo.observe(document.documentElement || document.body, {
             subtree: true,
             childList: true,
             characterData: true,
         });
-        this._domScrollScanHandler = () => this.scheduleDomPageIncrementalScan(180);
+        // Wait for the scroll to settle, then dispatch the newly revealed content as one
+        // bundle rather than firing a fresh request set on every scroll tick.
+        this._domScrollScanHandler = () => this.scheduleDomPageIncrementalScan(360);
         window.addEventListener("scroll", this._domScrollScanHandler, {
             passive: true,
             capture: true,

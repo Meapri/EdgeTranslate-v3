@@ -111,6 +111,12 @@ const CHROME_TRANSLATOR_SUPPORTED_LANGUAGE_CODES = new Set(
 // waiting up to 90s on a stalled request. Real LLM completions for page-translate batches
 // land in 5-15s on cloud APIs; 60s is well past the 99th percentile.
 const DEFAULT_TIMEOUT_MS = 60000;
+// Realtime captions are disposable: a translation that arrives after the line has
+// scrolled off is useless and, worse, holds the single in-flight caption slot the
+// whole time. Cap caption requests far tighter than page/selection translation so a
+// stalled request frees the slot quickly and the next caption (or Google fast
+// fallback) takes over.
+const REALTIME_CAPTION_TIMEOUT_MS = 12000;
 const DEFAULT_GOOGLE_AI_STUDIO_MODEL = "gemini-2.5-flash-lite";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_COMPATIBLE_MODEL = "gpt-oss-20b";
@@ -148,7 +154,7 @@ const PAGE_HTML_TRANSLATION_SYSTEM_PROMPT =
     "Translate visible HTML text only. Preserve tags, attrs, order exactly. Output translated HTML only.";
 
 const PAGE_SEGMENTED_TRANSLATION_SYSTEM_PROMPT =
-    "Translate page segments. Keep each [[n]]/[[n:r]] marker once, in order. Preserve HTML tags/attrs. Translate only visible text. Output only the translated payload.";
+    "Translate each [[n]] segment into the target language. Output every [[n]] marker exactly once, in order, each on its own line, with that segment's translation right after it. Keep inline tags (<a>,<b>,<i>,<code>…), numbers, URLs and code identifiers intact. Translate only the visible text — output only the [[n]] segments, nothing else.";
 
 const REALTIME_CAPTION_SYSTEM_PROMPT =
     "You are a subtitle translator. Return only translated subtitles.";
@@ -541,6 +547,34 @@ function extractOpenAIResponseText(payload: any) {
         .trim();
 }
 
+/**
+ * Strip chain-of-thought artifacts that local reasoning models emit *inline* in
+ * the message content. DeepSeek-R1, Qwen-QwQ / Qwen3-thinking, gpt-oss and the
+ * like are the popular choices for OpenAI-compatible local servers (llama.cpp,
+ * Ollama, LM Studio, vLLM), and most of those surface the reasoning as
+ * <think>…</think> blocks in `content` rather than a separate reasoning_content
+ * field — so without this the "translation" would carry the model's thinking.
+ * A no-op for ordinary models (no tags present).
+ */
+function stripReasoningArtifacts(text: string) {
+    let out = String(text || "");
+    if (!out) return out;
+    // Remove fully-formed reasoning blocks anywhere in the text.
+    out = out.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "");
+    // Stray closing tag (opener already stripped or never streamed): keep only
+    // what follows the final close, if anything.
+    const lastClose = out.toLowerCase().lastIndexOf("</think");
+    if (lastClose !== -1) {
+        const after = out.slice(out.indexOf(">", lastClose) + 1);
+        if (after.trim()) out = after;
+    }
+    // Stray opening tag (output truncated mid-reasoning): everything from it on is
+    // reasoning, so keep only the text before it.
+    const firstOpen = out.search(/<think(?:ing)?>/i);
+    if (firstOpen !== -1) out = out.slice(0, firstOpen);
+    return out.trim();
+}
+
 function countPageSegmentMarkers(text: string) {
     const matches = String(text || "").match(
         /\[\[\d+(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g
@@ -913,6 +947,13 @@ class LocalTranslator {
         );
     }
 
+    /** Per-request abort timeout — captions get the tight cap (see constant). */
+    private requestTimeoutMsFor(options: LocalTranslationOptions = {}) {
+        return this.isRealtimeCaptionTranslation(options)
+            ? Math.min(this.timeoutMs, REALTIME_CAPTION_TIMEOUT_MS)
+            : this.timeoutMs;
+    }
+
     private async requestTranslation(
         text: string,
         from: string,
@@ -922,17 +963,25 @@ class LocalTranslator {
         if (this.mode === "chromeBuiltin") {
             return this.requestChromeBuiltinTranslation(text, from, to);
         }
+        // Captions fail fast — a retry (with backoff) only ever lands a stale line and
+        // re-spends tokens; the next caption or the Google fast fallback covers the gap.
+        const retries = this.isRealtimeCaptionTranslation(options) ? 0 : 2;
         if (this.mode === "googleAiStudio") {
-            return retryWithBackoff(() =>
-                this.requestGoogleAiStudioTranslation(text, from, to, options)
+            return retryWithBackoff(
+                () => this.requestGoogleAiStudioTranslation(text, from, to, options),
+                retries
             );
         }
         if (this.mode === "openai") {
-            return retryWithBackoff(() => this.requestOpenAiTranslation(text, from, to, options));
+            return retryWithBackoff(
+                () => this.requestOpenAiTranslation(text, from, to, options),
+                retries
+            );
         }
         if (this.mode === "openaiCompatible") {
-            return retryWithBackoff(() =>
-                this.requestOpenAiCompatibleTranslation(text, from, to, options)
+            return retryWithBackoff(
+                () => this.requestOpenAiCompatibleTranslation(text, from, to, options),
+                retries
             );
         }
         return this.requestChromeBuiltinTranslation(text, from, to);
@@ -1104,9 +1153,7 @@ class LocalTranslator {
         if (options.translationProfile === "page" || hasPageTranslationSegments(text)) {
             const hasMarkers = hasPageTranslationSegments(text);
             const header = [
-                sourceLanguage && targetLanguage
-                    ? `${sourceLanguage}>${targetLanguage}`
-                    : "",
+                sourceLanguage && targetLanguage ? `${sourceLanguage}>${targetLanguage}` : "",
                 hasMarkers ? "Keep markers." : "",
             ]
                 .filter(Boolean)
@@ -1169,7 +1216,7 @@ class LocalTranslator {
     }
 
     private parseOpenAiResponse(payload: any) {
-        return extractOpenAIResponseText(payload);
+        return stripReasoningArtifacts(extractOpenAIResponseText(payload));
     }
 
     private getGoogleAiStudioCompatibilityModes(options: LocalTranslationOptions = {}) {
@@ -1180,7 +1227,8 @@ class LocalTranslator {
     }
 
     private shouldStartGoogleAiStudioWithBareRequest(options: LocalTranslationOptions = {}) {
-        if (this.buildGoogleAiStudioThinkingConfig(options)) return false;
+        void options;
+        if (this.buildGoogleAiStudioThinkingConfig()) return false;
         const model = this.model.toLowerCase();
         return /^gemini-(?:3(?:\.\d+)?-pro|pro-latest)(?:$|-)/.test(model);
     }
@@ -1189,46 +1237,37 @@ class LocalTranslator {
         return /^gemini-3(?:\.|-|$)/i.test(this.model);
     }
 
-    private isGemini3Model() {
-        return /^gemini-(?:3(?:\.|-)|flash-latest|flash-lite-latest|pro-latest)/i.test(this.model);
-    }
-
     private isGemini3ProModel() {
         return /^gemini-(?:3(?:\.\d+)?-pro|pro-latest)(?:$|-)/i.test(this.model);
-    }
-
-    private isGemini3FlashModel() {
-        return /^gemini-(?:3(?:\.\d+)?-flash|3(?:\.\d+)?-flash-lite|flash-latest|flash-lite-latest)(?:$|-)/i.test(
-            this.model
-        );
     }
 
     private isGemini25Model() {
         return /^gemini-2\.5/i.test(this.model);
     }
 
-    private getEffectiveGoogleAiStudioReasoningLevel(options: LocalTranslationOptions = {}) {
-        // Reasoning is intentionally not user-configurable. Prefer true off; use only
-        // the lowest provider-required value for models that do not accept off.
-        void options;
-        if (this.isGemini3ProModel()) return "low";
-        if (this.isGemini3FlashModel()) return "minimal";
-        return "none";
+    private isGemini3FlashLiteModel() {
+        return /^gemini-(?:3(?:\.\d+)?-flash-lite|flash-lite-latest)(?:$|-)/i.test(this.model);
     }
 
-    private buildGoogleAiStudioThinkingConfig(options: LocalTranslationOptions = {}) {
-        const level = this.getEffectiveGoogleAiStudioReasoningLevel(options);
-        if (this.isGemini3Model()) {
-            if (this.isGemini3ProModel()) {
-                return { thinkingLevel: "low" };
-            }
-            if (this.isGemini3FlashModel()) {
-                return { thinkingLevel: "minimal" };
-            }
-            return undefined;
+    private isGemini3FlashModel() {
+        return /^gemini-(?:3(?:\.\d+)?-flash|flash-latest)(?:$|-)/i.test(this.model);
+    }
+
+    private buildGoogleAiStudioThinkingConfig() {
+        // Reasoning/"thinking" is pure waste for translation. Turn it fully OFF wherever the
+        // model allows it, and fall back to the lowest provider-required level otherwise.
+        if (this.isGemini3ProModel()) {
+            // Gemini 3 Pro mandates thinking — give it the minimum level.
+            return { thinkingLevel: "low" };
         }
-        if (this.isGemini25Model() && level === "none") {
+        if (this.isGemini3FlashLiteModel() || this.isGemini25Model()) {
+            // Flash-Lite (3.x) and all Gemini 2.5 flash/flash-lite accept a zero budget,
+            // which disables thinking entirely (no reasoning tokens billed).
             return { thinkingBudget: 0 };
+        }
+        if (this.isGemini3FlashModel()) {
+            // Gemini 3 Flash (non-lite) keeps thinking on but at the minimum level.
+            return { thinkingLevel: "minimal" };
         }
         return undefined;
     }
@@ -1240,7 +1279,7 @@ class LocalTranslator {
     ) {
         if (compatibilityMode === "bare") return undefined;
         const config: Record<string, any> = { temperature: 0 };
-        const thinkingConfig = this.buildGoogleAiStudioThinkingConfig(options);
+        const thinkingConfig = this.buildGoogleAiStudioThinkingConfig();
         if (thinkingConfig) config.thinkingConfig = thinkingConfig;
         if (this.isRealtimeCaptionTranslation(options)) {
             config.maxOutputTokens = Math.max(96, Math.ceil((inputLength || 24) * 2));
@@ -1364,7 +1403,7 @@ class LocalTranslator {
         options: LocalTranslationOptions = {}
     ) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const model = encodeURIComponent(this.model);
@@ -1452,7 +1491,8 @@ class LocalTranslator {
                                     /* noop */
                                 }
                             }
-                            if (candidate.finishReason) finishReason = String(candidate.finishReason);
+                            if (candidate.finishReason)
+                                finishReason = String(candidate.finishReason);
                         }
                         if (json.usageMetadata) usageMetadata = json.usageMetadata;
                     } catch {
@@ -1605,7 +1645,7 @@ class LocalTranslator {
         options: LocalTranslationOptions = {}
     ) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const isPageTranslation =
@@ -1797,7 +1837,7 @@ class LocalTranslator {
         options: LocalTranslationOptions = {}
     ) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const isPageTranslation =
@@ -1831,16 +1871,20 @@ class LocalTranslator {
                       )
                     : Math.min(
                           tokenMultiplier >= 8 ? 3072 : 1536,
-                          Math.max(
-                              512,
-                              Math.ceil(text.length * (tokenMultiplier >= 8 ? 2.5 : 1.5))
-                          )
+                          Math.max(512, Math.ceil(text.length * (tokenMultiplier >= 8 ? 2.5 : 1.5)))
                       ),
                 temperature: 0,
                 // llama.cpp / vLLM / TGI honor this; unknown servers ignore unknown fields.
                 // The stable system prompt prefix (see AI_TRANSLATION_SYSTEM_PROMPT) makes
                 // this 5-10x cheaper per concurrent request because the KV-cache is reused.
                 cache_prompt: true,
+                // Disable chain-of-thought for translation — it's pure latency/token waste.
+                // Qwen3 & friends read enable_thinking from chat_template_kwargs (vLLM/sglang/
+                // llama.cpp); reasoning_effort covers servers that expose the OpenAI knob.
+                // Unknown servers ignore unknown fields, and any leaked <think> is still
+                // stripped from the output downstream.
+                chat_template_kwargs: { enable_thinking: false },
+                reasoning_effort: "low",
             });
             const useStreaming = typeof options.onProgress === "function";
             const requestPayload = async (tokenMultiplier = 4) => {
@@ -1875,7 +1919,9 @@ class LocalTranslator {
                         if (delta) {
                             accumulated += String(delta);
                             try {
-                                options.onProgress?.(accumulated);
+                                // Surface the reasoning-stripped text so a thinking
+                                // model's <think> stream doesn't flash in the panel.
+                                options.onProgress?.(stripReasoningArtifacts(accumulated));
                             } catch {
                                 /* ignore listener errors */
                             }
@@ -1954,8 +2000,7 @@ class LocalTranslator {
         } catch (error: any) {
             throw {
                 errorType: "API_ERR",
-                errorCode:
-                    error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_COMPATIBLE_API_ERROR",
+                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_COMPATIBLE_API_ERROR",
                 errorMsg: error?.message || "OpenAI-compatible API request failed.",
                 errorAct: {
                     api: "local",

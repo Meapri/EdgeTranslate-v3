@@ -239,6 +239,10 @@
         "message": "Отменить выделение текста после перевода",
         "description": "Отменить выделение текста автоматически после перевода"
     },
+    "HidePageTranslatorBanner": {
+        "message": "Скрыть баннер перевода страницы",
+        "description": "Скрывать баннер, отображаемый при переводе всей страницы."
+    },
     "GooglePageTranslate": {
         "message": "Перевод страниц Google",
         "description": "Перевод текущей страницы с помощью Google Translate API."

@@ -89,8 +89,8 @@ body {
     overflow: hidden;
     margin: 0;
     padding: 18px;
-    border-radius: 24px;
-    background: linear-gradient(145deg, rgba(255, 255, 255, .84), rgba(255, 255, 255, .56));
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .72);
     backdrop-filter: blur(30px) saturate(185%);
     -webkit-backdrop-filter: blur(30px) saturate(185%);
     border: 1px solid rgba(255, 255, 255, .82);
@@ -106,8 +106,8 @@ body {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: linear-gradient(135deg, rgba(255, 255, 255, .64), rgba(255, 255, 255, 0) 44%), linear-gradient(315deg, rgba(211, 227, 253, .28), rgba(255, 255, 255, 0) 40%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(11, 87, 208, .07);
+    background: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(0, 102, 204, .07);
 }
 
 .frame > * {
@@ -165,7 +165,7 @@ select,
     border-radius: 999px;
     box-shadow: inset 0 0 0 1px rgba(221, 230, 239, .92), inset 0 1px 0 rgba(255, 255, 255, .78);
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
     outline: none;
     transition: transform var(--dur-quick) var(--spring-press),
                 background-color var(--dur-quick) var(--ease-decelerate),
@@ -176,7 +176,7 @@ select,
         &:hover {
             background-color: rgba(230, 237, 244, .86);
             box-shadow: inset 0 0 0 1px color-primary-container,
-                        0 2px 8px rgba(14, 124, 134, .08);
+                        0 2px 8px rgba(0, 102, 204, .08);
             transform: translateY(-1px);
         }
     }
@@ -224,7 +224,7 @@ select {
     background: color-primary;
     border: 0;
     border-radius: 999px;
-    box-shadow: 0 1px 3px rgba(14, 124, 134, 0.32), 0 6px 16px rgba(14, 124, 134, 0.18);
+    box-shadow: 0 1px 3px rgba(0, 102, 204, 0.32), 0 6px 16px rgba(0, 102, 204, 0.18);
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 0.1px;
@@ -239,15 +239,15 @@ select {
         &:hover {
             background: color-primary-hover;
             transform: translateY(-1px) scale(1.02);
-            box-shadow: 0 2px 5px rgba(14, 124, 134, 0.38),
-                        0 12px 28px rgba(14, 124, 134, 0.26);
+            box-shadow: 0 2px 5px rgba(0, 102, 204, 0.38),
+                        0 12px 28px rgba(0, 102, 204, 0.26);
         }
     }
 
     &:active {
         transform: scale(0.96);
         transition-duration: var(--dur-tap);
-        box-shadow: 0 1px 2px rgba(14, 124, 134, 0.4);
+        box-shadow: 0 1px 2px rgba(0, 102, 204, 0.4);
     }
 }
 
@@ -266,7 +266,7 @@ select {
     &:hover {
         color: color-primary-hover;
         background-color: color-primary-container;
-        box-shadow: 0 0 0 1px rgba(11, 87, 208, 0.12);
+        box-shadow: 0 0 0 1px rgba(0, 102, 204, 0.12);
     }
 
     &:active {
@@ -292,7 +292,7 @@ select {
     &:hover .set {
         color: color-primary-hover;
         background-color: color-primary-container;
-        box-shadow: 0 0 0 1px rgba(11, 87, 208, 0.12);
+        box-shadow: 0 0 0 1px rgba(0, 102, 204, 0.12);
     }
 }
 
@@ -326,7 +326,7 @@ select {
     margin: 16px 0 4px;
     padding: 14px;
     overflow: hidden;
-    background: linear-gradient(145deg, rgba(255, 255, 255, .68), rgba(255, 255, 255, .42));
+    background: rgba(255, 255, 255, .72);
     backdrop-filter: blur(22px) saturate(170%);
     -webkit-backdrop-filter: blur(22px) saturate(170%);
     border: 1px solid rgba(255, 255, 255, .74);
@@ -416,35 +416,35 @@ footer {
     html,
     body {
         background: app-background-dark;
-        color: #e8eaed;
+        color: #f5f5f7;
         color-scheme: dark;
     }
 
     .frame {
-        background: linear-gradient(145deg, rgba(30, 36, 44, .8), rgba(30, 36, 44, .56));
+        background: rgba(28, 28, 30, .72);
         border-color: rgba(255, 255, 255, 0.08);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
     }
 
     .switch-label,
     .option {
-        color: #e8eaed;
+        color: #f5f5f7;
     }
 
     select,
     #translate_input {
-        color: #e8eaed;
+        color: #f5f5f7;
         background-color: rgba(255, 255, 255, 0.06);
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 
         &:hover {
             background-color: rgba(255, 255, 255, 0.1);
-            box-shadow: inset 0 0 0 1px rgba(168, 199, 250, 0.3);
+            box-shadow: inset 0 0 0 1px rgba(41, 151, 255, 0.3);
         }
 
         &:focus {
-            background-color: #1b2026;
-            box-shadow: inset 0 0 0 2px #8ab4f8, 0 0 0 4px rgba(138, 180, 248, 0.18);
+            background-color: #1d1d1f;
+            box-shadow: inset 0 0 0 2px #2997ff, 0 0 0 4px rgba(138, 180, 248, 0.18);
         }
     }
 
@@ -453,16 +453,16 @@ footer {
     }
 
     #translate_input::placeholder {
-        color: #9aa0a6;
+        color: #8e8e93;
     }
 
     #translateSubmit {
-        color: #0b1f3a;
-        background: linear-gradient(135deg, #a8c7fa, #c4e0e5);
+        color: #ffffff;
+        background: #2997ff;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 
         &:hover {
-            background: linear-gradient(135deg, #d3e3fd, #e2f1f5);
+            background: #e3edfb;
             box-shadow: 0 6px 16px rgba(0, 0, 0, 0.42);
         }
     }
@@ -479,62 +479,62 @@ footer {
 
     #exchange,
     .set {
-        color: #a8c7fa;
+        color: #2997ff;
     }
 
     #exchange:hover,
     #setting-switch:hover .set {
-        color: #d3e3fd;
-        background: rgba(168, 199, 250, 0.14);
+        color: #e3edfb;
+        background: rgba(41, 151, 255, 0.14);
         box-shadow: 0 0 0 1px rgba(138, 180, 248, 0.18);
     }
 
     footer {
-        color: #bdc1c6;
+        color: #aeaeb2;
 
         a {
-            color: #bdc1c6;
+            color: #aeaeb2;
         }
     }
 
     .radio,
     .checkbox {
-        background-color: #1b2026;
-        border-color: #9aa0a6;
+        background-color: #1d1d1f;
+        border-color: #8e8e93;
     }
 
     .radio:checked,
     .checkbox:checked {
-        background-color: #8ab4f8;
-        border-color: #8ab4f8;
+        background-color: #2997ff;
+        border-color: #2997ff;
     }
 
     .radio:checked:before {
-        background-color: #0b1f3a;
+        background-color: #ffffff;
     }
 
     .checkbox:checked:after {
-        border-color: #0b1f3a;
+        border-color: #ffffff;
     }
 
     .switch {
-        background: #343b44;
-        border-color: #9aa0a6;
+        background: #2c2c2e;
+        border-color: #8e8e93;
 
         &:before {
-            background-color: #343b44;
+            background-color: #2c2c2e;
         }
 
         &:after {
-            background-color: #c4c7c5;
+            background-color: #aeaeb2;
         }
 
         &:checked {
-            background-color: #1f3b68;
-            border-color: #8ab4f8;
+            background-color: #173a5e;
+            border-color: #2997ff;
 
             &:after {
-                background-color: #8ab4f8;
+                background-color: #2997ff;
             }
         }
     }

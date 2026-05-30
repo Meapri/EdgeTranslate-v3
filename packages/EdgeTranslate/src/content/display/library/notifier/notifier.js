@@ -7,13 +7,44 @@
 import { h } from "preact";
 import render from "preact-render-to-string";
 import NotifierTemplate from "./notifier.jsx";
-import { delayPromise } from "common/scripts/promise.js";
 
 // prefix for CSS selector name
 const SELECTOR_PREFIX = "edge-translate-notifier-";
 const STYLE_PATH = "content/display/library/notifier/notification.css";
-// the animation duration in CSS file
+// Minimum notification duration; below this we just don't auto-dismiss.
 const ANIMATION_DURATION = 400;
+// Safety-net cap for the exit wait — the real signal is the native transitionend
+// event; this only fires if that never arrives (e.g. an interrupted transition).
+const EXIT_FALLBACK_MS = 500;
+
+/**
+ * Resolve when the element's exit transition finishes. Listens for the native
+ * `transitionend` on opacity/transform; falls back to a timer only if that
+ * event never fires (interrupted transition, no-transition environments).
+ *
+ * @param {Element} element the notification element being dismissed
+ * @returns {Promise<void>} resolves once the exit has visually completed
+ */
+function waitForExitTransition(element) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            element.removeEventListener("transitionend", onEnd);
+            resolve();
+        };
+        const onEnd = (event) => {
+            if (
+                event.target === element &&
+                (event.propertyName === "opacity" || event.propertyName === "transform")
+            )
+                finish();
+        };
+        element.addEventListener("transitionend", onEnd);
+        setTimeout(finish, EXIT_FALLBACK_MS);
+    });
+}
 
 export default class Notifier {
     /**
@@ -127,9 +158,12 @@ export default class Notifier {
      */
     async destroyNotification(notificationElement) {
         if (notificationElement instanceof Element) {
+            // Add the exit-target class; the CSS transition animates to it. Wait
+            // for the native transitionend (the real completion signal) before
+            // removing the element — no hardcoded duration coupled to the CSS.
             notificationElement.classList.add(`${SELECTOR_PREFIX}disappear-animation`);
-            await delayPromise(ANIMATION_DURATION);
-            if (this.shadowDom.contains(notificationElement))
+            await waitForExitTransition(notificationElement);
+            if (this.shadowDom && this.shadowDom.contains(notificationElement))
                 this.shadowDom.removeChild(notificationElement);
             this.notificationCount--;
             if (this.notificationCount === 0) this.destroyContainer();

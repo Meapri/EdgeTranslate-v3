@@ -243,6 +243,10 @@
         "message": "Cancel text selection after translation",
         "description": "Cancel text selection automatically after translation"
     },
+    "HidePageTranslatorBanner": {
+        "message": "Hide the page-translation banner",
+        "description": "Hide the banner shown while translating a whole page."
+    },
     "GooglePageTranslate": {
         "message": "Google Page Trans.",
         "description": "Translate current page with Google translate api."

@@ -17,7 +17,6 @@ import Dropdown from "./Dropdown.jsx";
 import SettingIcon from "./icons/setting.svg";
 import PinIcon from "./icons/pin.svg";
 import CloseIcon from "./icons/close.svg";
-import { LiquidGlass } from "liquid-glass";
 
 function getI18nMessage(name, fallback = "") {
     const message = chrome.i18n.getMessage(name);
@@ -37,17 +36,17 @@ let documentBodyCSS = "";
 // The duration time of result panel's transition. unit: ms.
 const transitionDuration = 360;
 const transitionEasing = "cubic-bezier(0.25, 1, 0.5, 1)";
-const DarkPrimary = "#a8c7fa";
-const DarkOnSurface = "#e8eaed";
-const DarkOnSurfaceVariant = "#bdc1c6";
-// const DarkOutline = "#3d4651";
+const DarkPrimary = "#2997ff";
+const DarkOnSurface = "#f5f5f7";
+const DarkOnSurfaceVariant = "#aeaeb2";
+// const DarkOutline = "#48484a";
 const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
 const MotionStandard = "280ms cubic-bezier(0.25, 1, 0.5, 1)";
 const MotionFloatingSpotlightIn = "210ms cubic-bezier(0.2, 0, 0, 1)";
 const MotionFloatingSpotlightOut = "170ms cubic-bezier(0.32, 0, 0.67, 0)";
 const MotionSnappy = "360ms cubic-bezier(0.16, 1, 0.3, 1)";
 const DetachResizeMotion = "240ms cubic-bezier(0.2, 1, 0.2, 1)";
-const PanelRadius = "24px";
+const PanelRadius = "18px";
 const FloatingMargin = 16;
 const SlideOverMargin = 16;
 const SlideOverWidthMin = 320;
@@ -106,9 +105,6 @@ export default function ResultPanel() {
     const panelMotionTimerRef = useRef(0);
     const closeTimerRef = useRef(0);
     const simplebarRef = useRef();
-    // Liquid Glass engine instance bound to the panel element (created on open,
-    // destroyed on close). See onDisplayStatusChange.
-    const glassRef = useRef(null);
 
     // 기억된 부동 패널 위치(사용자가 드래그로 이동한 경우)
     const lastFloatingPosRef = useRef(null); // { x: number, y: number }
@@ -1009,8 +1005,6 @@ export default function ResultPanel() {
 
         /* If panel is closed */
         if (!panelEl) {
-            glassRef.current?.destroy();
-            glassRef.current = null;
             windowControllerRef.current?.();
             windowControllerRef.current = null;
             setMoveableReady(false);
@@ -1037,28 +1031,9 @@ export default function ResultPanel() {
         windowControllerRef.current?.();
         windowControllerRef.current = setupNativeWindowController(panelEl);
 
-        // Bind the Liquid Glass engine to the panel surface. 'balanced' quality
-        // is the engine's recommended tier for a content-script panel: single
-        // refraction pass + 1× maps over the host page's backdrop, keeping the
-        // specular rim and frost. The engine auto-detects this Shadow DOM root
-        // (getRootNode) and overrides backdrop-filter/background-color inline,
-        // gracefully falling back to the stylesheet blur if construction fails.
-        glassRef.current?.destroy();
-        try {
-            glassRef.current = new LiquidGlass(panelEl, {
-                quality: "high",
-                radius: 24,
-                thickness: 24,
-                refraction: 28,
-                chromaticAberration: 0.5,
-                blur: 4,
-                saturation: 180,
-                specularIntensity: 0.9,
-            });
-            panelEl.dataset.liquidGlass = "on";
-        } catch {
-            glassRef.current = null;
-        }
+        // The panel surface is a plain iOS-style frosted blur — the styled
+        // `Panel` component owns the backdrop-filter, translucent fill, edge
+        // shadow and top sheen. No engine, no pointer-tracking effects.
 
         setMoveableReady(true);
         panelEl.style.opacity = "0";
@@ -1371,7 +1346,6 @@ export default function ResultPanel() {
                                         data-testid="Head"
                                     >
                                         <SourceOption
-                                            glass
                                             role="button"
                                             title={getI18nMessage(
                                                 `${currentTranslator}Short`,
@@ -1499,7 +1473,7 @@ export default function ResultPanel() {
  */
 
 export const MaxZIndex = 2147483647;
-const ColorPrimary = "#0b57d0";
+const ColorPrimary = "#0066cc";
 export const ContentWrapperCenterClassName = "simplebar-content-wrapper-center";
 
 const GlobalStyle = createGlobalStyle`
@@ -1594,16 +1568,19 @@ const GlobalStyle = createGlobalStyle`
  * }} props
  */
 const Panel = styled.div`
-    --et-outline-color: rgba(255, 255, 255, 0.76);
-    --et-glass-top: rgba(255, 255, 255, 0.38);
-    --et-glass-bottom: rgba(248, 250, 253, 0.18);
-    --et-glass-sheen: rgba(255, 255, 255, 0.46);
+    /* Apple system surface: flat translucent parchment under backdrop-blur, a single soft
+       drop-shadow for floating separation, and a 0.5px hairline — no gradients, no glass. */
+    --et-surface: rgba(245, 245, 247, 0.72);
+    --et-hairline: rgba(0, 0, 0, 0.08);
+    --et-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    --et-shadow-strong: 0 16px 48px rgba(0, 0, 0, 0.16);
+    --et-outline-color: var(--et-hairline);
 
     @media (prefers-color-scheme: dark) {
-        --et-outline-color: rgba(255, 255, 255, 0.1);
-        --et-glass-top: rgba(33, 39, 46, 0.42);
-        --et-glass-bottom: rgba(22, 27, 32, 0.2);
-        --et-glass-sheen: rgba(255, 255, 255, 0.05);
+        --et-surface: rgba(28, 28, 30, 0.7);
+        --et-hairline: rgba(255, 255, 255, 0.1);
+        --et-shadow: 0 8px 30px rgba(0, 0, 0, 0.46);
+        --et-shadow-strong: 0 16px 48px rgba(0, 0, 0, 0.54);
     }
 
     display: flex;
@@ -1618,14 +1595,11 @@ const Panel = styled.div`
     border-radius: ${PanelRadius};
     overflow: hidden;
     isolation: isolate;
-    box-shadow: 0 24px 64px rgba(30, 47, 72, 0.2), 0 8px 18px rgba(30, 47, 72, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.78);
-    background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.46), transparent 34%),
-        radial-gradient(circle at 92% 8%, rgba(211, 227, 253, 0.24), transparent 32%),
-        linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
+    box-shadow: var(--et-shadow);
+    background: var(--et-surface);
     background-clip: padding-box;
-    backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
-    -webkit-backdrop-filter: blur(34px) saturate(190%) contrast(1.02);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
     opacity: 1;
     scale: 1;
     transform-origin: 50% 24px;
@@ -1635,15 +1609,15 @@ const Panel = styled.div`
     padding: 0;
     margin: 0;
     border: none;
-    font-size: 16px;
-    font-weight: normal;
-    color: #202124;
+    font-size: 17px;
+    font-weight: 400;
+    color: #1d1d1f;
     line-height: 1;
     -webkit-text-size-adjust: 100%;
     box-sizing: border-box;
     -moz-tab-size: 4;
     tab-size: 4;
-    font-family: system-ui, -apple-system,
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
         /* Firefox supports this but not yet 'system-ui' */ "Segoe UI", Roboto, Helvetica, Arial,
         sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 
@@ -1651,42 +1625,22 @@ const Panel = styled.div`
         filter ${MotionSnappy}, color ${MotionStandard}, opacity ${MotionFast},
         border-color ${MotionFast}, scale ${MotionSnappy};
 
-    border: 1px solid var(--et-outline-color);
+    border: 1px solid var(--et-hairline);
 
     &[data-display-type="fixed"] {
-        box-shadow: 0 28px 70px rgba(30, 47, 72, 0.22), 0 12px 34px rgba(30, 47, 72, 0.14),
-            inset 0 1px 0 rgba(255, 255, 255, 0.82);
-        background: radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.46), transparent 34%),
-            radial-gradient(circle at 94% 10%, rgba(211, 227, 253, 0.24), transparent 30%),
-            linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
+        box-shadow: var(--et-shadow);
+        background: var(--et-surface);
     }
 
-    &[data-motion="undocking"] {
-        border-color: rgba(211, 227, 253, 0.9);
-        box-shadow: 0 32px 74px rgba(30, 47, 72, 0.24), 0 14px 28px rgba(30, 47, 72, 0.14),
-            inset 0 1px 0 rgba(255, 255, 255, 0.9);
-        filter: saturate(1.08) brightness(1.02);
-    }
-
-    &[data-motion="dragging"] {
-        border-color: rgba(255, 255, 255, 0.82);
-        box-shadow: 0 34px 78px rgba(30, 47, 72, 0.26), 0 16px 32px rgba(30, 47, 72, 0.12),
-            inset 0 1px 0 rgba(255, 255, 255, 0.9);
-        filter: saturate(1.1);
-    }
-
+    &[data-motion="undocking"],
+    &[data-motion="dragging"],
     &[data-motion="detaching"] {
-        border-color: rgba(255, 255, 255, 0.86);
-        box-shadow: 0 34px 78px rgba(30, 47, 72, 0.24), 0 16px 32px rgba(30, 47, 72, 0.11),
-            inset 0 1px 0 rgba(255, 255, 255, 0.9);
-        filter: saturate(1.08) brightness(1.015);
+        box-shadow: var(--et-shadow-strong);
     }
 
     &[data-motion="docking"],
     &[data-motion="settling"] {
-        box-shadow: 0 26px 66px rgba(30, 47, 72, 0.2), 0 9px 20px rgba(30, 47, 72, 0.11),
-            inset 0 1px 0 rgba(255, 255, 255, 0.84);
-        filter: saturate(1.04);
+        box-shadow: var(--et-shadow);
     }
 
     &[data-motion="floating-opening"] {
@@ -1696,8 +1650,8 @@ const Panel = styled.div`
     &[data-motion="closing"] {
         opacity: 0;
         scale: 0.98;
-        filter: blur(10px) saturate(0.88) brightness(1.04);
-        box-shadow: 0 10px 28px rgba(30, 47, 72, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.62);
+        filter: blur(10px);
+        box-shadow: var(--et-shadow);
         transition: opacity ${MotionFloatingSpotlightOut}, scale ${MotionFloatingSpotlightOut},
             filter ${MotionFloatingSpotlightOut}, box-shadow ${MotionFloatingSpotlightOut},
             border-color ${MotionFloatingSpotlightOut};
@@ -1707,45 +1661,21 @@ const Panel = styled.div`
         from {
             opacity: 0;
             scale: 0.98;
-            filter: blur(12px) saturate(0.86) brightness(1.04);
+            filter: blur(12px);
         }
 
         to {
             opacity: 1;
             scale: 1;
-            filter: blur(0) saturate(1) brightness(1);
+            filter: blur(0);
         }
-    }
-
-    &:before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background: linear-gradient(180deg, var(--et-glass-sheen), transparent 34%);
-        opacity: 0.58;
     }
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background: radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.1), transparent 34%),
-            radial-gradient(circle at 92% 8%, rgba(31, 59, 104, 0.18), transparent 32%),
-            linear-gradient(145deg, var(--et-glass-top), var(--et-glass-bottom));
-        border-color: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 24px 56px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.36),
-            0 1px 4px rgba(0, 0, 0, 0.2);
-    }
-
-    /* When the Liquid Glass engine is bound it owns the surface via an inline
-       backdrop-filter (real refraction) + a translucent tint background-color.
-       Drop the painted gradient fills so the rim refraction and specular read
-       through; border, shadow and the top sheen stay as glass-edge accents. */
-    &[data-liquid-glass="on"] {
-        background-image: none;
-    }
-
-    &[data-liquid-glass="on"]:before {
-        opacity: 0.34;
+        background: var(--et-surface);
+        border-color: var(--et-hairline);
+        box-shadow: var(--et-shadow);
     }
 `;
 
@@ -1763,43 +1693,16 @@ const Head = styled.div`
     user-select: none;
     -webkit-user-select: none;
     touch-action: none;
-    box-shadow: 0 4px 12px rgba(30, 47, 72, 0);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(248, 250, 253, 0.16));
+    background: transparent;
     border-radius: inherit;
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
-    transition: background ${MotionStandard}, border-color ${MotionStandard},
-        box-shadow ${MotionStandard};
+    /* Chrome recedes: header is transparent; a single hairline appears only on scroll. */
+    border-bottom: 1px solid transparent;
+    transition: border-color ${MotionStandard};
 
     &[data-scrolled="true"] {
-        box-shadow: 0 4px 12px rgba(30, 47, 72, 0.04);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(248, 250, 253, 0.28));
-    }
-
-    @media (prefers-color-scheme: dark) {
-        background: linear-gradient(180deg, rgba(32, 38, 45, 0.46), rgba(27, 32, 38, 0.26));
-
-        &[data-scrolled="true"] {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
-            background: linear-gradient(180deg, rgba(32, 38, 45, 0.62), rgba(27, 32, 38, 0.38));
-        }
-    }
-
-    /* When the engine owns the surface, thin the head fill so the top-rim
-       refraction + baked specular read through (controls keep their own fills). */
-    [data-liquid-glass="on"] & {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(248, 250, 253, 0.03));
-    }
-    [data-liquid-glass="on"] &[data-scrolled="true"] {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(248, 250, 253, 0.1));
-    }
-    @media (prefers-color-scheme: dark) {
-        [data-liquid-glass="on"] & {
-            background: linear-gradient(180deg, rgba(32, 38, 45, 0.2), rgba(27, 32, 38, 0.05));
-        }
-        [data-liquid-glass="on"] &[data-scrolled="true"] {
-            background: linear-gradient(180deg, rgba(32, 38, 45, 0.38), rgba(27, 32, 38, 0.14));
-        }
+        border-bottom-color: var(--et-hairline, rgba(0, 0, 0, 0.08));
     }
 `;
 
@@ -1826,16 +1729,16 @@ const HeadIcon = styled.div`
     width: 34px;
     height: 34px;
     margin: 0 3px;
-    background-color: rgba(241, 244, 248, 0.66);
+    background-color: rgba(118, 118, 128, 0.12);
     backdrop-filter: blur(12px) saturate(150%);
     -webkit-backdrop-filter: blur(12px) saturate(150%);
     border-radius: 999px;
-    box-shadow: 0 4px 12px rgba(30, 47, 72, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.68);
-    transition: transform ${MotionSnappy}, background-color 0.2s, box-shadow 0.2s, color 0.2s;
+    box-shadow: none;
+    transition: transform ${MotionSnappy}, background-color 0.2s, color 0.2s;
     transform: scale(1);
 
     svg {
-        fill: #5f6368;
+        fill: rgba(60, 60, 67, 0.6);
         width: 18px;
         height: 18px;
         display: block;
@@ -1843,39 +1746,31 @@ const HeadIcon = styled.div`
     }
 
     &:hover {
-        background-color: rgba(211, 227, 253, 0.82);
-        transform: scale(1.1);
-        box-shadow: 0 4px 8px rgba(11, 87, 208, 0.15);
+        background-color: rgba(118, 118, 128, 0.2);
     }
 
     &:hover svg {
         fill: ${ColorPrimary};
     }
 
+    /* Apple system press: a subtle scale-down, no bounce, no shadow. */
     &:active {
-        transform: scale(0.92);
-        box-shadow: 0 1px 2px rgba(11, 87, 208, 0.1);
+        transform: scale(0.95);
     }
 
     @media (prefers-color-scheme: dark) {
-        background-color: #242a31;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        background-color: rgba(118, 118, 128, 0.24);
 
         svg {
-            fill: ${DarkOnSurfaceVariant};
+            fill: rgba(235, 235, 245, 0.6);
         }
 
         &:hover {
-            background-color: #2e3742;
-            box-shadow: 0 4px 8px rgba(168, 199, 250, 0.2);
+            background-color: rgba(118, 118, 128, 0.36);
         }
 
         &:hover svg {
             fill: ${DarkPrimary};
-        }
-
-        &:active {
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
     }
 `;
@@ -1898,17 +1793,10 @@ const Body = styled.div`
     overflow-x: hidden;
     overflow-y: overlay;
     overscroll-behavior: contain;
-    background: linear-gradient(180deg, rgba(241, 244, 248, 0.22), rgba(248, 250, 253, 0.1)),
-        rgba(248, 250, 253, 0.06);
+    background: transparent;
     flex-grow: 1;
     flex-shrink: 1;
     word-break: break-word;
-    transition: background ${MotionStandard};
-
-    @media (prefers-color-scheme: dark) {
-        background: linear-gradient(180deg, rgba(36, 42, 49, 0.42), rgba(27, 32, 38, 0.2)),
-            rgba(21, 25, 29, 0.2);
-    }
 `;
 
 const SourceOption = styled(Dropdown)`
@@ -1920,8 +1808,8 @@ const SourceOption = styled(Dropdown)`
     cursor: pointer;
     // To center the text in select box
     text-align-last: center;
-    color: ${ColorPrimary};
-    background-color: #d3e3fd;
+    color: #1d1d1f;
+    background-color: rgba(118, 118, 128, 0.12);
     border-color: transparent;
     border-radius: 999px;
     min-height: 36px;
@@ -1929,9 +1817,17 @@ const SourceOption = styled(Dropdown)`
     outline: none;
     transition: background-color ${MotionFast}, color ${MotionFast};
 
+    &:hover {
+        background-color: rgba(118, 118, 128, 0.2);
+    }
+
     @media (prefers-color-scheme: dark) {
-        color: ${DarkPrimary};
-        background-color: #1f3b68;
+        color: ${DarkOnSurface};
+        background-color: rgba(118, 118, 128, 0.24);
+
+        &:hover {
+            background-color: rgba(118, 118, 128, 0.36);
+        }
     }
 
     ul {
@@ -1951,9 +1847,9 @@ const ResizeHandle = styled.div`
     border-radius: 999px;
     cursor: nwse-resize;
     touch-action: none;
-    background: radial-gradient(circle at 70% 70%, rgba(11, 87, 208, 0.24), rgba(11, 87, 208, 0));
-    opacity: 0.72;
-    transition: opacity ${MotionFast}, transform ${MotionSnappy};
+    background: transparent;
+    opacity: 0.6;
+    transition: opacity ${MotionFast};
 
     &:after {
         content: "";
@@ -1962,25 +1858,18 @@ const ResizeHandle = styled.div`
         bottom: 5px;
         width: 9px;
         height: 9px;
-        border-right: 2px solid rgba(11, 87, 208, 0.55);
-        border-bottom: 2px solid rgba(11, 87, 208, 0.55);
+        border-right: 2px solid rgba(0, 102, 204, 0.55);
+        border-bottom: 2px solid rgba(0, 102, 204, 0.55);
         border-radius: 1px;
     }
 
     &:hover {
         opacity: 1;
-        transform: scale(1.08);
     }
 
     @media (prefers-color-scheme: dark) {
-        background: radial-gradient(
-            circle at 70% 70%,
-            rgba(168, 199, 250, 0.24),
-            rgba(168, 199, 250, 0)
-        );
-
         &:after {
-            border-color: rgba(168, 199, 250, 0.62);
+            border-color: rgba(41, 151, 255, 0.62);
         }
     }
 `;
@@ -2015,9 +1904,9 @@ const TranslatorOptionName = styled.span`
 const TranslatorOptionDescription = styled.span`
     display: block;
     width: 100%;
-    color: #5f6368;
+    color: rgba(60, 60, 67, 0.6);
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1.35;
     text-align: left;
     text-align-last: left;
@@ -2032,7 +1921,7 @@ const TranslatorOptionDescription = styled.span`
 
 const Highlight = styled.div`
     --et-guide-slide-offset: ${(props) => (props.$position === "left" ? "-10px" : "10px")};
-    background: rgba(211, 227, 253, 0.34);
+    background: rgba(0, 102, 204, 0.12);
     backdrop-filter: blur(16px) saturate(150%);
     -webkit-backdrop-filter: blur(16px) saturate(150%);
     position: fixed;
@@ -2041,8 +1930,8 @@ const Highlight = styled.div`
     z-index: ${MaxZIndex};
     pointer-events: none;
     border-radius: ${PanelRadius};
-    border: 1px solid rgba(255, 255, 255, 0.62);
-    box-shadow: 0 18px 48px rgba(30, 47, 72, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.58);
+    border: 1px solid rgba(0, 102, 204, 0.24);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
     transform-origin: ${(props) => (props.$position === "left" ? "left center" : "right center")};
     animation: et-dock-guide-enter 180ms cubic-bezier(0.2, 0, 0, 1) both;
     will-change: opacity, transform, filter;

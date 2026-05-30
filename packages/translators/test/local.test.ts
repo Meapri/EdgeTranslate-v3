@@ -252,12 +252,9 @@ describe("LocalTranslator", () => {
             openaiCompatibleBaseUrl: "http://localhost:5000/v1",
             openaiCompatibleModel: "Hy-MT2-1.8B",
         });
-        const result = await translator.translate(
-            "[[1:p]]\nPage translation source.",
-            "en",
-            "ko",
-            { translationProfile: "page" }
-        );
+        const result = await translator.translate("[[1:p]]\nPage translation source.", "en", "ko", {
+            translationProfile: "page",
+        });
 
         expect(result.mainMeaning).toBe("[[1:p]]\n페이지 번역 결과입니다.");
     });
@@ -394,6 +391,29 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.maxOutputTokens).toBeUndefined();
     });
 
+    test("turns thinking fully off for Gemini 3 Flash-Lite models", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-3.1-flash-lite",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        // Flash-Lite accepts a zero budget — disable thinking entirely.
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+    });
+
     test("uses compact page-translation guidance for proper nouns and inline HTML", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
@@ -423,8 +443,10 @@ describe("LocalTranslator", () => {
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         const prompt = body.contents[0].parts[0].text;
-        expect(body.systemInstruction.parts[0].text).toContain("Translate page segments.");
-        expect(body.systemInstruction.parts[0].text).toContain("Keep each [[n]]/[[n:r]] marker");
+        expect(body.systemInstruction.parts[0].text).toContain("Translate each [[n]] segment");
+        expect(body.systemInstruction.parts[0].text).toContain(
+            "Output every [[n]] marker exactly once"
+        );
         expect(body.systemInstruction.parts[0].text).not.toContain(
             "subtitle cue numbers, timestamps"
         );

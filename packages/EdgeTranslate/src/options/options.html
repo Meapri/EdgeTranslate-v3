@@ -4,9 +4,6 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title class="i18n" data-i18n-name="SettingsTitle"></title>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
         <link type="text/css" rel="stylesheet" href="./options.css" />
     </head>
 
@@ -314,6 +311,23 @@
                                             ></label>
                                         </div>
                                     </div>
+                                    <div class="row">
+                                        <div class="column">
+                                            <input
+                                                type="checkbox"
+                                                setting-type="switch"
+                                                setting-path="HidePageTranslatorBanner"
+                                                class="switch"
+                                                id="hide-page-translator-banner"
+                                            />
+                                            <span class="space"></span>
+                                            <label
+                                                for="hide-page-translator-banner"
+                                                class="checked-label i18n"
+                                                data-i18n-name="HidePageTranslatorBanner"
+                                            ></label>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -367,21 +381,6 @@
                                                     ></option>
                                                 </select>
                                             </label>
-                                        </div>
-                                        <div class="column">
-                                            <input
-                                                type="checkbox"
-                                                setting-type="switch"
-                                                setting-path="RealtimeCaptionConfig draggableOverlay"
-                                                class="switch"
-                                                id="realtime-caption-draggable-overlay"
-                                            />
-                                            <span class="space"></span>
-                                            <label
-                                                for="realtime-caption-draggable-overlay"
-                                                class="checked-label i18n"
-                                                data-i18n-name="RealtimeCaptionDraggableOverlay"
-                                            ></label>
                                         </div>
                                     </div>
                                     <p
@@ -537,26 +536,6 @@
                                             </select>
                                         </label>
                                     </div>
-                                    <div class="column" data-local-mode="googleAiStudio">
-                                        <label
-                                            for="local-translator-timeout"
-                                            class="checked-label i18n"
-                                            data-i18n-name="LocalTranslatorTimeoutMs"
-                                            data-insert-pos="afterBegin"
-                                        >
-                                            <select
-                                                setting-type="select"
-                                                setting-path="LocalTranslatorConfig timeoutMs"
-                                                id="local-translator-timeout"
-                                            >
-                                                <option value="30000">30s</option>
-                                                <option value="60000">60s</option>
-                                                <option value="120000">120s</option>
-                                                <option value="180000">180s</option>
-                                                <option value="300000">300s</option>
-                                            </select>
-                                        </label>
-                                    </div>
                                 </div>
                                 <div class="row" id="local-translator-openai-settings">
                                     <div class="column provider-heading" data-local-mode="openai">
@@ -701,26 +680,6 @@
                                             </select>
                                         </label>
                                     </div>
-                                    <div class="column" data-local-mode="openai">
-                                        <label
-                                            for="local-translator-openai-timeout"
-                                            class="checked-label i18n"
-                                            data-i18n-name="LocalTranslatorTimeoutMs"
-                                            data-insert-pos="afterBegin"
-                                        >
-                                            <select
-                                                setting-type="select"
-                                                setting-path="LocalTranslatorConfig timeoutMs"
-                                                id="local-translator-openai-timeout"
-                                            >
-                                                <option value="30000">30s</option>
-                                                <option value="60000">60s</option>
-                                                <option value="120000">120s</option>
-                                                <option value="180000">180s</option>
-                                                <option value="300000">300s</option>
-                                            </select>
-                                        </label>
-                                    </div>
                                 </div>
                                 <div
                                     class="row"
@@ -784,12 +743,17 @@
                                                 setting-path="LocalTranslatorConfig openaiCompatibleModel"
                                                 id="local-translator-openai-compatible-model"
                                                 autocomplete="off"
+                                                placeholder="gpt-oss-20b"
                                             />
                                         </label>
                                     </div>
-                                    <div class="column" data-local-mode="openaiCompatible">
+                                </div>
+                                <!-- Single shared request-timeout row (applies to all AI modes;
+                                     hidden for Chrome built-in via syncLocalTranslatorFields). -->
+                                <div class="row" id="local-translator-timeout-settings">
+                                    <div class="column">
                                         <label
-                                            for="local-translator-openai-compatible-timeout"
+                                            for="local-translator-timeout"
                                             class="checked-label i18n"
                                             data-i18n-name="LocalTranslatorTimeoutMs"
                                             data-insert-pos="afterBegin"
@@ -797,7 +761,7 @@
                                             <select
                                                 setting-type="select"
                                                 setting-path="LocalTranslatorConfig timeoutMs"
-                                                id="local-translator-openai-compatible-timeout"
+                                                id="local-translator-timeout"
                                             >
                                                 <option value="30000">30s</option>
                                                 <option value="60000">60s</option>
@@ -921,11 +885,54 @@
                                                 setting-path="PreciseTranslatorConfig openaiCompatibleModel"
                                                 id="precise-translator-openai-compatible-model"
                                                 autocomplete="off"
+                                                placeholder="gpt-oss-20b"
                                             />
                                         </label>
                                     </div>
                                 </div>
                                 <p class="i18n" data-i18n-name="PreciseTranslatorHelp"></p>
+                            </div>
+                            <div class="card-container">
+                                <label
+                                    class="setting-title i18n"
+                                    data-i18n-name="DefaultPageTranslator"
+                                ></label>
+                                <div class="row">
+                                    <div class="column">
+                                        <label
+                                            for="google-page-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="GooglePageTranslate"
+                                        >
+                                            <input
+                                                type="radio"
+                                                value="GooglePageTranslate"
+                                                setting-type="radio"
+                                                setting-path="DefaultPageTranslator"
+                                                class="radio"
+                                                name="default-page-translator"
+                                                id="google-page-translator"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="column" id="ai-page-translator-row" hidden>
+                                        <label
+                                            for="ai-page-translator"
+                                            class="checked-label i18n"
+                                            data-i18n-name="AIPageTranslate"
+                                        >
+                                            <input
+                                                type="radio"
+                                                value="AIPageTranslate"
+                                                setting-type="radio"
+                                                setting-path="DefaultPageTranslator"
+                                                class="radio"
+                                                name="default-page-translator"
+                                                id="ai-page-translator"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                             <div class="card-container">
                                 <label
@@ -989,48 +996,6 @@
                                                 class="translator-config"
                                                 data-affected="examples"
                                             ></select>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="card-container">
-                                <label
-                                    class="setting-title i18n"
-                                    data-i18n-name="DefaultPageTranslator"
-                                ></label>
-                                <div class="row">
-                                    <div class="column">
-                                        <label
-                                            for="google-page-translator"
-                                            class="checked-label i18n"
-                                            data-i18n-name="GooglePageTranslate"
-                                        >
-                                            <input
-                                                type="radio"
-                                                value="GooglePageTranslate"
-                                                setting-type="radio"
-                                                setting-path="DefaultPageTranslator"
-                                                class="radio"
-                                                name="default-page-translator"
-                                                id="google-page-translator"
-                                            />
-                                        </label>
-                                    </div>
-                                    <div class="column" id="ai-page-translator-row" hidden>
-                                        <label
-                                            for="ai-page-translator"
-                                            class="checked-label i18n"
-                                            data-i18n-name="AIPageTranslate"
-                                        >
-                                            <input
-                                                type="radio"
-                                                value="AIPageTranslate"
-                                                setting-type="radio"
-                                                setting-path="DefaultPageTranslator"
-                                                class="radio"
-                                                name="default-page-translator"
-                                                id="ai-page-translator"
-                                            />
                                         </label>
                                     </div>
                                 </div>

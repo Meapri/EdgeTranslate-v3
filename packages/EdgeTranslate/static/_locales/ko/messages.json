@@ -239,6 +239,10 @@
         "message": "번역 후 선택 해제",
         "description": "번역 후 선택 해제"
     },
+    "HidePageTranslatorBanner": {
+        "message": "페이지 번역 배너 숨기기",
+        "description": "전체 페이지 번역 중 표시되는 배너를 숨깁니다."
+    },
     "GooglePageTranslate": {
         "message": "Google 페이지 번역",
         "description": "Google로 현재 페이지 번역"
