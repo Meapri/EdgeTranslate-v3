@@ -4151,6 +4151,21 @@ class BannerController {
         if (!entries || !entries.length) return [];
         const { maxChars, maxInputTokens, maxOutputTokens, maxItems } =
             this.getAiPageSectionBatchOptions();
+        // SPEED: size batches to SATURATE the parallel-request slots, not to minimise request
+        // count. Completion time ≈ (number of waves) × (per-batch generation time), and
+        // generation time grows with batch size — so a handful of huge batches finish far
+        // SLOWER than ~concurrency medium batches all generating at once. Target ~one parallel
+        // wave: aim for `concurrency` batches, each totalChars/concurrency, clamped to
+        // [minBatch, maxChars]. Tiny sections still bundle (maxItems), big pages still cap at
+        // maxChars (no truncation); request count stays bounded by concurrency.
+        const concurrency = Math.max(1, this.getDomPageMaxConcurrentTranslations());
+        const totalChars = entries.reduce((sum, e) => sum + String(e?.sourceText || "").length, 0);
+        const minBatchChars =
+            this._domPageTranslateOptions.engine === "openaiCompatible" ? 1200 : 3000;
+        const targetChars = Math.min(
+            maxChars,
+            Math.max(minBatchChars, Math.ceil(totalChars / concurrency))
+        );
         const batches = [];
         let current = [];
         let currentChars = 0;
@@ -4164,7 +4179,7 @@ class BannerController {
                 entry?.outputTokens ||
                 estimateLlmOutputTokens(entry?.plainText || "", entry?.sourceText || "");
             const wouldOverflowItems = current.length >= maxItems;
-            const wouldOverflowChars = current.length > 0 && currentChars + len > maxChars;
+            const wouldOverflowChars = current.length > 0 && currentChars + len > targetChars;
             const wouldOverflowTokens =
                 current.length > 0 && currentInputTokens + inputTokens > maxInputTokens;
             const wouldOverflowOutput =
