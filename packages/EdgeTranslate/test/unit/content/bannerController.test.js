@@ -1337,6 +1337,48 @@ describe("DOM page translation banner", () => {
         expect(lines).toEqual(["자연스럽게 합쳐진 전체 자막.", "다음 자막."]);
     });
 
+    it("matches caption fragments only on word boundaries for spaced scripts", () => {
+        const controller = new BannerController();
+
+        // Real prefix fragment of a growing sentence still matches.
+        expect(
+            controller.realtimeCaptionSourceIncludes(
+                "I am honored to be with you today at your commencement",
+                "I am honored to be with you today"
+            )
+        ).toBe(true);
+        // Trailing-punctuation variants normalize to the same fragment.
+        expect(
+            controller.realtimeCaptionSourceIncludes("Welcome to campus.", "Welcome to campus")
+        ).toBe(false); // identical after normalization → not a covering fragment
+        // A short standalone word must NOT match inside a longer word.
+        expect(controller.realtimeCaptionSourceIncludes("Welcome to campus", "us")).toBe(false);
+        expect(controller.realtimeCaptionSourceIncludes("Let us start", "art")).toBe(false);
+        // But a whole word bounded by spaces/punctuation does match.
+        expect(controller.realtimeCaptionSourceIncludes("Let us start now", "us start")).toBe(true);
+        // Scriptio-continua (CJK) has no inter-word spaces — plain substring still applies.
+        expect(controller.realtimeCaptionSourceIncludes("私は大学生です", "大学生")).toBe(true);
+    });
+
+    it("does not drop a new short caption that is a mid-word substring of the current row", () => {
+        const controller = new BannerController();
+        controller._captionModeEnabled = true;
+
+        controller.showRealtimeCaptionOverlay(
+            "캠퍼스에 오신 것을 환영합니다.",
+            "Welcome to campus"
+        );
+        // "Us." is a genuinely new caption; "us" only appears mid-word inside "campus", so the
+        // boundary-aware guard must keep it instead of treating it as a covered fragment.
+        controller.showRealtimeCaptionOverlay("우리.", "Us.");
+
+        const overlay = document.getElementById("edge-translate-realtime-caption");
+        const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
+            line.textContent.trim()
+        );
+        expect(lines).toEqual(["캠퍼스에 오신 것을 환영합니다.", "우리."]);
+    });
+
     it("coalesces live caption updates while a translation request is in flight", async () => {
         document.body.innerHTML = `
             <div class="ytp-caption-window-container">

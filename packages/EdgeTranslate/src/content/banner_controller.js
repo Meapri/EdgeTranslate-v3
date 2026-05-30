@@ -1095,7 +1095,39 @@ class BannerController {
     realtimeCaptionSourceIncludes(sourceText, fragmentText) {
         const source = this.normalizeRealtimeCaptionCacheText(sourceText);
         const fragment = this.normalizeRealtimeCaptionCacheText(fragmentText);
-        return Boolean(source && fragment && source !== fragment && source.includes(fragment));
+        return Boolean(
+            source && fragment && source !== fragment && this.captionTextContains(source, fragment)
+        );
+    }
+
+    // Word-boundary-aware containment for caption merge decisions. Plain String.includes
+    // mis-fires on spaced scripts — "us" hits inside "campus", "art" inside "start" — so a
+    // short standalone caption that merely shares a substring with a longer one would be
+    // wrongly treated as its fragment (then dropped from the overlay, or merged into the wrong
+    // sentence group). We require the match to land on word boundaries, but ONLY for spaced
+    // alphabetic scripts (Latin / Cyrillic / Greek). CJK and other scriptio-continua text has
+    // no inter-word spaces, so any boundary is valid there — we keep plain-substring behavior
+    // and never regress those languages.
+    captionTextContains(source, fragment) {
+        if (!source || !fragment || fragment.length > source.length) return false;
+        const isSpacedWordChar = (ch) =>
+            Boolean(ch) && /[0-9\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u.test(ch);
+        const headIsWord = isSpacedWordChar(fragment[0]);
+        const tailIsWord = isSpacedWordChar(fragment[fragment.length - 1]);
+        const limit = source.length - fragment.length;
+        for (let from = 0; from <= limit; ) {
+            const idx = source.indexOf(fragment, from);
+            if (idx < 0) return false;
+            const before = idx > 0 ? source[idx - 1] : "";
+            const after = source[idx + fragment.length] || "";
+            // A boundary is violated only when the match cuts through the middle of a spaced
+            // word — i.e. a spaced word char abuts a spaced word char on the same side.
+            const okBefore = !(headIsWord && isSpacedWordChar(before));
+            const okAfter = !(tailIsWord && isSpacedWordChar(after));
+            if (okBefore && okAfter) return true;
+            from = idx + 1;
+        }
+        return false;
     }
 
     getRealtimeCaptionDisplayMax() {
@@ -2147,8 +2179,8 @@ class BannerController {
             return (
                 cueNorm &&
                 (cueNorm === normSource ||
-                    cueNorm.includes(normSource) ||
-                    normSource.includes(cueNorm))
+                    this.captionTextContains(cueNorm, normSource) ||
+                    this.captionTextContains(normSource, cueNorm))
             );
         });
         if (!matches.length) return sourceText;
@@ -2168,7 +2200,7 @@ class BannerController {
         const normGroup = this.normalizeRealtimeCaptionCacheText(groupText);
         if (!normGroup) return sourceText;
         // Only override when the on-screen text is genuinely part of the group.
-        return normGroup.includes(normSource) ? groupText : sourceText;
+        return this.captionTextContains(normGroup, normSource) ? groupText : sourceText;
     }
 
     dedupeRealtimeCaptionCuesByGroup(cues) {
@@ -2204,7 +2236,8 @@ class BannerController {
             const cueText = this.normalizeRealtimeCaptionCacheText(cue.text);
             return (
                 cueText &&
-                (normalizedSource.includes(cueText) || cueText.includes(normalizedSource))
+                (this.captionTextContains(normalizedSource, cueText) ||
+                    this.captionTextContains(cueText, normalizedSource))
             );
         });
     }
