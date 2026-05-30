@@ -1,4 +1,20 @@
 /**
+ * True when the current document is the browser's NATIVE PDF viewer (a real
+ * `application/pdf` document). Content scripts must not inject UI here: rendering into
+ * documentElement replaces the PDF embed and leaves a blank gray page (a content script
+ * only reaches such a page when the user has granted "Allow access to file URLs"). The
+ * extension's own pdf.js viewer is served as text/html (viewer.html), NOT application/pdf,
+ * so it is never matched here and in-viewer translation keeps working.
+ */
+export function isNativePdfDocument() {
+    try {
+        return document.contentType === "application/pdf";
+    } catch {
+        return false;
+    }
+}
+
+/**
  * detect users select action and take action after the detection
  * This function need to be called in the mouse down listener
  * @param {Node} targetElement target element to be detected

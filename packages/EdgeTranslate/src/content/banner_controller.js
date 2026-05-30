@@ -1,5 +1,6 @@
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import { isNativePdfDocument } from "./common.js";
 import {
     toChromeTranslatorLanguage,
     translateWithChromeOnDevice,
@@ -8064,7 +8065,8 @@ BannerController._targetLangPatterns = {
     yi: { letter: /[\p{L}]/gu, target: /[֐-׿]/g },
 };
 
-// Create the object.
-window.EdgeTranslateBannerController = new BannerController();
+// Create the object — but never on the browser's native PDF viewer, where the page-translate
+// machinery has nothing to translate and must not touch the document.
+window.EdgeTranslateBannerController = isNativePdfDocument() ? null : new BannerController();
 
 export { BannerController };

@@ -2,6 +2,7 @@
 import { h, render } from "preact";
 import Panel from "./Panel.jsx";
 import { wrapConsoleForFiltering, shouldFilterError } from "common/scripts/logger.js";
+import { isNativePdfDocument } from "../common.js";
 
 wrapConsoleForFiltering();
 
@@ -26,6 +27,9 @@ window.addEventListener("unhandledrejection", (event) => {
 
 (async function initialize() {
     try {
+        // Never mount the panel onto the browser's native PDF viewer — rendering into
+        // documentElement would replace the PDF embed and blank the page.
+        if (isNativePdfDocument()) return;
         render(<Panel />, document.documentElement);
         // Prepare this polyfill for the useMeasure hook of "react-use".
         if (!window.ResizeObserver) {

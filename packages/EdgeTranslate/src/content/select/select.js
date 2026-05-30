@@ -1,5 +1,5 @@
 import { getDomain } from "common/scripts/common.js";
-import { detectSelect } from "../common.js";
+import { detectSelect, isNativePdfDocument } from "../common.js";
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 import { wrapConsoleForFiltering } from "common/scripts/logger.js";
@@ -21,15 +21,20 @@ let HasButtonShown = false;
  */
 let translationButtonContainer = document.createElement("iframe");
 const iframeContainer = translationButtonContainer;
-// Note: some websites can't get contentDocument e.g. https://raw.githubusercontent.com/git/git/master/Documentation/RelNotes/2.40.0.txt. So I use shadow DOM as a fallback.
-document.documentElement.appendChild(translationButtonContainer);
-if (translationButtonContainer.contentDocument === null) {
-    translationButtonContainer = document.createElement("div");
-    renderButton();
+// On the browser's native PDF viewer, skip injecting the selection button entirely: the
+// extension can't read the PDF plugin's text, and touching documentElement at document_start
+// can disrupt the embed. (The extension's own viewer.html is text/html, not application/pdf.)
+if (!isNativePdfDocument()) {
+    // Note: some websites can't get contentDocument e.g. https://raw.githubusercontent.com/git/git/master/Documentation/RelNotes/2.40.0.txt. So I use shadow DOM as a fallback.
+    document.documentElement.appendChild(translationButtonContainer);
+    if (translationButtonContainer.contentDocument === null) {
+        translationButtonContainer = document.createElement("div");
+        renderButton();
+    }
+    document.documentElement.removeChild(iframeContainer);
+    translationButtonContainer.id = "edge-translate-button";
+    translationButtonContainer.style.backgroundColor = "transparent"; // programatically set style to compatible with the extension 'Dark Reader'
 }
-document.documentElement.removeChild(iframeContainer);
-translationButtonContainer.id = "edge-translate-button";
-translationButtonContainer.style.backgroundColor = "transparent"; // programatically set style to compatible with the extension 'Dark Reader'
 
 /**
  * When the user clicks the translation button, the translationButtonContainer will be mounted at document.documentElement and the load event will be triggered.
@@ -329,6 +334,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // this listener activated when document content is loaded
 // to make selection button available ASAP
 window.addEventListener("DOMContentLoaded", () => {
+    // Don't wire selection translation onto the native PDF viewer (see the injection guard above).
+    if (isNativePdfDocument()) return;
     // to make the selection icon move with the mouse scrolling
     scrollingElement.addEventListener("scroll", scrollHandler);
 
