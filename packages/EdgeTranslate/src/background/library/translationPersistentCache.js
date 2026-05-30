@@ -168,6 +168,65 @@ function getEntry(key) {
     });
 }
 
+/**
+ * Batch get for the per-STRING cache: given many keys, return the live (non-expired)
+ * {key,value} pairs in ONE round-trip. Memory hits resolve instantly; misses are read in a
+ * single readonly transaction. Used so a page-translation batch can drop already-translated
+ * strings from its request even across sessions / other pages.
+ */
+function getEntriesByKeys(keys) {
+    const list = Array.isArray(keys) ? Array.from(new Set(keys.filter(Boolean))) : [];
+    if (!list.length) return Promise.resolve([]);
+    const now = Date.now();
+    const out = [];
+    const missing = [];
+    for (const key of list) {
+        const hit = memoryCache.get(key);
+        if (hit && !isExpired(hit, now)) out.push({ key, value: hit.value });
+        else missing.push(key);
+    }
+    if (!missing.length) return Promise.resolve(out);
+    return withStore("readonly", (store) => {
+        for (const key of missing) {
+            const request = store.get(key);
+            request.onsuccess = () => {
+                const entry = request.result;
+                if (entry && !isExpired(entry, now)) {
+                    rememberInMemory(key, entry);
+                    out.push({ key, value: entry.value });
+                }
+            };
+            request.onerror = () => {};
+        }
+        return null;
+    }).then(() => out);
+}
+
+/** Batch save for the per-string cache: store many {key,value} in one transaction. */
+function saveEntries(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    if (!list.length) return Promise.resolve(false);
+    const now = Date.now();
+    for (const { key, value } of list) {
+        if (!key || !value) continue;
+        rememberInMemory(key, {
+            key,
+            urlHash: "",
+            value,
+            createdAt: now,
+            expiresAt: now + DEFAULT_TTL_MS,
+        });
+    }
+    schedulePrune();
+    return withStore("readwrite", (store) => {
+        for (const { key, value } of list) {
+            if (!key || !value) continue;
+            store.put({ key, urlHash: "", value, createdAt: now, expiresAt: now + DEFAULT_TTL_MS });
+        }
+        return true;
+    }).then((result) => Boolean(result));
+}
+
 function clearAll() {
     memoryCache.clear();
     return withStore("readwrite", (store) => {
@@ -196,4 +255,12 @@ function schedulePrune() {
     }).catch(() => null);
 }
 
-export { DEFAULT_TTL_MS, clearAll, getEntry, prefetchEntriesForUrlHash, saveEntry };
+export {
+    DEFAULT_TTL_MS,
+    clearAll,
+    getEntriesByKeys,
+    getEntry,
+    prefetchEntriesForUrlHash,
+    saveEntries,
+    saveEntry,
+};

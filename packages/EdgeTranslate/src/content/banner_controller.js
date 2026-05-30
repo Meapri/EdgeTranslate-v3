@@ -4269,12 +4269,25 @@ class BannerController {
     }
 
     // Feed each block's (source text -> translation) into the per-string session cache so the
-    // same string is never sent to the model again this page session.
+    // same string is never sent to the model again this page session, and persist it to the
+    // IDB store (fire-and-forget) for cross-session / cross-page reuse.
     storeEntrySegmentCache(entry, map) {
         if (!entry || !entry.segTexts || !map || !map.size) return;
+        const saves = [];
         for (let i = 0; i < entry.segBlocks.length; i += 1) {
             const translation = map.get(i + 1);
-            if (translation != null) this.storeCachedSegmentText(entry.segTexts[i], translation);
+            if (translation == null) continue;
+            const text = entry.segTexts[i];
+            if (!text) continue;
+            this.storeCachedSegmentText(text, translation);
+            saves.push({ key: this.persistentSegmentKey(text), value: translation });
+        }
+        if (saves.length) {
+            try {
+                this.channel.emit("persistent_segment_save", { entries: saves });
+            } catch {
+                /* persistent cache is opportunistic */
+            }
         }
     }
 
@@ -4533,6 +4546,9 @@ class BannerController {
             this._domActiveTranslations += 1;
             const queueWaitMs = Math.max(0, Date.now() - queuedAt);
             let requestDurationMs = 0;
+            // When this run re-queues itself for one retry, it is the SAME entry — it must not
+            // be counted again in the total, nor marked completed until it truly finishes.
+            let willRetry = false;
             // Streaming partial apply: as the SSE buffer grows, write each completed [[n]]
             // segment onto its leaf block. The reader sees translations popcorn into place
             // instead of waiting 3-8s for the full response. `appliedSegments` is shared
@@ -4640,7 +4656,7 @@ class BannerController {
                 // text so the reader at least sees something readable.
                 if (entry.attempt < 1 && this._domBatchFailureCount < 5) {
                     entry.attempt += 1;
-                    this._domTotalTranslationEntries += 1;
+                    willRetry = true;
                     if (!this._domTranslationQueue) this._domTranslationQueue = [];
                     this._domTranslationQueue.unshift(run);
                 } else {
@@ -4656,7 +4672,7 @@ class BannerController {
                 } catch {
                     /* noop */
                 }
-                this.markDomPageTranslationEntriesCompleted();
+                if (!willRetry) this.markAiPageEntriesCompleted([entry]);
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
             }
@@ -4673,7 +4689,7 @@ class BannerController {
         const run = async () => {
             if (this._domCircuitBreakerActive) {
                 entries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
-                this.markDomPageTranslationEntriesCompleted(entries.length);
+                this.markAiPageEntriesCompleted(entries);
                 return;
             }
             this._domActiveTranslations += 1;
@@ -4707,6 +4723,12 @@ class BannerController {
                 pendingEntries = uncachedEntries;
 
                 if (pendingEntries.length) {
+                    // Cross-session/page reuse: pull any of this batch's strings that were
+                    // translated before out of the persistent IDB store (one round-trip) so
+                    // they're dropped from the request below.
+                    await this.loadPersistentSegments(
+                        pendingEntries.flatMap((entry) => entry.segTexts || [])
+                    );
                     // One deduped [[n]] payload over every unique block text in the batch; each
                     // entry records batchUnitOf so the reply maps back onto all of its blocks.
                     // Blocks already in the per-string cache are resolved here and excluded.
@@ -4806,7 +4828,7 @@ class BannerController {
                 } catch {
                     /* noop */
                 }
-                this.markDomPageTranslationEntriesCompleted(entries.length);
+                this.markAiPageEntriesCompleted(entries);
                 this._domActiveTranslations -= 1;
                 this.flushDomTranslationQueue();
             }
@@ -4875,7 +4897,8 @@ class BannerController {
             entries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
             return;
         }
-        this._domTotalTranslationEntries += entries.length;
+        // Retries re-process the SAME entries — they were already counted in the total at
+        // dispatch and are marked completed (once) via entry._counted, so no re-increment.
         if (entries.length > 1) {
             const mid = Math.ceil(entries.length / 2);
             this.enqueueAiPageSectionBatchTranslation(entries.slice(mid), attempt + 1, {
@@ -5291,6 +5314,38 @@ class BannerController {
             if (oldest !== undefined) this._domSegmentTextCache.delete(oldest);
         }
         this._domSegmentTextCache.set(key, translation);
+    }
+
+    // IndexedDB key for a string (global, cross-page/cross-session). "s|" namespaces it from
+    // the per-URL entry cache keys.
+    persistentSegmentKey(text) {
+        return `s|${this.segmentTextCacheKey(text)}`;
+    }
+
+    // Pull any of these strings that were translated in a PREVIOUS session / on another page
+    // out of the persistent IDB store into the in-memory cache, in one round-trip, BEFORE the
+    // batch builds its request — so they're dropped from the payload (0 tokens).
+    async loadPersistentSegments(texts) {
+        if (!this._domSegmentTextCache) this._domSegmentTextCache = new Map();
+        const idbKeyToMem = new Map();
+        for (const text of texts || []) {
+            if (!text) continue;
+            const memKey = this.segmentTextCacheKey(text);
+            if (this._domSegmentTextCache.has(memKey)) continue; // already in memory
+            idbKeyToMem.set(`s|${memKey}`, memKey);
+        }
+        if (!idbKeyToMem.size) return;
+        try {
+            const hits = await this.channel.request("persistent_segment_get", {
+                keys: Array.from(idbKeyToMem.keys()),
+            });
+            for (const { key, value } of hits || []) {
+                const memKey = idbKeyToMem.get(key);
+                if (memKey && value != null) this._domSegmentTextCache.set(memKey, value);
+            }
+        } catch {
+            /* persistent cache is opportunistic — never block translation */
+        }
     }
 
     markDomPageEntryApplied(entry) {
@@ -7206,6 +7261,19 @@ class BannerController {
         this.updateDomPageBannerStatus();
     }
 
+    // Count each AI page entry as completed exactly ONCE (idempotent via entry._counted), so a
+    // retried entry — which passes through a second run's finally — can never inflate "X of Y".
+    markAiPageEntriesCompleted(entries) {
+        let newly = 0;
+        for (const entry of entries || []) {
+            if (entry && !entry._counted) {
+                entry._counted = true;
+                newly += 1;
+            }
+        }
+        if (newly) this.markDomPageTranslationEntriesCompleted(newly);
+    }
+
     cancelDomPageTranslate() {
         if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
         this._pendingNodes.clear();
@@ -7444,8 +7512,17 @@ class BannerController {
             characterData: true,
         });
         // Wait for the scroll to settle, then dispatch the newly revealed content as one
-        // bundle rather than firing a fresh request set on every scroll tick.
-        this._domScrollScanHandler = () => this.scheduleDomPageIncrementalScan(360);
+        // bundle rather than firing a fresh request set on every scroll tick. Once the page
+        // is fully translated AND stable, a plain scroll can't reveal anything new that's
+        // already in the DOM (the initial dispatch collected the whole root) — and genuinely
+        // lazy-loaded content fires a DOM mutation that the observer rescans on its own. So
+        // skip the redundant full-DOM walk while idle/complete.
+        this._domScrollScanHandler = () => {
+            if (this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1) {
+                return;
+            }
+            this.scheduleDomPageIncrementalScan(360);
+        };
         window.addEventListener("scroll", this._domScrollScanHandler, {
             passive: true,
             capture: true,

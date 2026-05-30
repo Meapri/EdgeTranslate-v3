@@ -2,7 +2,9 @@ import { TranslatorManager } from "./library/translate.js";
 import { translatePage, executeGoogleScript } from "./library/pageTranslate.js";
 import {
     clearAll as clearPersistentTranslationCache,
+    getEntriesByKeys as getPersistentCacheEntriesByKeys,
     prefetchEntriesForUrlHash as prefetchPersistentCacheForUrl,
+    saveEntries as savePersistentCacheEntries,
     saveEntry as savePersistentCacheEntry,
 } from "./library/translationPersistentCache.js";
 import {
@@ -482,6 +484,20 @@ channel.on("persistent_cache_save", (detail) => {
         key: detail.key,
         value: detail.value,
     }).catch(() => null);
+});
+
+// Per-STRING cache (global, cross-page / cross-session): a batch looks up its strings here
+// before sending, and saves each translated string back.
+channel.provide("persistent_segment_get", (detail) => {
+    const keys = detail && Array.isArray(detail.keys) ? detail.keys : [];
+    if (!keys.length) return Promise.resolve([]);
+    return getPersistentCacheEntriesByKeys(keys).catch(() => []);
+});
+
+channel.on("persistent_segment_save", (detail) => {
+    const entries = detail && Array.isArray(detail.entries) ? detail.entries : [];
+    if (!entries.length) return;
+    savePersistentCacheEntries(entries).catch(() => null);
 });
 
 channel.on("persistent_cache_clear", () => {

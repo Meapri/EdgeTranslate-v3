@@ -427,9 +427,13 @@ describe("DOM page translation banner", () => {
 
         expect(article.textContent).toContain("첫 번째 문단입니다.");
         expect(article.textContent).toContain("두 번째 문단입니다.");
-        expect(controller.channel.request.mock.calls[0][1].text).toContain("[[1]]");
-        expect(controller.channel.request.mock.calls[0][1].text).toContain("[[2]]");
-        expect(controller.channel.request.mock.calls[0][1].text).not.toContain("[[1:p]]");
+        // The translate request (has .text) — not the per-string IDB lookup (has .keys).
+        const translateReq = controller.channel.request.mock.calls.find(
+            (call) => call[1] && typeof call[1].text === "string"
+        );
+        expect(translateReq[1].text).toContain("[[1]]");
+        expect(translateReq[1].text).toContain("[[2]]");
+        expect(translateReq[1].text).not.toContain("[[1:p]]");
     });
 
     it("never re-sends a string already translated this session (per-string cache)", async () => {
@@ -482,7 +486,9 @@ describe("DOM page translation banner", () => {
         await Promise.resolve();
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        const secondPayload = controller.channel.request.mock.calls[0][1].text;
+        const secondPayload = controller.channel.request.mock.calls.find(
+            (call) => call[1] && typeof call[1].text === "string"
+        )[1].text;
         expect(secondPayload).toContain("Unique second.");
         expect(secondPayload).not.toContain("Shared label.");
         // Both blocks are translated: the repeat from cache, the new one from the reply.
@@ -506,12 +512,14 @@ describe("DOM page translation banner", () => {
         controller._domMaxConcurrentTranslations = 1;
         controller._aiSectionTranslatedChildren = new WeakSet([first, second]);
         let resolveRequest;
-        controller.channel.request = jest.fn(
-            () =>
-                new Promise((resolve) => {
-                    resolveRequest = resolve;
-                })
-        );
+        controller.channel.request = jest.fn((service) => {
+            // The per-string IDB lookup resolves immediately; only the translate call is held
+            // pending so the test can drive the streaming/final phases deterministically.
+            if (service === "persistent_segment_get") return Promise.resolve([]);
+            return new Promise((resolve) => {
+                resolveRequest = resolve;
+            });
+        });
 
         controller.enqueueAiPageSectionBatchTranslation([
             {
@@ -527,12 +535,14 @@ describe("DOM page translation banner", () => {
                 cacheKey: "second",
             },
         ]);
-        await Promise.resolve();
+        for (let i = 0; i < 5; i += 1) await Promise.resolve();
 
         const streamHandler = controller.channel.on.mock.calls.find(
             ([eventName]) => eventName === "translation_stream_progress"
         )[1];
-        const streamId = controller.channel.request.mock.calls[0][1].streamId;
+        const streamId = controller.channel.request.mock.calls.find(
+            (call) => call[1] && call[1].streamId
+        )[1].streamId;
         streamHandler({
             streamId,
             text: "[[1]]\n첫 번째 문단입니다.\n[[2]]\n두 번째",
