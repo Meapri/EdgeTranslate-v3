@@ -1122,7 +1122,6 @@ describe("DOM page translation banner", () => {
             engine: "googleAiStudio",
             fastTranslatorId: "",
         });
-        expect(controller._captionOverlayDraggable).toBe(false);
 
         controller._captionOptionsCache = null;
         getOrSetDefaultSettings.mockResolvedValueOnce({
@@ -1139,7 +1138,8 @@ describe("DOM page translation banner", () => {
             engine: "",
             fastTranslatorId: "",
         });
-        expect(controller._captionOverlayDraggable).toBe(true);
+        // (The overlay is always draggable now — the draggableOverlay toggle was removed
+        // and hardcoded on, so it's no longer derived from RealtimeCaptionConfig.)
     });
 
     it("replaces fragment captions when a stabilized merged caption arrives", () => {
@@ -1228,11 +1228,17 @@ describe("DOM page translation banner", () => {
             const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
                 line.textContent.trim()
             );
+            // Two-row display: the late merged sentence corrected the earlier fragment's slot
+            // in history — it did NOT hijack the current line — so the two newest captions stay
+            // on screen with the genuinely-current caption last.
             expect(lines).toEqual([
-                "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다.",
                 "사실 저는 대학을 졸업하지 못했습니다.",
                 "그리고 이것이 제가 대학 졸업식에 가장 가까이 다가간 순간입니다.",
             ]);
+            // The merged sentence replaced the fragment in place at the earliest history slot.
+            expect(controller._captionDisplayItems[0].text).toBe(
+                "세계 최고의 대학 중 한 곳에서 열리는 오늘 졸업식에 함께하게 되어 영광입니다."
+            );
             expect(overlay.textContent).not.toContain(
                 "오늘 여러분의 졸업식에 함께하게 되어 영광입니다."
             );
@@ -1289,8 +1295,13 @@ describe("DOM page translation banner", () => {
         controller.showRealtimeCaptionOverlay("세 번째.", "Third.");
 
         let overlay = document.getElementById("edge-translate-realtime-caption");
-        expect(overlay.querySelectorAll("[data-role]")).toHaveLength(3);
-        expect(overlay.dataset.expanded).toBe("true");
+        // Two-row display stays at two rows right after a merge — the merged sentence took the
+        // fragment's slot in history, so the two newest captions are what's on screen.
+        let rows = overlay.querySelectorAll("[data-role]");
+        expect(rows).toHaveLength(2);
+        expect(rows[0].textContent).toBe("두 번째.");
+        expect(rows[1].textContent).toBe("세 번째.");
+        expect(overlay.dataset.expanded).toBe("false");
 
         controller.showRealtimeCaptionOverlay("네 번째.", "Fourth.");
         controller.showRealtimeCaptionOverlay("다섯 번째.", "Fifth.");
@@ -1314,15 +1325,16 @@ describe("DOM page translation banner", () => {
             { allowExpandedReplacement: true }
         );
         controller.showRealtimeCaptionOverlay("다음 자막.", "Next caption.");
-        const overlayBeforeDuplicate = document.getElementById("edge-translate-realtime-caption");
-        const firstRenderedLine = overlayBeforeDuplicate.querySelector("[data-role]");
+        // "중복 조각" carries source "second fragment", which is already part of the merged
+        // caption still on screen — it's a stray cue of an already-displayed sentence and must
+        // be dropped rather than appended as a new line.
         controller.showRealtimeCaptionOverlay("중복 조각.", "second fragment");
 
         const overlay = document.getElementById("edge-translate-realtime-caption");
         const lines = Array.from(overlay.querySelectorAll("[data-role]")).map((line) =>
             line.textContent.trim()
         );
-        expect(lines).toEqual(["자연스럽게 합쳐진 전체 자막.", "다음 자막.", "중복 조각."]);
+        expect(lines).toEqual(["자연스럽게 합쳐진 전체 자막.", "다음 자막."]);
     });
 
     it("coalesces live caption updates while a translation request is in flight", async () => {

@@ -309,9 +309,11 @@ class BannerController {
         this._captionHoldAfterMissingMs = 1400;
         this._captionLastVisibleAt = 0;
         this._captionDisplayItems = [];
-        // Show only the current caption block — clean, standard-subtitle behavior.
-        // (History is still kept internally for merge/dedup, just not stacked on screen.)
-        this._captionDisplayMax = 1;
+        // Show two caption rows: the previous line (dimmed) + the current line (bold),
+        // like standard two-line subtitles — gives reading context without clutter
+        // (the fragment-merge guard + capped getRealtimeCaptionDisplayMax keep it at
+        // exactly two distinct lines, never a growing stack).
+        this._captionDisplayMax = 2;
         this._captionSeekHandler = null;
         this._captionPrefetchTimer = null;
         this._captionPrefetchVideoId = "";
@@ -1041,25 +1043,44 @@ class BannerController {
         if (!translatedText) return false;
         const lastItem = this._captionDisplayItems.at(-1);
         if (lastItem?.source === source && lastItem?.text === translatedText) return false;
-        // Never let a fragment cover the caption that's already shown: if the incoming
-        // source is contained in the current one (i.e. it's an individual cue of the
-        // merged sentence on screen), keep the full sentence and drop the fragment.
-        // This holds even when the group resolution missed and the two translations
-        // come from different engines (fragment text ≠ part of the sentence text).
-        if (lastItem && this.realtimeCaptionSourceIncludes(lastItem.source, source)) return false;
+        // Never let a fragment cover a caption that's already on screen: if the incoming
+        // source is contained in any currently-shown row (i.e. it's an individual cue of a
+        // merged sentence already displayed), keep the full sentence and drop the fragment.
+        // We check every visible row — not just the current line — so a late stray cue of an
+        // earlier merged caption can't slip back in. Holds even cross-engine (fragment text
+        // ≠ part of the sentence text), since the match is on source.
+        const visibleItems = this._captionDisplayItems.slice(-this.getRealtimeCaptionDisplayMax());
+        if (visibleItems.some((item) => this.realtimeCaptionSourceIncludes(item.source, source))) {
+            return false;
+        }
 
+        // A merged/expanded caption is the full form of an earlier fragment — slot it back
+        // IN PLACE of that fragment so a late-arriving full sentence corrects its own line
+        // instead of jumping ahead of newer captions (chronological order preserved). A
+        // genuinely new caption finds no fragment to replace and appends LAST as the current
+        // line. Only the FIRST matching fragment keeps the slot; any further fragments drop.
         let replacedFragment = false;
-        const nextItems = this._captionDisplayItems.filter((item) => {
+        let replacedInPlace = false;
+        const nextItems = [];
+        for (const item of this._captionDisplayItems) {
             const duplicate = item.source === source || item.text === translatedText;
-            const replacedByMergedSource =
+            const isFragmentOfNew =
                 this.realtimeCaptionSourceIncludes(source, item.source) ||
                 this.realtimeCaptionSourceIncludes(translatedText, item.text);
-            if (replacedByMergedSource) replacedFragment = true;
-            return !duplicate && !replacedByMergedSource;
-        });
-        // The newest caption always goes LAST so it renders as the current line —
-        // never spliced into the middle (that could show a stale line as current).
-        nextItems.push({ source, text: translatedText, expanded: replacedFragment });
+            if (isFragmentOfNew) {
+                replacedFragment = true;
+                if (!replacedInPlace) {
+                    nextItems.push({ source, text: translatedText, expanded: true });
+                    replacedInPlace = true;
+                }
+                continue;
+            }
+            if (duplicate) continue;
+            nextItems.push(item);
+        }
+        if (!replacedInPlace) {
+            nextItems.push({ source, text: translatedText, expanded: replacedFragment });
+        }
         this._captionDisplayItems = nextItems;
         const historyMax = Math.max(
             this._captionDisplayMax + this._captionStabilizeMaxSources + 2,
