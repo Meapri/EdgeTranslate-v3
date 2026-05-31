@@ -23,15 +23,13 @@ const DEFAULT_SETTINGS = {
     OtherSettings: {
         MutualTranslate: false,
         SelectTranslate: true,
-        TranslateAfterDblClick: false,
+        TranslateAfterDblClick: true,
         TranslateAfterSelect: false,
         RealtimeCaptionTranslate: false,
-        CancelTextSelection: false,
+        CancelTextSelection: true,
         UseGoogleAnalytics: false,
         // When true (default), PDF links open in the bundled pdf.js viewer; when false,
-        // the browser's native PDF handler is used. Nested here so the falsy check in
-        // getOrSetDefaultSettings (which would reset a top-level default-true boolean)
-        // never clobbers a user's "off" choice.
+        // the browser's native PDF handler is used.
         EnableBuiltinPdfViewer: true,
     },
     DefaultTranslator: "GoogleTranslate",
@@ -57,7 +55,7 @@ const DEFAULT_SETTINGS = {
         timeoutMs: 120000,
     },
     RealtimeCaptionConfig: {
-        translatorMode: "ai",
+        translatorMode: "google",
         draggableOverlay: true,
     },
     HybridTranslatorConfig: {
@@ -79,12 +77,12 @@ const DEFAULT_SETTINGS = {
     // Defines which contents in the translating result should be displayed.
     TranslateResultFilter: {
         mainMeaning: true,
-        originalText: true,
+        originalText: false,
         tPronunciationIcon: true,
-        sPronunciationIcon: true,
+        sPronunciationIcon: false,
         detailedMeanings: true,
         definitions: true,
-        examples: true,
+        examples: false,
     },
     // Defines the order of displaying contents.
     ContentDisplayOrder: [
@@ -97,6 +95,62 @@ const DEFAULT_SETTINGS = {
     HidePageTranslatorBanner: false,
 };
 
+function isPlainSettingsObject(value) {
+    return Boolean(value) && typeof value === "object" && !(value instanceof Array);
+}
+
+function isSettingsArray(value) {
+    return value instanceof Array;
+}
+
+function cloneDefaultValue(value) {
+    if (isSettingsArray(value)) {
+        return value.map((item) => cloneDefaultValue(item));
+    }
+
+    if (isPlainSettingsObject(value)) {
+        const cloned = {};
+        for (let key in value) {
+            cloned[key] = cloneDefaultValue(value[key]);
+        }
+        return cloned;
+    }
+
+    return value;
+}
+
+function resolveDefaultSettings(settings, defaults) {
+    return typeof defaults === "function" ? defaults(settings) : defaults;
+}
+
+function normalizeRequestedSettings(settings, defaults) {
+    if (typeof settings === "string") {
+        return [settings];
+    }
+
+    if (settings === undefined) {
+        return Object.keys(resolveDefaultSettings([], defaults));
+    }
+
+    return settings;
+}
+
+function hasStoredSetting(result, setting, defaults) {
+    if (!Object.prototype.hasOwnProperty.call(result, setting) || result[setting] === undefined) {
+        return false;
+    }
+
+    const defaultValue = defaults[setting];
+    if (isPlainSettingsObject(defaultValue)) {
+        return isPlainSettingsObject(result[setting]);
+    }
+    if (isSettingsArray(defaultValue)) {
+        return isSettingsArray(result[setting]);
+    }
+
+    return true;
+}
+
 /**
  * assign default value to settings which are undefined in recursive way
  * @param {*} result setting result stored in chrome.storage
@@ -105,20 +159,20 @@ const DEFAULT_SETTINGS = {
 function setDefaultSettings(result, settings) {
     for (let i in settings) {
         // settings[i] contains key-value settings
-        if (
-            typeof settings[i] === "object" &&
-            !(settings[i] instanceof Array) &&
-            Object.keys(settings[i]).length > 0
-        ) {
-            if (result[i]) {
+        if (isPlainSettingsObject(settings[i]) && Object.keys(settings[i]).length > 0) {
+            if (isPlainSettingsObject(result[i])) {
                 setDefaultSettings(result[i], settings[i]);
             } else {
                 // settings[i] contains several setting items but these have not been set before
-                result[i] = settings[i];
+                result[i] = cloneDefaultValue(settings[i]);
+            }
+        } else if (isSettingsArray(settings[i])) {
+            if (!isSettingsArray(result[i])) {
+                result[i] = cloneDefaultValue(settings[i]);
             }
         } else if (result[i] === undefined) {
             // settings[i] is a single setting item and it has not been set before
-            result[i] = settings[i];
+            result[i] = cloneDefaultValue(settings[i]);
         }
     }
 }
@@ -133,27 +187,20 @@ function setDefaultSettings(result, settings) {
  */
 function getOrSetDefaultSettings(settings, defaults) {
     return new Promise((resolve) => {
-        // If there is only one setting to get, warp it up.
-        if (typeof settings === "string") {
-            settings = [settings];
-        } else if (settings === undefined) {
-            // If settings is undefined, collect all setting keys in defaults.
-            settings = [];
-            for (let key in defaults) {
-                settings.push(key);
-            }
-        }
+        const requestedSettings = normalizeRequestedSettings(settings, defaults);
+        const defaultSettings = resolveDefaultSettings(requestedSettings, defaults);
 
-        chrome.storage.sync.get(settings, (result) => {
+        chrome.storage.sync.get(requestedSettings, (result) => {
             let updated = false;
 
-            for (let setting of settings) {
-                if (!result[setting]) {
-                    if (typeof defaults === "function") {
-                        defaults = defaults(settings);
-                    }
-                    result[setting] = defaults[setting];
+            for (let setting of requestedSettings) {
+                if (!hasStoredSetting(result, setting, defaultSettings)) {
+                    result[setting] = cloneDefaultValue(defaultSettings[setting]);
                     updated = true;
+                } else if (isPlainSettingsObject(defaultSettings[setting])) {
+                    const before = JSON.stringify(result[setting]);
+                    setDefaultSettings(result[setting], defaultSettings[setting]);
+                    updated = updated || before !== JSON.stringify(result[setting]);
                 }
             }
 

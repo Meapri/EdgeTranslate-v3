@@ -239,7 +239,8 @@ window.onload = () => {
                 const isAiMode =
                     localConfig.mode === "googleAiStudio" ||
                     localConfig.mode === "openai" ||
-                    localConfig.mode === "openaiCompatible";
+                    localConfig.mode === "openaiCompatible" ||
+                    localConfig.mode === "chromeBuiltin";
                 settingItemValue =
                     localConfig.enabled && isAiMode ? "AIPageTranslate" : "GooglePageTranslate";
                 saveOption(result, settingItemPath, settingItemValue);
@@ -253,7 +254,8 @@ window.onload = () => {
                 const isAiMode =
                     localConfig.mode === "googleAiStudio" ||
                     localConfig.mode === "openai" ||
-                    localConfig.mode === "openaiCompatible";
+                    localConfig.mode === "openaiCompatible" ||
+                    localConfig.mode === "chromeBuiltin";
                 if (!localConfig.enabled || !isAiMode) {
                     settingItemValue = "GooglePageTranslate";
                     saveOption(result, settingItemPath, settingItemValue);
@@ -461,7 +463,8 @@ function syncAiPageTranslatorVisibility(localSettings) {
     const isAiMode =
         localConfig.mode === "googleAiStudio" ||
         localConfig.mode === "openai" ||
-        localConfig.mode === "openaiCompatible";
+        localConfig.mode === "openaiCompatible" ||
+        localConfig.mode === "chromeBuiltin";
     const showAi = Boolean(localConfig.enabled && isAiMode);
     const aiRow = document.getElementById("ai-page-translator-row");
     if (aiRow) aiRow.hidden = !showAi;

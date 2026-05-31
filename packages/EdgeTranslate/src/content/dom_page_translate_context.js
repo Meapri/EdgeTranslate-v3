@@ -722,8 +722,7 @@ function isAlreadyInTargetLanguage(text, targetLanguage) {
     const hebrew = countScript(sample, SCRIPT_RANGES.hebrew);
     const greek = countScript(sample, SCRIPT_RANGES.greek);
     const latin = countScript(sample, SCRIPT_RANGES.latinLetters);
-    const totalLetterLike =
-        hangul + kana + han + cyrillic + arabic + devanagari + thai + hebrew + greek + latin;
+    const totalLetterLike = countScript(sample, /[\p{L}]/gu);
     if (totalLetterLike < 4) return false;
     const ratio = (n) => n / totalLetterLike;
 
@@ -1033,15 +1032,39 @@ function applyTranslatedTextNodes(originalElement, translatedElement) {
     const originals = collectMeaningfulTextNodes(originalElement);
     if (!originals.length) return false;
     const translations = collectMeaningfulTextNodes(translatedElement);
-    if (originals.length !== translations.length) return false;
-    let wrote = false;
-    for (let i = 0; i < originals.length; i += 1) {
-        const value = normalizeBlockText(translations[i].nodeValue);
-        if (!value) continue;
-        originals[i].nodeValue = preserveTextNodeBoundaryWhitespace(originals[i], value);
-        wrote = true;
+    if (!translations.length) return false;
+
+    if (originals.length === translations.length) {
+        // Exact structural match: map text node 1:1 so inline emphasis + links keep their
+        // translated text in place (the common, ideal case).
+        let wrote = false;
+        for (let i = 0; i < originals.length; i += 1) {
+            const value = normalizeBlockText(translations[i].nodeValue);
+            if (!value) continue;
+            originals[i].nodeValue = preserveTextNodeBoundaryWhitespace(originals[i], value);
+            wrote = true;
+        }
+        return wrote;
     }
-    return wrote;
+
+    // Count mismatch: the model reordered the inline pieces — extremely common EN→KO/JA, where
+    // word order moves an inline <a>/<strong> to a different spot so the text-node split no
+    // longer lines up. The old behavior REJECTED the whole block, leaving it in the source
+    // language (this was the "AI page translation leaves a paragraph with a link untranslated"
+    // bug). Instead, write the full translated text onto the block's first DIRECT text run and
+    // blank the other text nodes: the content is fully translated and block-level layout is
+    // untouched — only inline emphasis/link boundaries inside THIS one block are flattened.
+    const joined = translations
+        .map((node) => normalizeBlockText(node.nodeValue))
+        .filter(Boolean)
+        .join(" ");
+    if (!joined) return false;
+    const primary = originals.find((node) => node.parentNode === originalElement) || originals[0];
+    primary.nodeValue = preserveTextNodeBoundaryWhitespace(primary, joined);
+    for (const node of originals) {
+        if (node !== primary) node.nodeValue = "";
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,6 +1257,237 @@ function applyPageSegments(blocks, segmentMap, baseIndex = 0, appliedSet = null)
         }
     }
     return applied;
+}
+
+function isHiddenTranslationLeaf(element) {
+    if (!element || !element.closest) return false;
+    return Boolean(element.closest("[hidden],[aria-hidden='true']"));
+}
+
+function isChromeTranslationLeaf(element) {
+    if (!element || !element.closest) return false;
+    if (element.closest("script,style,noscript,template,svg,math,code,pre,kbd,samp")) {
+        return true;
+    }
+    if (element.closest("input,textarea,select,option,button,[role='button']")) return true;
+    if (element.closest("footer,[role='banner'],[role='contentinfo'],[role='search']")) {
+        return true;
+    }
+    const nav = element.closest("nav,[role='navigation']");
+    if (nav && !nav.closest("main,article,[role='main'],[role='article']")) return true;
+    return false;
+}
+
+function isWidgetTranslationLeaf(element) {
+    let current = element;
+    while (current && current !== document.documentElement) {
+        const className =
+            typeof current.className === "string"
+                ? current.className
+                : current.getAttribute && current.getAttribute("class");
+        const signature = [
+            current.id || "",
+            className || "",
+            current.getAttribute && current.getAttribute("role"),
+            current.getAttribute && current.getAttribute("aria-label"),
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .replace(/[_\s]+/g, "-");
+        if (
+            /(^|-)newsletter($|-)/.test(signature) ||
+            /(^|-)login($|-)/.test(signature) ||
+            /(^|-)follow($|-)/.test(signature) ||
+            /(^|-)(popup|modal)($|-)/.test(signature) ||
+            /(^|-)(sponsor|sponsored|promo|promotion)($|-)/.test(signature)
+        ) {
+            return true;
+        }
+        current = current.parentElement;
+    }
+    return false;
+}
+
+function isAdChromeTranslationText(text) {
+    const value = String(text || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!value) return false;
+    if (/^(?:ad|ads|advertisement|sponsored)$/i.test(value)) return true;
+    if (/\bremove\s+ads?\b/i.test(value)) return true;
+    if (/\b(?:googletag|adsbygoogle|doubleclick|googleadservices|adservice)\b/i.test(value)) {
+        return true;
+    }
+    return false;
+}
+
+function isLowValueTranslationText(text) {
+    const value = String(text || "").trim();
+    if (!value) return true;
+    if (isAdChromeTranslationText(value)) return true;
+    if (!/\p{L}/u.test(value)) return true;
+    if (!/\s/.test(value)) {
+        if (/^(?:https?:\/\/|www\.|mailto:)/i.test(value)) return true;
+        if (/^[\w.-]+\.[a-z0-9]{1,8}$/i.test(value) && /[._-]/.test(value)) return true;
+        if (/^[0-9a-f]{7,40}$/i.test(value)) return true;
+        if (/^@?[\w-]+(?:\/[\w.-]+)+$/.test(value)) return true;
+        if (/^v?\d+(?:\.\d+){1,}(?:[-+][\w.]+)?$/i.test(value)) return true;
+    }
+    return false;
+}
+
+function isTranslationLeafEligible(element, options = {}) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE || !element.isConnected) return false;
+    if (isExcludedHtmlSubtree(element)) return false;
+    if (isHiddenTranslationLeaf(element)) return false;
+    if (isChromeTranslationLeaf(element)) return false;
+    if (isWidgetTranslationLeaf(element)) return false;
+    if (elementHasNestedTranslatableBlock(element)) return false;
+    const plainText = normalizeBlockText(element.textContent);
+    if (plainText.length < (options.minTextLength || 2)) return false;
+    if (isLowValueTranslationText(plainText)) return false;
+    if (options.targetLanguage && isAlreadyInTargetLanguage(plainText, options.targetLanguage)) {
+        return false;
+    }
+    if (options.skipExisting instanceof WeakSet && options.skipExisting.has(element)) return false;
+    if (typeof options.isEligibleElement === "function" && !options.isEligibleElement(element)) {
+        return false;
+    }
+    return true;
+}
+
+function serializeTranslationLeaf(element, options = {}) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+    const text = serializeBlockSegment(element);
+    const plainText = normalizeBlockText(element.textContent);
+    if (!text || !plainText) return null;
+    return {
+        id: Number.isFinite(options.id) ? options.id : undefined,
+        element,
+        role: inferDomPageTextRole(element),
+        text,
+        sourceText: text,
+        plainText,
+    };
+}
+
+function collectTranslationLeaves(roots, options = {}) {
+    const leaves = [];
+    const seen = new WeakSet();
+    const sources = Array.isArray(roots) ? roots : [roots];
+    const selector = Array.from(HTML_BLOCK_LEAF_TAGS).join(",").toLowerCase();
+    const consider = (element) => {
+        if (!element || seen.has(element)) return;
+        seen.add(element);
+        if (!isTranslationLeafEligible(element, options)) return;
+        const serialized = serializeTranslationLeaf(element);
+        if (serialized) leaves.push(serialized);
+    };
+
+    for (const root of sources) {
+        if (!root || root.nodeType !== Node.ELEMENT_NODE) continue;
+        if (HTML_BLOCK_LEAF_TAGS.has(root.tagName)) consider(root);
+        if (!root.querySelectorAll) continue;
+        root.querySelectorAll(selector).forEach(consider);
+    }
+    return leaves;
+}
+
+function getIrSegmentMarker(id, role, options = {}) {
+    if (options.compactMarkers !== false) return `[[${id}]]`;
+    return getSegmentMarker(id - 1, role);
+}
+
+function buildTranslationIrBatch(leaves, options = {}) {
+    const startId = Number.isFinite(options.startId) ? options.startId : 1;
+    const segments = [];
+    for (const item of leaves || []) {
+        const element = item?.element || item?.block || item;
+        const id = startId + segments.length;
+        const segment =
+            item && item.text && item.element
+                ? { ...item, id }
+                : serializeTranslationLeaf(element, { id });
+        if (!segment || !segment.text) continue;
+        segments.push(segment);
+    }
+    const text = segments
+        .map((segment) =>
+            [getIrSegmentMarker(segment.id, segment.role, options), String(segment.text).trim()]
+                .filter(Boolean)
+                .join("\n")
+        )
+        .join("\n");
+    return { segments, text, sourceText: text };
+}
+
+function normalizeExpectedIrIds(expectedIds) {
+    if (Array.isArray(expectedIds)) {
+        return expectedIds
+            .map((item) => (typeof item === "object" ? item.id : item))
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+    }
+    const count = Number(expectedIds || 0);
+    if (!Number.isFinite(count) || count <= 0) return [];
+    return Array.from({ length: count }, (_, index) => index + 1);
+}
+
+function parseTranslationIrReply(translatedText, expectedIds = [], options = {}) {
+    const expected = normalizeExpectedIrIds(expectedIds);
+    const expectedSet = new Set(expected);
+    const allowUnknown = options.allowUnknown === true || expected.length === 0;
+    const text = String(translatedText || "");
+    const markerRe = /\[\[(\d+)(?::[a-z][a-z0-9-]*)?]]/gi;
+    const matches = [];
+    let match;
+    while ((match = markerRe.exec(text)) !== null) {
+        matches.push({ id: Number(match[1]), at: match.index, length: match[0].length });
+    }
+
+    const segments = new Map();
+    const duplicateIds = [];
+    const unknownIds = [];
+    for (let i = 0; i < matches.length; i += 1) {
+        const { id, at, length } = matches[i];
+        if (!Number.isFinite(id) || id < 1) continue;
+        const start = at + length;
+        const end = i + 1 < matches.length ? matches[i + 1].at : text.length;
+        const content = text.slice(start, end).trim();
+        if (!content) continue;
+        if (!allowUnknown && !expectedSet.has(id)) {
+            if (!unknownIds.includes(id)) unknownIds.push(id);
+            continue;
+        }
+        if (segments.has(id)) {
+            if (!duplicateIds.includes(id)) duplicateIds.push(id);
+            continue;
+        }
+        segments.set(id, content);
+    }
+
+    const missingIds = expected.filter((id) => !segments.has(id));
+    return {
+        segments,
+        missingIds,
+        duplicateIds,
+        unknownIds,
+        complete: missingIds.length === 0,
+    };
+}
+
+function applyTranslationIrSegment(segment, translatedText, options = {}) {
+    const element = segment?.element || segment?.block || segment?.leaf || null;
+    if (!element || !translatedText) return false;
+    return applyPageSegmentToBlock(element, translatedText, options);
+}
+
+function findRemainingSourceLeaves(roots, options = {}) {
+    return collectTranslationLeaves(roots, {
+        ...options,
+        targetLanguage: options.targetLanguage || options.tl || "",
+    });
 }
 
 /**
@@ -1557,16 +1811,22 @@ export {
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
     buildStrippedSectionHtml,
+    buildTranslationIrBatch,
     captureLeafSegmentTexts,
     captureLeafTextsFromElement,
     coalesceTinySections,
     collectHtmlPageBlocks,
     collectHtmlPageSections,
+    collectTranslationLeaves,
+    findRemainingSourceLeaves,
     findLeafBlocksInElement,
     inferDomPageTextRole,
     isAlreadyInTargetLanguage,
+    applyTranslationIrSegment,
     parsePageSegmentMap,
+    parseTranslationIrReply,
     serializeBlockSegment,
+    serializeTranslationLeaf,
     splitLeafByLineBreaks,
     splitSegmentedTranslationText,
     splitTranslatedContext,

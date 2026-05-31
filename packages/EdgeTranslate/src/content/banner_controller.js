@@ -10,12 +10,13 @@ import {
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
+    buildTranslationIrBatch,
     captureLeafSegmentTexts,
     collectHtmlPageSections,
     findLeafBlocksInElement,
     isAlreadyInTargetLanguage,
     parsePageSegmentMap,
-    serializeBlockSegment,
+    serializeTranslationLeaf,
     splitSegmentedTranslationText,
     splitTranslatedContext,
     wrapLeafLineSegmentsInSpans,
@@ -297,6 +298,7 @@ class BannerController {
         this._captionStabilizeDelayMs = 400;
         this._captionStabilizeWindowMs = 2600;
         this._captionStabilizeMaxSources = 3;
+        this._captionLateDisplayGraceMs = 900;
         this._captionVisibleHistoryMax = 8;
         this._captionVisibleSources = [];
         this._captionVisibleSourceSeq = 0;
@@ -449,6 +451,15 @@ class BannerController {
         this._domCompletedTranslationEntries = 0;
         this._domTotalTranslationEntries = 0;
         this._domBatchFailureCount = 0;
+        // How many times an entry may be re-sent to fill leaves whose [[n]] markers the model
+        // dropped. Bounded so a block the model simply won't translate can't loop forever.
+        this._aiSectionMaxPartialRetries = 2;
+        // Completion-sweep state (final safety net for still-untranslated leaves).
+        this._domSweepCount = 0;
+        this._domSweptElements = null;
+        this._domGapCandidateElements = null;
+        // Per-leaf re-collection cap for dropped [[n]] markers (see finalizeAppliedAiPageEntry).
+        this._aiSectionLeafRetries = new WeakMap();
         this.resetAiPageSectionBatchTuning();
         this._domCoverageScanCount = 0;
         this._domCoverageStableScanCount = 0;
@@ -505,6 +516,8 @@ class BannerController {
     normalizeDomPageTranslateEngine(engine) {
         if (engine === "openai") return "openai";
         if (engine === "openaiCompatible") return "openaiCompatible";
+        // On-device Gemini Nano (both legacy alias and current key) → "chromeBuiltin".
+        if (engine === "chromeBuiltin" || engine === "geminiNano") return "chromeBuiltin";
         return "googleAiStudio";
     }
 
@@ -513,14 +526,209 @@ class BannerController {
         if (pdfViewerRoot && document.getElementById("outerContainer")) {
             return [pdfViewerRoot];
         }
-        // Focus on the page's primary content region so we translate the article/README
-        // rather than the site's global nav, header, sidebar and footer chrome. On a
-        // content-heavy page (e.g. a GitHub repo) the chrome can dwarf the actual content
-        // and quietly cost most of the tokens. Falls back to <body> when there is no clear
-        // single main region.
+        // Content-focus: translate the page's primary content region (article/README), not the
+        // site's global nav/header/sidebar/footer chrome. Translating the WHOLE body produced far
+        // more leaves → far more dropped [[n]] markers (it made things worse), so we narrow to
+        // <main> when it clearly holds the content. Falls back to <body> when there is no single
+        // dominant main region.
         const main = this.getDomPagePrimaryContentRoot();
-        if (main) return [main];
+        if (main) {
+            // The article HEADLINE often sits in a <header> OUTSIDE <main>; add it so the title
+            // is translated too.
+            const roots = [main];
+            for (const heading of this.getDomPageHeadingsOutsideRoot(main)) roots.push(heading);
+            for (const auxRoot of this.getDomPageAuxiliaryContentRoots(main)) roots.push(auxRoot);
+            return this.dedupeDomPageTranslationRoots(roots);
+        }
         return [document.body].filter(Boolean);
+    }
+
+    dedupeDomPageTranslationRoots(roots) {
+        const out = [];
+        for (const root of roots || []) {
+            if (!root || !root.isConnected) continue;
+            if (out.some((existing) => existing === root || existing.contains(root))) continue;
+            for (let i = out.length - 1; i >= 0; i -= 1) {
+                if (root.contains(out[i])) out.splice(i, 1);
+            }
+            out.push(root);
+        }
+        return out;
+    }
+
+    // Substantial headings outside the content root (the article <h1> usually lives in a header
+    // over a hero image) — NOT a logo <h1> in the global banner/nav.
+    getDomPageHeadingsOutsideRoot(root) {
+        const out = [];
+        let headings;
+        try {
+            headings = document.querySelectorAll("h1");
+        } catch {
+            return out;
+        }
+        for (const h of headings) {
+            if (!h || !h.isConnected || root.contains(h)) continue;
+            if (
+                h.closest &&
+                h.closest("footer,[role='banner'],[role='contentinfo'],[role='navigation'],nav")
+            ) {
+                continue;
+            }
+            const text = String(h.textContent || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            if (text.length >= 10) {
+                out.push(h);
+                if (out.length >= 2) break;
+            }
+        }
+        return out;
+    }
+
+    getDomPageAuxiliaryContentRoots(primaryRoot) {
+        return this.getDomPageCommentRootsOutsideRoot(primaryRoot);
+    }
+
+    getDomPageCommentRootSelector() {
+        return [
+            "[id*='comment' i]",
+            "[class*='comment' i]",
+            "[aria-label*='comment' i]",
+            "[data-testid*='comment' i]",
+            "[data-test*='comment' i]",
+            "[data-component*='comment' i]",
+            "[id*='discussion' i]",
+            "[class*='discussion' i]",
+            "[aria-label*='discussion' i]",
+            "[id*='conversation' i]",
+            "[class*='conversation' i]",
+            "[id*='responses' i]",
+            "[class*='responses' i]",
+            "[id*='replies' i]",
+            "[class*='replies' i]",
+            "[id*='reviews' i]",
+            "[class*='reviews' i]",
+            "[id*='thread' i]",
+            "[class*='thread' i]",
+        ].join(",");
+    }
+
+    getDomPageElementSignature(element) {
+        if (!element) return "";
+        const className =
+            typeof element.className === "string"
+                ? element.className
+                : element.getAttribute && element.getAttribute("class");
+        return [
+            element.id || "",
+            className || "",
+            element.getAttribute && element.getAttribute("role"),
+            element.getAttribute && element.getAttribute("aria-label"),
+            element.getAttribute && element.getAttribute("data-testid"),
+            element.getAttribute && element.getAttribute("data-test"),
+            element.getAttribute && element.getAttribute("data-component"),
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .replace(/[_\s]+/g, "-");
+    }
+
+    isDomPageCommentLikeElement(element) {
+        const signature = this.getDomPageElementSignature(element);
+        if (!signature) return false;
+        if (
+            /(^|-)(comment-count|comments-count|comment-button|comments-button|comment-toggle|comments-toggle|comment-icon|comments-icon|comment-link|comments-link|comment-form|comment-editor|comment-input|reply-button|reply-form|reply-editor|thread-count|thread-button|thread-toggle|thread-icon|thread-link)(-|$)/.test(
+                signature
+            )
+        ) {
+            return false;
+        }
+        return /(^|-)(comments?|discussion|conversation|responses?|replies|reviews?|threads?)(-|$)/.test(
+            signature
+        );
+    }
+
+    isDomPageAuxiliaryRootCandidate(element) {
+        if (!element || element.nodeType !== Node.ELEMENT_NODE || !element.isConnected) {
+            return false;
+        }
+        if (/^(HTML|BODY|SCRIPT|STYLE|NOSCRIPT|TEMPLATE|SVG|MATH)$/i.test(element.tagName)) {
+            return false;
+        }
+        if (
+            element.matches &&
+            element.matches("button,[role='button'],a,input,textarea,select,option")
+        ) {
+            return false;
+        }
+        if (
+            element.closest &&
+            element.closest("[role='banner'],[role='contentinfo'],[role='search']")
+        ) {
+            return false;
+        }
+        if (this.isDomPageWidgetElement(element)) return false;
+        return this.isDomPageCommentLikeElement(element);
+    }
+
+    isDomPageWidgetElement(element) {
+        let current = element;
+        while (current && current !== document.documentElement) {
+            const signature = this.getDomPageElementSignature(current);
+            if (
+                /(^|-)newsletter($|-)/.test(signature) ||
+                /(^|-)quill($|-)/.test(signature) ||
+                /(^|-)login($|-)/.test(signature) ||
+                /(^|-)follow($|-)/.test(signature) ||
+                /(^|-)(popup|modal)($|-)/.test(signature) ||
+                /(^|-)(sponsor|sponsored|promo|promotion)($|-)/.test(signature)
+            ) {
+                return true;
+            }
+            current = current.parentElement;
+        }
+        return false;
+    }
+
+    getDomPageCommentRootForElement(element) {
+        let current = element && (element.nodeType === Node.ELEMENT_NODE ? element : null);
+        let best = null;
+        while (current && current !== document.body && current !== document.documentElement) {
+            if (this.isDomPageAuxiliaryRootCandidate(current)) best = current;
+            current = current.parentElement;
+        }
+        return best;
+    }
+
+    getDomPageCommentRootsOutsideRoot(primaryRoot) {
+        const out = [];
+        let candidates = [];
+        try {
+            candidates = Array.from(
+                document.querySelectorAll(this.getDomPageCommentRootSelector())
+            );
+        } catch {
+            candidates = Array.from(
+                document.querySelectorAll(
+                    "[id],[class],[role],[aria-label],[data-testid],[data-test],[data-component]"
+                )
+            );
+        }
+        for (const candidate of candidates) {
+            const root = this.getDomPageCommentRootForElement(candidate);
+            if (!root || (primaryRoot && primaryRoot.contains(root))) continue;
+            if (out.some((existing) => existing === root || existing.contains(root))) continue;
+            const text = String(root.textContent || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            if (text.length < 20) continue;
+            for (let i = out.length - 1; i >= 0; i -= 1) {
+                if (root.contains(out[i])) out.splice(i, 1);
+            }
+            out.push(root);
+        }
+        return out.slice(0, 4);
     }
 
     getDomPagePrimaryContentRoot() {
@@ -537,8 +745,7 @@ class BannerController {
         const mains = Array.from(document.querySelectorAll("main, [role='main']")).filter(
             (el) => el.isConnected && textLen(el) >= 200
         );
-        // Only narrow when there is exactly one main region and it holds the bulk of the
-        // page text — otherwise we risk dropping real content on app-shell / multi-pane UIs.
+        // Only narrow when there is exactly one main region holding the bulk of the page text.
         if (mains.length === 1 && textLen(mains[0]) / bodyLen >= 0.35) return mains[0];
         return null;
     }
@@ -1186,16 +1393,24 @@ class BannerController {
 
     scheduleRealtimeCaptionOverlayHide(delay = this._captionHoldAfterMissingMs) {
         const overlay = this._captionOverlay;
-        if (!overlay || overlay.hidden) return;
-        this.clearRealtimeCaptionHideTimer();
+        if (this._captionHideTimer) return;
         this._captionHideTimer = setTimeout(() => {
             this._captionHideTimer = null;
             if (!this._captionModeEnabled) return;
-            overlay.style.opacity = "0";
-            overlay.hidden = true;
+            if (overlay) {
+                overlay.style.opacity = "0";
+                overlay.hidden = true;
+            }
             this._captionDisplayItems = [];
+            this._captionLastSource = "";
             this._captionRenderedSource = "";
+            this._captionPendingSource = "";
+            this._captionPendingSources = [];
+            this._captionVisibleSources = [];
+            this._captionVisibleSourceSeq = 0;
             this._captionLastDisplayedVisibleSeq = 0;
+            this._captionMergedReplacementSources.clear();
+            this._captionLastRequestId += 1;
         }, delay);
     }
 
@@ -1426,6 +1641,7 @@ class BannerController {
 
     shouldStabilizeRealtimeCaptionSource(sourceText, requestSourceText, options = {}) {
         if (!sourceText || !requestSourceText) return false;
+        if (!this.canUseRealtimeCaptionHistoryStabilization()) return false;
         const cacheKey = this.getRealtimeCaptionCacheKey(requestSourceText, options);
         if (this._captionTranslationCache.has(cacheKey)) return false;
         if (this.isRealtimeCaptionOpenEnded(sourceText)) return true;
@@ -1438,6 +1654,10 @@ class BannerController {
                     this.isRealtimeCaptionOpenEnded(entry.text) &&
                     !sourceText.includes(entry.text)
             );
+    }
+
+    canUseRealtimeCaptionHistoryStabilization() {
+        return this._captionPrefetchCues.length > 0;
     }
 
     waitForRealtimeCaptionStability(sourceText, requestSourceText) {
@@ -2378,12 +2598,22 @@ class BannerController {
         return true;
     }
 
-    wasRecentlyVisibleRealtimeCaptionSource(sourceText) {
+    wasRecentlyVisibleRealtimeCaptionSource(sourceText, maxAgeMs = this._captionStabilizeWindowMs) {
         const source = this.normalizeRealtimeCaptionVisibleSource(sourceText);
         if (!source) return false;
         const now = Date.now();
         return this._captionVisibleSources.some(
-            (entry) => now - entry.at <= this._captionStabilizeWindowMs && entry.text === source
+            (entry) => now - entry.at <= maxAgeMs && entry.text === source
+        );
+    }
+
+    canApplyRecentRealtimeCaptionSource(sourceText) {
+        return (
+            sourceText === this._captionLastSource ||
+            this.wasRecentlyVisibleRealtimeCaptionSource(
+                sourceText,
+                this._captionLateDisplayGraceMs
+            )
         );
     }
 
@@ -2451,7 +2681,10 @@ class BannerController {
                     !this._captionModeEnabled ||
                     this._captionRenderedSource === sourceText ||
                     (!this.isRealtimeCaptionRequestStillCurrent(sourceText) &&
-                        !this.wasRecentlyVisibleRealtimeCaptionSource(sourceText)) ||
+                        !this.wasRecentlyVisibleRealtimeCaptionSource(
+                            sourceText,
+                            this._captionLateDisplayGraceMs
+                        )) ||
                     !this.canDisplayRealtimeCaptionSource(sourceText)
                 ) {
                     return translated;
@@ -2627,15 +2860,7 @@ class BannerController {
             singleWindow: googleCaptionMode,
         });
         if (!sourceText) {
-            this._captionLastSource = "";
-            this._captionPendingSource = "";
-            this._captionPendingSources = [];
-            this._captionVisibleSources = [];
-            this._captionVisibleSourceSeq = 0;
-            this._captionLastDisplayedVisibleSeq = 0;
-            this._captionMergedReplacementSources.clear();
             this.clearRealtimeCaptionStabilizeTimer();
-            this._captionLastRequestId += 1;
             this.scheduleRealtimeCaptionOverlayHide();
             return;
         }
@@ -2726,10 +2951,8 @@ class BannerController {
             if (cached?.text) {
                 const allowExpandedReplacement =
                     this.shouldUseExpandedCaptionReplacement(sourceText);
-                if (
-                    !this.isRealtimeCaptionRequestStillCurrent(sourceText) &&
-                    !this.wasRecentlyVisibleRealtimeCaptionSource(sourceText)
-                ) {
+                const canApplyRecentCaption = this.canApplyRecentRealtimeCaptionSource(sourceText);
+                if (!canApplyRecentCaption && !allowExpandedReplacement) {
                     return;
                 }
                 if (
@@ -2752,9 +2975,7 @@ class BannerController {
                     options
                 );
                 const canApplyLateMerge = this.shouldUseExpandedCaptionReplacement(sourceText);
-                const canApplyRecentCaption =
-                    sourceText === this._captionLastSource ||
-                    this.wasRecentlyVisibleRealtimeCaptionSource(sourceText);
+                const canApplyRecentCaption = this.canApplyRecentRealtimeCaptionSource(sourceText);
                 if (
                     !this._captionModeEnabled ||
                     (!canApplyRecentCaption && !canApplyLateMerge) ||
@@ -2773,11 +2994,7 @@ class BannerController {
                     return;
                 }
                 this.cacheRealtimeCaptionTranslation(cacheKey, translated);
-                if (
-                    options.fastTranslatorId &&
-                    this._captionRenderedSource === sourceText &&
-                    !canApplyLateMerge
-                ) {
+                if (this._captionRenderedSource === sourceText && !canApplyLateMerge) {
                     return;
                 }
                 this.showRealtimeCaptionTranslatedText(translated, sourceText, {
@@ -2802,9 +3019,7 @@ class BannerController {
             };
             if (options.engine) request.engine = options.engine;
             const result = await this.channel.request("translate_text_quiet", request);
-            const canApplyRecentCaption =
-                sourceText === this._captionLastSource ||
-                this.wasRecentlyVisibleRealtimeCaptionSource(sourceText);
+            const canApplyRecentCaption = this.canApplyRecentRealtimeCaptionSource(sourceText);
             if (
                 !this._captionModeEnabled ||
                 !canApplyRecentCaption ||
@@ -2844,7 +3059,10 @@ class BannerController {
                     pendingSource &&
                     pendingSource !== sourceText &&
                     (pendingSource === this._captionLastSource ||
-                        this.wasRecentlyVisibleRealtimeCaptionSource(pendingSource))
+                        this.wasRecentlyVisibleRealtimeCaptionSource(
+                            pendingSource,
+                            this._captionLateDisplayGraceMs
+                        ))
                 ) {
                     this.translateRealtimeCaptionSource(pendingSource);
                 }
@@ -2888,24 +3106,83 @@ class BannerController {
         if (this.currentTranslator !== "dom") return;
         if (this._domCircuitBreakerActive) return;
         if (this._domCoverageScanTimer) return;
-        if (this._domCoverageScanCount >= 5) return;
-        if (this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1) return;
+        if (this._domCoverageScanCount >= 2) {
+            this.finalizeDomPageCoverageAfterScanLimit();
+            return;
+        }
+        if (this.isDomPageCoverageComplete()) return;
         this._domCoverageScanTimer = setTimeout(() => {
             this._domCoverageScanTimer = null;
             if (this.currentTranslator !== "dom") return;
             if (this._domCircuitBreakerActive) return;
             if (this._domTranslationQueue?.length || this._domActiveTranslations > 0) return;
-            if (this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1) {
-                return;
-            }
+            if (this.isDomPageCoverageComplete()) return;
             this._domCoverageScanCount += 1;
-            const enqueued = this.dispatchAiPageSections({ reason: "coverage" });
-            if (enqueued > 0) {
-                this._domCoverageStableScanCount = 0;
-            } else if (this.isDomPageTranslationComplete()) {
-                this._domCoverageStableScanCount += 1;
+            if (!this.isDomPageTranslationComplete()) return;
+            // Coverage is a short background gap-fill pass, not a second full-page collection.
+            // Late widgets/recommendations/newsletters can keep mutating for seconds; if we
+            // redispatch the whole root here, completion appears stuck and burns tokens.
+            this.sweepUntranslatedDomPageLeaves();
+            if (this._domGapCandidateElements && this._domGapCandidateElements.size) {
+                const reSwept = this.dispatchAiPageSections({
+                    reason: "sweep",
+                    gapOnly: true,
+                });
+                if (reSwept > 0) {
+                    this._domCoverageStableScanCount = 0;
+                    return;
+                }
             }
+            this._domCoverageStableScanCount += 1;
+            this.updateDomPageBannerStatus();
         }, 150);
+    }
+
+    finalizeDomPageCoverageAfterScanLimit() {
+        if (!this.isDomPageTranslationComplete()) return false;
+        if (this._domTranslationQueue?.length || this._domActiveTranslations > 0) return false;
+        this._domCoverageStableScanCount = Math.max(this._domCoverageStableScanCount || 0, 1);
+        this.updateDomPageBannerStatus();
+        return true;
+    }
+
+    // Final safety net for "translation complete but a block is still in the source language".
+    // Walks the translation roots for meaningful, not-yet-target text and un-marks its section
+    // so the next dispatch re-collects it (the eligibility walker then sends only the leaves
+    // that are still source text; cached ones are excluded). Two bounds guarantee convergence:
+    // a global sweep cap, and a per-element WeakSet so a block the model simply refuses to
+    // translate (e.g. all proper nouns) is swept at most once and then left as-is.
+    sweepUntranslatedDomPageLeaves() {
+        if ((this._domSweepCount || 0) >= 1) return false;
+        const targetLang = this._domPageTranslateOptions?.tl || "";
+        if (!this._domSweptElements) this._domSweptElements = new WeakSet();
+        let found = 0;
+        const maxFound = 8;
+        for (const root of this._domPageRootElements || []) {
+            if (!root || !root.isConnected) continue;
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (!this.isMeaningfulDomPageTextNode(node)) continue;
+                if (this.isDomPageTextAlreadyInTargetLanguage(node.nodeValue, targetLang)) continue;
+                const el = node.parentElement;
+                if (!el || this._domSweptElements.has(el)) continue;
+                if (
+                    !this.isElementMarkedAsTranslatedAiSection(el) &&
+                    !this.isElementRelatedToDomGapCandidate(el)
+                ) {
+                    continue;
+                }
+                this._domSweptElements.add(el);
+                this.addDomGapCandidateElement(el);
+                this.releaseAiPageSectionElement(el);
+                found += 1;
+                if (found >= maxFound) break;
+            }
+            if (found >= maxFound) break;
+        }
+        if (found) this._domSweepCount = (this._domSweepCount || 0) + 1;
+        return found > 0;
     }
 
     isDomPageTranslationComplete() {
@@ -2913,6 +3190,10 @@ class BannerController {
             this._domTotalTranslationEntries > 0 &&
             this._domCompletedTranslationEntries >= this._domTotalTranslationEntries
         );
+    }
+
+    isDomPageCoverageComplete() {
+        return this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1;
     }
 
     noteDomPageOwnMutation(durationMs = 900) {
@@ -3009,39 +3290,26 @@ class BannerController {
 
     isNodeInDomPageTranslationRoot(node) {
         if (!this._domPageRootElements || !this._domPageRootElements.length) return true;
-        return this._domPageRootElements.some((root) => root && root.contains(node));
+        if (this._domPageRootElements.some((root) => root && root.contains(node))) return true;
+        const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        return Boolean(this.getDomPageCommentRootForElement(element));
+    }
+
+    isDomPageAdChromeText(text) {
+        const value = String(text || "")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (!value) return false;
+        if (/^(?:ad|ads|advertisement|sponsored)$/i.test(value)) return true;
+        if (/\bremove\s+ads?\b/i.test(value)) return true;
+        if (/\b(?:googletag|adsbygoogle|doubleclick|googleadservices|adservice)\b/i.test(value)) {
+            return true;
+        }
+        return false;
     }
 
     isDomPageWidgetTextNode(node) {
-        let element = node && node.parentElement;
-        while (element && element !== document.documentElement) {
-            const className =
-                typeof element.className === "string"
-                    ? element.className
-                    : element.getAttribute && element.getAttribute("class");
-            const signature = [
-                element.id || "",
-                className || "",
-                element.getAttribute && element.getAttribute("role"),
-                element.getAttribute && element.getAttribute("aria-label"),
-            ]
-                .filter(Boolean)
-                .join(" ")
-                .toLowerCase();
-            const normalized = signature.replace(/[_\s]+/g, "-");
-            if (
-                /(^|-)newsletter($|-)/.test(normalized) ||
-                /(^|-)quill($|-)/.test(normalized) ||
-                /(^|-)login($|-)/.test(normalized) ||
-                /(^|-)follow($|-)/.test(normalized) ||
-                /(^|-)(popup|modal)($|-)/.test(normalized) ||
-                /(^|-)(ads?|advert|advertisement|sponsor|promo|promotion)($|-)/.test(normalized)
-            ) {
-                return true;
-            }
-            element = element.parentElement;
-        }
-        return false;
+        return this.isDomPageWidgetElement(node && node.parentElement);
     }
 
     // Text inside standard non-content ARIA landmarks (global nav, banner, footer, search)
@@ -3050,11 +3318,25 @@ class BannerController {
     isDomPageChromeTextNode(node) {
         const el = node && node.parentElement;
         if (!el || !el.closest) return false;
-        return Boolean(
-            el.closest(
-                "nav,footer,[role='navigation'],[role='banner'],[role='contentinfo'],[role='search']"
-            )
-        );
+        // Article comment systems are often mounted in an article <footer>. Treat those
+        // comment/thread subtrees as content, while keeping ordinary site footers excluded.
+        if (this.getDomPageCommentRootForElement(el)) return false;
+        // Skip the page footer, header banner, search box — repetitive site chrome.
+        if (el.closest("footer,[role='banner'],[role='contentinfo'],[role='search']")) {
+            return true;
+        }
+        // Interactive controls (Like / Log in / Share / AI-assistant prompt buttons) are UI
+        // chrome, not article prose — every such junk segment is one more marker the model can drop.
+        if (el.closest("button,[role='button']")) {
+            return true;
+        }
+        // Navigation: skip only SITE-LEVEL nav (outside the article/main content). An in-content
+        // TOC / breadcrumbs / "related" nav inside the article IS translated.
+        const nav = el.closest("nav,[role='navigation']");
+        if (nav && !nav.closest("main,article,[role='main'],[role='article']")) {
+            return true;
+        }
+        return false;
     }
 
     // Non-linguistic text never needs translation: pure numbers/symbols, and single tokens
@@ -3084,6 +3366,7 @@ class BannerController {
         if (text.length < 2) return false;
         const p = node.parentElement;
         if (!p) return false;
+        if (this.isDomPageAdChromeText(text)) return false;
         if (this.isDomPageWidgetTextNode(node)) return false;
         if (this.isLowValueDomPageText(text)) return false;
         if (this.isDomPageChromeTextNode(node)) return false;
@@ -3148,7 +3431,7 @@ class BannerController {
         const lang = String(targetLang || "")
             .toLowerCase()
             .split(/[-_]/)[0];
-        const pattern = BannerController._targetLangPatterns?.[lang];
+        const pattern = this.getDomPageTargetLanguagePattern(lang);
         if (!pattern) return false;
         const letters = value.match(pattern.letter);
         if (!letters || letters.length < 4) return false;
@@ -3281,20 +3564,41 @@ class BannerController {
     }
 
     async translateWithDomPageEngine(text, from, to, streamId = "") {
+        const engine = this._domPageTranslateOptions.engine;
+        if (this.isOnDeviceDomPageEngine(engine)) {
+            // Chrome's on-device APIs (Translator / Gemini Nano LanguageModel) live ONLY in the
+            // page's main world, not the background SW — so on-device page batches translate via
+            // the injected bridge instead of `translate_text_quiet`. The bridge preserves the
+            // `[[n]]` segment markers (per-segment translation), returning the same marked shape
+            // the apply step expects. No streamId: the bridge streams via postMessage, not the
+            // channel, so we await the final marked result (small batches keep paint incremental).
+            return await this.translateWithOnDeviceEngine(text, from, to, "");
+        }
         const payload = {
             text,
             sl: from,
             tl: to,
             translatorId: "LocalTranslate",
-            engine: this._domPageTranslateOptions.engine,
+            engine,
             translationProfile: "page",
         };
         if (streamId) payload.streamId = streamId;
         return await this.channel.request("translate_text_quiet", payload);
     }
 
+    isOnDeviceDomPageEngine(engine = this._domPageTranslateOptions?.engine) {
+        return engine === "chromeBuiltin" || engine === "geminiNano";
+    }
+
     isAiDomPageEngine(engine = this._domPageTranslateOptions?.engine) {
-        return engine === "googleAiStudio" || engine === "openai" || engine === "openaiCompatible";
+        // On-device (Gemini Nano) goes through the same `[[n]]` segment pipeline as the cloud AI
+        // engines — just translated locally — so it counts as an AI DOM engine here.
+        return (
+            engine === "googleAiStudio" ||
+            engine === "openai" ||
+            engine === "openaiCompatible" ||
+            this.isOnDeviceDomPageEngine(engine)
+        );
     }
 
     getDomPageTranslationGroupOptions() {
@@ -3384,9 +3688,14 @@ class BannerController {
         const engine = this._domPageTranslateOptions.engine;
         const failures = this._domBatchFailureCount;
         let base;
-        // openaiCompatible is hard-capped by the local server's `--parallel` slot count
-        // (typically 8). Going beyond that just queues at the server.
-        if (engine === "openaiCompatible") {
+        if (this.isOnDeviceDomPageEngine(engine)) {
+            // On-device Gemini Nano is a SINGLE local model — concurrent batches just queue on
+            // that model, with each request spinning up a cached session. Keep concurrency low
+            // so we pipeline the postMessage round-trips without thrashing the local model.
+            base = failures >= 1 ? 1 : 2;
+            // openaiCompatible is hard-capped by the local server's `--parallel` slot count
+            // (typically 8). Going beyond that just queues at the server.
+        } else if (engine === "openaiCompatible") {
             if (failures >= 3) base = 2;
             else if (failures >= 2) base = 4;
             else if (failures >= 1) base = 6;
@@ -3688,7 +3997,7 @@ class BannerController {
 
     isSuspiciousDomPageTranslation(sourceText, translatedText) {
         const source = String(sourceText || "").trim();
-        const translated = this.stripPromptEchoFromTranslation(translatedText);
+        const translated = this.sanitizeDomPageTranslationForSource(source, translatedText);
         if (!translated) return true;
 
         const sourceHasSubtitleCue = /\d{1,4}\s*\r?\n?\s*\d{2}:\d{2}:\d{2}[,.]?\d{3}\s*-->/i.test(
@@ -3753,6 +4062,8 @@ class BannerController {
         this._domPendingApplies = new Map();
         this._domNextApplySequence = 0;
         this._domNextApplyToFlush = 0;
+        this._aiSectionTranslatedChildren = new WeakSet();
+        this._aiSectionLeafRetries = new WeakMap();
         this._aiSectionLeadDispatched = false;
         this._aiSectionFirstDispatchHooksRan = false;
         this._aiSectionPersistentUrlHash = "";
@@ -3766,6 +4077,7 @@ class BannerController {
             this._domCoverageScanTimer = null;
         }
         this._domCoverageStableScanCount = 0;
+        this._domGapCandidateElements = null;
         this._domOwnMutationSuppressUntil = 0;
         this._pendingNodes.clear();
         if (this._scheduleBatch) {
@@ -3790,10 +4102,14 @@ class BannerController {
      * skips ones already translated this session, dedupes by cacheKey, and enqueues one
      * translation per section. No markers, no batching — each section is its own request.
      */
-    dispatchAiPageSections({ reason = "scan" } = {}) {
+    dispatchAiPageSections({ reason = "scan", gapOnly = false } = {}) {
         if (!this._aiSectionTranslatedChildren) {
             this._aiSectionTranslatedChildren = new WeakSet();
         }
+        const finishDispatch = (count) => {
+            if (gapOnly) this._domGapCandidateElements = null;
+            return count;
+        };
         // Side-effects we want on the very first dispatch of a translation session:
         //   - DNS prefetch + TCP preconnect for the AI engine's host so the TLS
         //     handshake overlaps with our section collection (~100-200ms saved).
@@ -3810,10 +4126,12 @@ class BannerController {
         let sections = collectHtmlPageSections(this._domPageRootElements, {
             maxChars: this.getAiPageSectionMaxChars(),
             minChars: this.getAiPageSectionMinChars(),
-            isEligibleElement: (element) => this.isAiPageSectionElementEligible(element),
+            isEligibleElement: (element) =>
+                (!gapOnly || this.isElementRelatedToDomGapCandidate(element)) &&
+                this.isAiPageSectionElementEligible(element),
             recurseNestedContainers: true,
         });
-        if (!sections.length) return 0;
+        if (!sections.length) return finishDispatch(0);
 
         // Lead-chunk fast path: on the very first dispatch of a translation session, split
         // the first section's children into a small prefix (~1-2k chars) so it completes
@@ -3832,8 +4150,10 @@ class BannerController {
         const enqueued = [];
         for (const section of sections) {
             // Skip sections whose children are all already translated.
-            const untranslatedChildren = section.children.filter((c) =>
-                this.isAiPageSectionElementEligible(c)
+            const untranslatedChildren = section.children.filter(
+                (c) =>
+                    (!gapOnly || this.isElementRelatedToDomGapCandidate(c)) &&
+                    this.isAiPageSectionElementEligible(c)
             );
             if (!untranslatedChildren.length) continue;
             const effectiveSection = {
@@ -3865,8 +4185,7 @@ class BannerController {
             // a plain-text [[n]] segment (text + attribute-free inline tags only — no
             // structural HTML). The model never sees or regenerates a single layout tag, so
             // the payload is small, generation is fast, and the reply can't break the page.
-            const segBlocks = [];
-            const segTexts = [];
+            const segLeaves = [];
             let cachedApplied = 0;
             for (const child of untranslatedChildren) {
                 for (const leaf of findLeafBlocksInElement(child)) {
@@ -3874,7 +4193,9 @@ class BannerController {
                     // already-target-language so a file name or commit hash riding inside an
                     // otherwise-translatable section never costs a segment.
                     if (!this.isAiPageSectionElementEligible(leaf)) continue;
-                    const text = serializeBlockSegment(leaf);
+                    if (gapOnly && !this.isElementRelatedToDomGapCandidate(leaf)) continue;
+                    const segment = serializeTranslationLeaf(leaf);
+                    const text = segment?.text || "";
                     if (!text) continue;
                     // Already translated this session (repeated string, SPA re-render, scroll
                     // back)? Apply straight from the per-string cache here — 0 tokens, instant —
@@ -3885,11 +4206,10 @@ class BannerController {
                         cachedApplied += 1;
                         continue;
                     }
-                    segBlocks.push(leaf);
-                    segTexts.push(text);
+                    segLeaves.push(segment);
                 }
             }
-            if (!segBlocks.length) {
+            if (!segLeaves.length) {
                 // Whole section came from cache — mark its children done so the rescan loop
                 // stops re-collecting them, then move on with no request at all.
                 if (cachedApplied) {
@@ -3900,17 +4220,17 @@ class BannerController {
                 }
                 continue;
             }
-            const sourceText = buildSegmentedTranslationText(
-                segTexts.map((text) => ({ text })),
-                { compactMarkers: true }
-            );
+            const irBatch = buildTranslationIrBatch(segLeaves, { compactMarkers: true });
+            const segBlocks = irBatch.segments.map((segment) => segment.element);
+            const segTexts = irBatch.segments.map((segment) => segment.text);
+            const sourceText = irBatch.text;
             const cacheKey = [
                 this._domPageTranslateOptions.engine,
                 model,
                 "seg",
                 sl,
                 tl,
-                fnv1a32(segTexts.join(" ")),
+                fnv1a32(segTexts.join("\0")),
             ].join("|");
             const entry = {
                 sectionMode: true,
@@ -3934,7 +4254,7 @@ class BannerController {
             }
             enqueued.push(entry);
         }
-        if (!enqueued.length) return 0;
+        if (!enqueued.length) return finishDispatch(0);
         this._domTotalTranslationEntries += enqueued.length;
         this._domCoverageStableScanCount = 0;
         this.updateDomPageBannerStatus();
@@ -3958,7 +4278,7 @@ class BannerController {
         this.buildAiPageSectionBatches(batchEntries).forEach((batch) =>
             this.enqueueAiPageSectionBatchTranslation(batch)
         );
-        return enqueued.length;
+        return finishDispatch(enqueued.length);
     }
 
     getAiPageSectionMaxChars() {
@@ -4062,6 +4382,27 @@ class BannerController {
         return false;
     }
 
+    addDomGapCandidateElement(element) {
+        if (!element || !element.isConnected) return;
+        if (!this._domGapCandidateElements) this._domGapCandidateElements = new Set();
+        this._domGapCandidateElements.add(element);
+    }
+
+    isElementRelatedToDomGapCandidate(element, candidates = this._domGapCandidateElements) {
+        if (!element || !candidates || !candidates.size) return false;
+        for (const candidate of candidates) {
+            if (!candidate || !candidate.isConnected) continue;
+            if (
+                element === candidate ||
+                (element.contains && element.contains(candidate)) ||
+                (candidate.contains && candidate.contains(element))
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     isAiPageSectionElementEligible(element) {
         if (!element || !element.isConnected) return false;
         if (this.isElementMarkedAsTranslatedAiSection(element)) return false;
@@ -4146,6 +4487,18 @@ class BannerController {
         const engine = this._domPageTranslateOptions.engine;
         const failures = this._domBatchFailureCount;
         let options;
+        if (this.isOnDeviceDomPageEngine(engine)) {
+            // On-device (Gemini Nano) translates each segment with its own sequential prompt
+            // call and the single local model serializes the work — so bundling many segments
+            // per batch buys nothing and just delays the first paint. Keep batches SMALL so the
+            // page fills in progressively as each handful of segments comes back.
+            return this.scaleAiPageSectionBatchOptions({
+                maxChars: 2400,
+                maxInputTokens: 900,
+                maxOutputTokens: 1200,
+                maxItems: failures >= 1 ? 2 : 4,
+            });
+        }
         if (engine === "openaiCompatible") {
             if (failures >= 2) {
                 options = {
@@ -4265,10 +4618,36 @@ class BannerController {
     // de-dupes segments already written so the final apply only fills the remainder.
     // Marks children translated, registers per-leaf originals for the hover tooltip
     // (once), and caches — but only after at least one segment has landed.
+    // Remove [[n]] segments whose translation is just the source echoed back (model failed to
+    // translate, or a polluted cache returned the original). Also trims bilingual
+    // "source + translation" answers down to the target-language chunk before anything can
+    // touch the DOM or cache. `map` keys are 1-based and align with entry.segBlocks[n-1] /
+    // entry.segTexts[n-1].
+    stripEchoSegmentsFromMap(map, entry) {
+        this.sanitizeAiPageSegmentMap(map, entry);
+    }
+
+    sanitizeAiPageSegmentMap(map, entry) {
+        if (!map || !map.size || !entry || !entry.segTexts) return;
+        for (const [n, content] of Array.from(map)) {
+            const sourceText = entry.segTexts[n - 1];
+            const sanitized = this.sanitizeAiPageSegmentTranslation(sourceText, content);
+            if (!sanitized) {
+                map.delete(n);
+            } else if (sanitized !== content) {
+                map.set(n, sanitized);
+            }
+        }
+    }
+
     applyAiPageSectionTranslation(entry, translatedText, appliedSet = null) {
         if (!entry || !entry.segBlocks || !entry.segBlocks.length) return false;
         const map = parsePageSegmentMap(translatedText);
+        // Drop source echoes (the model returned the original text) so the block isn't marked
+        // "done" in the source language — it stays eligible for retry/re-collection.
+        this.stripEchoSegmentsFromMap(map, entry);
         if (!map.size) return false;
+        if (appliedSet) entry._segAppliedSet = appliedSet;
         this.noteDomPageOwnMutation();
         // Synchronous mutation (optionally inside a View Transition) so `applied` is
         // settled before we read it.
@@ -4277,7 +4656,10 @@ class BannerController {
             applied = applyPageSegments(entry.segBlocks, map, 0, appliedSet);
         });
         this.storeEntrySegmentCache(entry, map);
-        return this.finalizeAppliedAiPageEntry(entry, translatedText, applied);
+        const cacheText = this.buildEntrySegmentCacheText(entry, map);
+        const ok = this.finalizeAppliedAiPageEntry(entry, cacheText, applied);
+        this.flagAiPageEntryPartialRetry(entry, appliedSet, ok);
+        return ok;
     }
 
     // Apply one entry's blocks out of a deduped global batch reply: each block resolves its
@@ -4297,7 +4679,38 @@ class BannerController {
         }
         this.storeEntrySegmentCache(entry, localMap);
         const cacheText = this.buildEntrySegmentCacheText(entry, localMap);
-        return this.finalizeAppliedAiPageEntry(entry, cacheText, applied);
+        const ok = this.finalizeAppliedAiPageEntry(entry, cacheText, applied);
+        this.flagAiPageEntryPartialRetry(entry, entry._segAppliedSet, ok);
+        return ok;
+    }
+
+    // How many of an entry's translatable leaves the model never returned a [[n]] segment for
+    // (so they're still in the source language). `appliedSet` holds the 1-based indices that
+    // DID land (applyPageSegments uses baseIndex + i + 1). Empty-text blocks need no translation.
+    countUnresolvedEntryBlocks(entry, appliedSet) {
+        if (!entry || !entry.segBlocks) return 0;
+        let count = 0;
+        for (let i = 0; i < entry.segBlocks.length; i += 1) {
+            const text = entry.segTexts && entry.segTexts[i];
+            if (!text || !String(text).trim()) continue;
+            if (appliedSet && appliedSet.has(i + 1)) continue;
+            count += 1;
+        }
+        return count;
+    }
+
+    // Flag an entry for a bounded "fill the gaps" retry when the model dropped some of its
+    // [[n]] markers. The retry re-sends ONLY the missing leaves (the applied ones are cached
+    // now), so it's cheap and the layout never shifts. The section is still marked translated,
+    // so a coverage scan won't ALSO re-collect it — this flag is the single gap-fill owner.
+    flagAiPageEntryPartialRetry(entry, appliedSet, finalized) {
+        if (!entry || !finalized) {
+            if (entry) entry._needsPartialRetry = false;
+            return;
+        }
+        entry._needsPartialRetry =
+            this.countUnresolvedEntryBlocks(entry, appliedSet) > 0 &&
+            (entry._partialApplyAttempts || 0) < (this._aiSectionMaxPartialRetries || 2);
     }
 
     // Apply a per-string-cache hit straight onto a single leaf at dispatch time — text-node
@@ -4311,15 +4724,17 @@ class BannerController {
         const original = String(leaf.textContent || "")
             .replace(/\s+/g, " ")
             .trim();
+        const cleanCachedText = this.sanitizeAiPageSegmentTranslation(original, cachedText);
+        if (!cleanCachedText) return false;
         this.noteDomPageOwnMutation();
         let applied = 0;
         runWithOptionalViewTransition(() => {
-            applied = applyPageSegments([leaf], new Map([[1, cachedText]]), 0, null);
+            applied = applyPageSegments([leaf], new Map([[1, cleanCachedText]]), 0, null);
         });
         if (!applied) return false;
         this._aiSectionTranslatedChildren.add(leaf);
         markElementTranslatedForRendering(leaf);
-        if (original) this.registerDomOriginalText(leaf, original);
+        if (original) this.registerDomOriginalTextOnce(leaf, original);
         return true;
     }
 
@@ -4334,8 +4749,12 @@ class BannerController {
             if (translation == null) continue;
             const text = entry.segTexts[i];
             if (!text) continue;
-            this.storeCachedSegmentText(text, translation);
-            saves.push({ key: this.persistentSegmentKey(text), value: translation });
+            // Skip source echoes and clean bilingual source+target payloads before they can
+            // pollute the in-memory OR persistent (IDB) cache.
+            const sanitized = this.sanitizeAiPageSegmentTranslation(text, translation);
+            if (!sanitized) continue;
+            this.storeCachedSegmentText(text, sanitized);
+            saves.push({ key: this.persistentSegmentKey(text), value: sanitized });
         }
         if (saves.length) {
             try {
@@ -4353,9 +4772,11 @@ class BannerController {
         const unitOf = entry.batchUnitOf;
         const cached = entry.batchCachedText;
         for (let i = 0; i < entry.segBlocks.length; i += 1) {
+            const source = entry.segTexts && entry.segTexts[i];
             // Session-cached block: resolve immediately, independent of the model reply.
             if (cached && cached[i] != null) {
-                local.set(i + 1, cached[i]);
+                const sanitized = this.sanitizeAiPageSegmentTranslation(source, cached[i]);
+                if (sanitized) local.set(i + 1, sanitized);
                 continue;
             }
             if (!globalMap || !globalMap.size) continue;
@@ -4363,7 +4784,13 @@ class BannerController {
             if (unit < 0) continue; // cache miss recorded but no fallback — skip
             if (unit + 1 > maxCompleteUnit) continue;
             const content = globalMap.get(unit + 1);
-            if (content != null) local.set(i + 1, content);
+            // Skip a source echo: the model returned the original text unchanged. Treating it as
+            // applied would mark the leaf "done" while it's still in the source language — instead
+            // leave it unresolved so it stays eligible and is retried/re-collected.
+            if (content != null) {
+                const sanitized = this.sanitizeAiPageSegmentTranslation(source, content);
+                if (sanitized) local.set(i + 1, sanitized);
+            }
         }
         return local;
     }
@@ -4387,13 +4814,35 @@ class BannerController {
         if (!this._aiSectionTranslatedChildren) {
             this._aiSectionTranslatedChildren = new WeakSet();
         }
+        if (!this._aiSectionLeafRetries) this._aiSectionLeafRetries = new WeakMap();
         entry._segApplied = (entry._segApplied || 0) + (appliedThisCall || 0);
         if (!entry._segApplied) {
             this.releaseAiPageSectionEntry(entry);
             return false;
         }
+        // A leaf whose [[n]] marker the model dropped is STILL in the source language. The old
+        // code marked the WHOLE section translated when ANY leaf applied, which hid the dropped
+        // leaf forever — the page read 100% with an English block (THE bug). Instead, leave any
+        // child that still holds a not-yet-exhausted dropped leaf UNMARKED so the coverage scan
+        // re-collects + re-sends just that leaf. Bound it per leaf so a block the model truly
+        // won't translate can't loop or hold the page below 100%.
+        const pendingLeaves = new Set();
+        for (let i = 0; i < entry.segBlocks.length; i += 1) {
+            const leaf = entry.segBlocks[i];
+            if (!leaf) continue;
+            const text = entry.segTexts && entry.segTexts[i];
+            if (!text || !String(text).trim()) continue;
+            if (entry._segAppliedSet && entry._segAppliedSet.has(i + 1)) continue; // applied
+            const tries = (this._aiSectionLeafRetries.get(leaf) || 0) + 1;
+            this._aiSectionLeafRetries.set(leaf, tries);
+            if (tries <= (this._aiSectionMaxPartialRetries || 2)) {
+                pendingLeaves.add(leaf);
+                this.addDomGapCandidateElement(leaf);
+            }
+        }
         for (const child of entry.section.children) {
             if (!child) continue;
+            if (pendingLeaves.size && this.elementContainsAnyLeaf(child, pendingLeaves)) continue;
             this._aiSectionTranslatedChildren.add(child);
             // content-visibility: auto lets off-screen translated regions skip
             // layout/paint until scrolled into view — huge win on long pages.
@@ -4405,13 +4854,23 @@ class BannerController {
             entry._registered = true;
             this.registerAiPageSectionOriginalTexts(entry, entry.originalCapture || [], 0);
         }
-        if (cacheText) {
+        if (cacheText && this.countUnresolvedEntryBlocks(entry, entry._segAppliedSet) === 0) {
             this.cacheDomPageTranslation(entry.cacheKey, cacheText);
             // Fire-forget save to the IDB-backed persistent cache so a revisit to
             // this URL paints instantly without re-translating.
             this.savePersistentTranslationCacheEntry(entry, cacheText);
         }
         return true;
+    }
+
+    // True when `element` is, or contains, any leaf in `leafSet`. Used to decide whether a
+    // section child still holds a dropped leaf and so must stay eligible.
+    elementContainsAnyLeaf(element, leafSet) {
+        if (!element || !leafSet || !leafSet.size) return false;
+        for (const leaf of leafSet) {
+            if (element === leaf || (element.contains && element.contains(leaf))) return true;
+        }
+        return false;
     }
 
     // Streaming partial apply for the single-section path: write whatever [[n]] segments
@@ -4429,6 +4888,7 @@ class BannerController {
         for (const [n, content] of full) {
             if (n <= maxComplete) ready.set(n, content);
         }
+        this.sanitizeAiPageSegmentMap(ready, entry);
         if (!ready.size) return;
         this.noteDomPageOwnMutation();
         applyPageSegments(entry.segBlocks, ready, 0, appliedSet);
@@ -4558,7 +5018,7 @@ class BannerController {
                 }
                 if (segmentTexts.length === 1) {
                     if (segmentTexts[0]) {
-                        this.registerDomOriginalText(transLeaf, segmentTexts[0]);
+                        this.registerDomOriginalTextOnce(transLeaf, segmentTexts[0]);
                     }
                     continue;
                 }
@@ -4568,7 +5028,7 @@ class BannerController {
                 const spanPair = Math.min(spans.length, segmentTexts.length);
                 for (let j = 0; j < spanPair; j += 1) {
                     if (spans[j] && segmentTexts[j]) {
-                        this.registerDomOriginalText(spans[j], segmentTexts[j]);
+                        this.registerDomOriginalTextOnce(spans[j], segmentTexts[j]);
                     }
                 }
             }
@@ -4586,7 +5046,7 @@ class BannerController {
         if (!element || !this._aiSectionTranslatedChildren) return;
         let current = element.nodeType === Node.ELEMENT_NODE ? element : element.parentElement;
         while (current && current !== document.documentElement) {
-            if (this._aiSectionTranslatedChildren.delete(current)) return;
+            this._aiSectionTranslatedChildren.delete(current);
             current = current.parentElement;
         }
     }
@@ -4688,6 +5148,15 @@ class BannerController {
                 if (!this.applyAiPageSectionTranslation(entry, translatedText, appliedSegments)) {
                     throw new Error("AI page section apply rejected.");
                 }
+                // Model dropped some [[n]] markers for this section → re-run to fill the gaps
+                // (bounded). Keep it out of the completed count until the gaps land.
+                if (entry._needsPartialRetry) {
+                    entry._partialApplyAttempts = (entry._partialApplyAttempts || 0) + 1;
+                    entry._needsPartialRetry = false;
+                    willRetry = true;
+                    if (!this._domTranslationQueue) this._domTranslationQueue = [];
+                    this._domTranslationQueue.unshift(run);
+                }
 
                 this.recordAiPageConcurrencyTelemetry({
                     durationMs: requestDurationMs,
@@ -4772,7 +5241,23 @@ class BannerController {
                 const uncachedEntries = [];
                 for (const entry of pendingEntries) {
                     const cached = this._domTranslationCache.get(entry.cacheKey);
-                    if (cached && this.applyAiPageSectionTranslation(entry, cached, null)) continue;
+                    if (cached) {
+                        if (!entry._segAppliedSet) entry._segAppliedSet = new Set();
+                        if (
+                            this.applyAiPageSectionTranslation(entry, cached, entry._segAppliedSet)
+                        ) {
+                            if (entry._needsPartialRetry) {
+                                this.logDomPageDebug("ai-section-cache:partial", {
+                                    blocks: this.countUnresolvedEntryBlocks(
+                                        entry,
+                                        entry._segAppliedSet
+                                    ),
+                                });
+                                uncachedEntries.push(entry);
+                            }
+                            continue;
+                        }
+                    }
                     uncachedEntries.push(entry);
                 }
                 pendingEntries = uncachedEntries;
@@ -4855,6 +5340,19 @@ class BannerController {
                             entries: batchEntryCount,
                         });
                         this.recordDomPageBatchSuccess();
+                    }
+                    // Heal dropped [[n]] markers: re-send ONLY the leaves the model skipped (the
+                    // applied ones are cached, so buildAiPageBatchPayload excludes them). This is
+                    // a successful request with a gap, NOT a failure — no batch-size penalty.
+                    const partialEntries = pendingEntries.filter((e) => e._needsPartialRetry);
+                    if (partialEntries.length) {
+                        for (const e of partialEntries) {
+                            e._partialApplyAttempts = (e._partialApplyAttempts || 0) + 1;
+                            e._needsPartialRetry = false;
+                        }
+                        this.enqueueAiPageSectionBatchTranslation(partialEntries, 0, {
+                            front: true,
+                        });
                     }
                 } else {
                     this.recordDomPageBatchSuccess();
@@ -5229,11 +5727,16 @@ class BannerController {
             this.releaseDomPageEntryPending(entry);
             return;
         }
+        const sanitized = this.sanitizeDomPageEntryTranslation(entry, translated);
+        if (!sanitized) {
+            this.releaseDomPageEntryPending(entry);
+            return;
+        }
         this.noteDomPageOwnMutation();
-        if (this.applyDomPageTranslatedEntry(entry, translated)) {
-            this.cacheDomPageTranslation(entry.cacheKey, translated);
+        if (this.applyDomPageTranslatedEntry(entry, sanitized)) {
+            this.cacheDomPageTranslation(entry.cacheKey, sanitized);
             this.markDomPageEntryApplied(entry);
-            this.fanOutDomPageDuplicates(entry, translated);
+            this.fanOutDomPageDuplicates(entry, sanitized);
         } else {
             this.releaseDomPageEntryPending(entry);
         }
@@ -5275,13 +5778,18 @@ class BannerController {
                 this.releaseDomPageEntryPending(dup);
                 continue;
             }
+            const sanitized = this.sanitizeDomPageEntryTranslation(dup, translated);
+            if (!sanitized) {
+                this.releaseDomPageEntryPending(dup);
+                continue;
+            }
             // Re-validate per duplicate: group.nodes differ, so split/segment checks must rerun.
-            const rejection = this.getDomPageEntryRejectionReason(dup, translated);
+            const rejection = this.getDomPageEntryRejectionReason(dup, sanitized);
             if (rejection) {
                 this.releaseDomPageEntryPending(dup);
                 continue;
             }
-            if (this.applyDomPageTranslatedEntry(dup, translated)) {
+            if (this.applyDomPageTranslatedEntry(dup, sanitized)) {
                 this.markDomPageEntryApplied(dup);
             } else {
                 this.releaseDomPageEntryPending(dup);
@@ -5301,12 +5809,28 @@ class BannerController {
      * sourceText is the full HTML payload including <t> tags.
      */
     getDomPageEntryRejectionReason(entry, translated) {
-        const source =
-            (entry.htmlMode && entry.plainText) || entry.wrappedPlainText || entry.sourceText;
+        const source = this.getDomPageEntryComparableSourceText(entry);
         if (!this.canUseDomPageTranslation(source, translated)) {
             return "suspicious-output";
         }
         return "";
+    }
+
+    getDomPageEntryComparableSourceText(entry) {
+        return (
+            (entry &&
+                ((entry.htmlMode && entry.plainText) ||
+                    entry.wrappedPlainText ||
+                    entry.sourceText)) ||
+            ""
+        );
+    }
+
+    sanitizeDomPageEntryTranslation(entry, translated) {
+        return this.sanitizeDomPageTranslationForSource(
+            this.getDomPageEntryComparableSourceText(entry),
+            translated
+        );
     }
 
     shouldUsePlainDomPageNodeFallback(entry, reason = "") {
@@ -5351,14 +5875,165 @@ class BannerController {
         );
     }
 
+    // Plain, case-folded text with segment markers + inline tags stripped, for comparing a
+    // "translation" against its source.
+    normalizeDomPageEchoText(text) {
+        return String(text || "")
+            .replace(/\[\[\d+(?::[a-z0-9-]+)?]]/gi, " ")
+            .replace(/<[^>]*>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+    }
+
+    getDomPageTargetLanguagePattern(targetLang = this._domPageTranslateOptions?.tl || "") {
+        const lang = String(targetLang || "")
+            .toLowerCase()
+            .split(/[-_]/)[0];
+        return BannerController._targetLangPatterns?.[lang] || null;
+    }
+
+    plainDomPageSegmentText(text) {
+        return String(text || "")
+            .replace(/\[\[\d+(?::[a-z0-9-]+)?]]/gi, " ")
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/(?:p|div|li|h[1-6]|blockquote|section|article)>/gi, "\n")
+            .replace(/<[^>]*>/g, " ")
+            .replace(/&nbsp;|&#160;/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    domPageTextContainsTargetLanguage(text, targetLang = this._domPageTranslateOptions?.tl || "") {
+        const pattern = this.getDomPageTargetLanguagePattern(targetLang);
+        if (!pattern) return false;
+        const plain = this.plainDomPageSegmentText(text);
+        const targets = plain.match(pattern.target);
+        return Boolean(targets && targets.length >= 4);
+    }
+
+    isLikelyUntargetedDomPageTranslation(sourceText, candidateText) {
+        const candidate = this.plainDomPageSegmentText(candidateText);
+        if (!candidate || candidate.length < 40) return false;
+        const candidateLatinWords = candidate.match(/[A-Za-z][A-Za-z0-9.+#-]{2,}/g) || [];
+        if (candidateLatinWords.length < 6) return false;
+
+        const source = this.plainDomPageSegmentText(sourceText);
+        const sourceLatinWords = source.match(/[A-Za-z][A-Za-z0-9.+#-]{2,}/g) || [];
+        if (sourceLatinWords.length >= 4) return true;
+
+        const candidateLetters = candidate.match(/[A-Za-z]/g) || [];
+        return candidateLetters.length >= 32;
+    }
+
+    splitPotentialBilingualTranslationChunks(text) {
+        const value = String(text || "")
+            .replace(/\r\n/g, "\n")
+            .trim();
+        if (!value) return [];
+        return value
+            .split(/(?:\n\s*){2,}|(?:<br\s*\/?>\s*){2,}/i)
+            .map((part) => part.trim())
+            .filter(Boolean);
+    }
+
+    isLikelyDomPageSourceEchoChunk(sourceText, candidateText) {
+        const source = this.normalizeDomPageEchoText(sourceText);
+        const candidate = this.normalizeDomPageEchoText(candidateText);
+        if (!source || !candidate) return false;
+        if (source === candidate) return true;
+        if (candidate.includes(source) && candidate.length > source.length + 20) return true;
+
+        const sourceTokens = source.match(/[a-z][a-z0-9.+#-]{2,}/g) || [];
+        const candidateTokens = candidate.match(/[a-z][a-z0-9.+#-]{2,}/g) || [];
+        if (sourceTokens.length < 4 || candidateTokens.length < 4) return false;
+        const sourceSet = new Set(sourceTokens);
+        const overlapping = candidateTokens.filter((token) => sourceSet.has(token));
+        const uniqueOverlap = new Set(overlapping).size;
+        return (
+            uniqueOverlap >= 4 &&
+            overlapping.length / candidateTokens.length >= 0.5 &&
+            uniqueOverlap / sourceSet.size >= 0.35
+        );
+    }
+
+    sanitizeDomPageTranslationForSource(sourceText, translatedText) {
+        let text = this.stripPromptEchoFromTranslation(translatedText);
+        if (!text || this.isDomPageSourceEchoTranslation(sourceText, text)) return "";
+
+        const targetLang = this._domPageTranslateOptions?.tl || "";
+        const hasTargetLanguage = this.domPageTextContainsTargetLanguage(text, targetLang);
+        if (
+            this.getDomPageTargetLanguagePattern(targetLang) &&
+            !hasTargetLanguage &&
+            this.isLikelyUntargetedDomPageTranslation(sourceText, text)
+        ) {
+            return "";
+        }
+        if (
+            this.getDomPageTargetLanguagePattern(targetLang) &&
+            !hasTargetLanguage &&
+            this.isLikelyDomPageSourceEchoChunk(sourceText, text)
+        ) {
+            return "";
+        }
+
+        const chunks = this.splitPotentialBilingualTranslationChunks(text);
+        if (chunks.length > 1 && this.getDomPageTargetLanguagePattern(targetLang)) {
+            const analyzed = chunks.map((chunk) => ({
+                raw: chunk,
+                hasTarget: this.domPageTextContainsTargetLanguage(chunk, targetLang),
+                sourceLike: this.isLikelyDomPageSourceEchoChunk(sourceText, chunk),
+            }));
+            const hasTargetChunk = analyzed.some((chunk) => chunk.hasTarget);
+            const hasSourceEchoChunk = analyzed.some(
+                (chunk) => chunk.sourceLike && !chunk.hasTarget
+            );
+            if (hasTargetChunk && hasSourceEchoChunk) {
+                const kept = analyzed
+                    .filter((chunk) => chunk.hasTarget || !chunk.sourceLike)
+                    .map((chunk) => chunk.raw);
+                if (kept.length && kept.length < analyzed.length) {
+                    text = kept.join("\n\n").trim();
+                }
+            }
+        }
+
+        if (!text || this.isDomPageSourceEchoTranslation(sourceText, text)) return "";
+        return text;
+    }
+
+    sanitizeAiPageSegmentTranslation(sourceText, translatedText) {
+        return this.sanitizeDomPageTranslationForSource(sourceText, translatedText);
+    }
+
+    // True when a cached "translation" is really just the SOURCE echoed back (a failed or
+    // skipped translation). Such a value must never be stored or applied: the per-string cache
+    // is GLOBAL across pages, so one echo would re-apply the ORIGINAL language onto every other
+    // page that shares the string — i.e. "the cache turned my translated text back into English".
+    isDomPageSourceEchoTranslation(sourceText, translation) {
+        const a = this.normalizeDomPageEchoText(sourceText);
+        const b = this.normalizeDomPageEchoText(translation);
+        return Boolean(a && b && a === b);
+    }
+
     getCachedSegmentText(text) {
         if (!text || !this._domSegmentTextCache) return null;
-        const value = this._domSegmentTextCache.get(this.segmentTextCacheKey(text));
-        return value == null ? null : value;
+        const key = this.segmentTextCacheKey(text);
+        const value = this._domSegmentTextCache.get(key);
+        if (value == null) return null;
+        // Drop or clean entries that earlier sessions may have stored — translate fresh instead
+        // of re-applying the source language, and trim bilingual source+target pollution.
+        const sanitized = this.sanitizeAiPageSegmentTranslation(text, value);
+        if (!sanitized) return null;
+        if (sanitized !== value) this._domSegmentTextCache.set(key, sanitized);
+        return sanitized;
     }
 
     storeCachedSegmentText(text, translation) {
         if (!text || translation == null || translation === "") return;
+        const sanitized = this.sanitizeAiPageSegmentTranslation(text, translation);
+        if (!sanitized) return;
         if (!this._domSegmentTextCache) this._domSegmentTextCache = new Map();
         const key = this.segmentTextCacheKey(text);
         // Re-insert to keep most-recent at the tail (simple insertion-order LRU).
@@ -5368,7 +6043,7 @@ class BannerController {
             const oldest = this._domSegmentTextCache.keys().next().value;
             if (oldest !== undefined) this._domSegmentTextCache.delete(oldest);
         }
-        this._domSegmentTextCache.set(key, translation);
+        this._domSegmentTextCache.set(key, sanitized);
     }
 
     // IndexedDB key for a string (global, cross-page/cross-session). "s|" namespaces it from
@@ -5487,6 +6162,7 @@ class BannerController {
     }
 
     applyDomPageTranslatedEntry(entry, translated) {
+        translated = this.sanitizeDomPageEntryTranslation(entry, translated);
         if (!translated) return false;
         if (entry.htmlMode && entry.htmlElement && entry.htmlElement.isConnected) {
             return this.applyDomPageHtmlNativeEntry(entry, translated);
@@ -5510,7 +6186,7 @@ class BannerController {
                 });
             }
             if (pendingUpdates.length > 0) {
-                this.registerDomOriginalText(block, entry.wrappedPlainText || entry.sourceText);
+                this.registerDomOriginalTextOnce(block, entry.wrappedPlainText || entry.sourceText);
                 this.fadeInDomPageBlock(block, () => {
                     for (const { node, text } of pendingUpdates) {
                         node.nodeValue = text;
@@ -5528,7 +6204,7 @@ class BannerController {
                 ""
             );
             if (!sanitized) return false;
-            this.registerDomOriginalText(block, entry.wrappedPlainText || entry.sourceText);
+            this.registerDomOriginalTextOnce(block, entry.wrappedPlainText || entry.sourceText);
             this.fadeInDomPageBlock(block, () => {
                 block.textContent = sanitized;
                 for (const node of wrappedNodes.values()) {
@@ -5589,9 +6265,11 @@ class BannerController {
     applyDomPageHtmlNativeEntry(entry, translated) {
         const block = entry.htmlElement;
         if (!block || !block.isConnected) return false;
+        const sourcePlain = entry.plainText || this.computeDomPageBlockPlainText(block);
+        translated = this.sanitizeDomPageTranslationForSource(sourcePlain, translated);
+        if (!translated) return false;
         const safeContainer = buildSafeTranslatedHtml(block, translated);
         if (!safeContainer) return false;
-        const sourcePlain = entry.plainText || this.computeDomPageBlockPlainText(block);
         const translatedPlain = String(safeContainer.textContent || "")
             .replace(/\s+/g, " ")
             .trim();
@@ -5603,7 +6281,7 @@ class BannerController {
         ) {
             return false;
         }
-        this.registerDomOriginalText(block, sourcePlain);
+        this.registerDomOriginalTextOnce(block, sourcePlain);
         this.fadeInDomPageBlock(block, () => {
             block.innerHTML = safeContainer.innerHTML;
             const textWalker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -5653,7 +6331,7 @@ class BannerController {
      * disappear from the page.
      */
     applyWithFadeIn(node, translated, type, originalText) {
-        translated = this.sanitizeDomPageTranslatedText(translated);
+        translated = this.sanitizeDomPageTranslationForSource(originalText, translated);
         if (!translated || !translated.trim()) return false;
         if (type === "text") {
             this.noteDomPageOwnMutation();
@@ -5985,6 +6663,11 @@ class BannerController {
             existing && !existing.includes(text) ? `${existing}\n\n${text}` : existing || text;
         this._domOriginalTextByElement.set(element, next);
         this.ensureDomOriginalTooltipHandlers();
+    }
+
+    registerDomOriginalTextOnce(element, originalText) {
+        if (!element || this._domOriginalTextByElement.get(element)) return;
+        this.registerDomOriginalText(element, originalText);
     }
 
     ensureDomOriginalTooltipHandlers() {
@@ -7280,13 +7963,15 @@ class BannerController {
         }
         const completed = Math.min(this._domCompletedTranslationEntries, total);
         const percent = Math.round((completed / total) * 100);
-        const nextState = completed >= total ? "complete" : "running";
+        const requestsComplete = completed >= total;
+        const nextState = requestsComplete ? "complete" : "running";
         if (last.state !== nextState) {
             refs.bar.dataset.state = nextState;
             last.state = nextState;
         }
-        const nextStatus =
-            completed >= total ? "Translation complete" : `${completed} of ${total} translated`;
+        const nextStatus = requestsComplete
+            ? "Translation complete"
+            : `${completed} of ${total} translated`;
         if (last.statusText !== nextStatus) {
             refs.status.textContent = nextStatus;
             last.statusText = nextStatus;
@@ -7566,27 +8251,10 @@ class BannerController {
             childList: true,
             characterData: true,
         });
-        // Wait for the scroll to settle, then dispatch the newly revealed content as one
-        // bundle rather than firing a fresh request set on every scroll tick. Once the page
-        // is fully translated AND stable, a plain scroll can't reveal anything new that's
-        // already in the DOM (the initial dispatch collected the whole root) — and genuinely
-        // lazy-loaded content fires a DOM mutation that the observer rescans on its own. So
-        // skip the redundant full-DOM walk while idle/complete.
-        this._domScrollScanHandler = () => {
-            if (this.isDomPageTranslationComplete() && this._domCoverageStableScanCount >= 1) {
-                return;
-            }
-            this.scheduleDomPageIncrementalScan(360);
-        };
-        window.addEventListener("scroll", this._domScrollScanHandler, {
-            passive: true,
-            capture: true,
-        });
-        document.addEventListener("scroll", this._domScrollScanHandler, {
-            passive: true,
-            capture: true,
-        });
-        window.addEventListener("resize", this._domScrollScanHandler, { passive: true });
+        // The AI section collector now scans the whole content root up front. A plain scroll
+        // cannot reveal uncollected text already in the DOM, and true infinite-scroll/lazy-load
+        // additions arrive through the MutationObserver above. Keeping a scroll-triggered
+        // incremental pass here made every scroll look like "more scan work" on long articles.
     }
 
     /**
@@ -7596,9 +8264,9 @@ class BannerController {
     translateBatchNodes(nodes) {
         if (this._domCircuitBreakerActive) return;
         // AI engines go through the section-level path: no markers, no per-block batching,
-        // one LLM call per semantic section, raw HTML in / raw HTML out. The text-node
-        // collection that fed this function is ignored — the section collector walks the
-        // root containers directly so the model sees full structural context.
+        // one IR batch per semantic section group. The text-node collection that fed this
+        // function is ignored — the section collector walks the root containers directly
+        // and sends compact text + inline markers, never page-controlled HTML.
         const engine = this._domPageTranslateOptions && this._domPageTranslateOptions.engine;
         if (this.isAiDomPageEngine(engine)) {
             this.dispatchAiPageSections();
@@ -7651,8 +8319,12 @@ class BannerController {
             entries.forEach((entry) => {
                 const cached = this._domTranslationCache.get(entry.cacheKey);
                 if (cached) {
-                    this.queueDomPageEntryApply(entry, cached);
-                    return;
+                    const sanitized = this.sanitizeDomPageEntryTranslation(entry, cached);
+                    if (sanitized) {
+                        this.queueDomPageEntryApply(entry, sanitized);
+                        return;
+                    }
+                    this._domTranslationCache.delete(entry.cacheKey);
                 }
                 uncachedEntries.push(entry);
             });
@@ -7879,6 +8551,10 @@ class BannerController {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
                 let translated = this._domTranslationCache.get(entry.cacheKey);
+                if (translated) {
+                    translated = this.sanitizeDomPageEntryTranslation(entry, translated);
+                    if (!translated) this._domTranslationCache.delete(entry.cacheKey);
+                }
                 if (!translated) {
                     const requestText = this.buildDomPageRoleSegmentText(entry);
                     const result = await this.translateWithDomPageEngine(requestText, sl, tl);
@@ -7971,6 +8647,10 @@ class BannerController {
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
                 const cacheKey = `${this._domPageTranslateOptions.engine}|${sl}|${tl}|${item.text}`;
                 let translated = this._domTranslationCache.get(cacheKey);
+                if (translated) {
+                    translated = this.sanitizeDomPageTranslationForSource(item.text, translated);
+                    if (!translated) this._domTranslationCache.delete(cacheKey);
+                }
                 if (!translated) {
                     const result = await this.translateWithDomPageEngine(item.text, sl, tl);
                     this.recordDomPageTokenUsage(result);
@@ -7987,6 +8667,7 @@ class BannerController {
                         throw new Error(result.errorMsg || "Page translation request failed.");
                     }
                     translated = result.mainMeaning || result.translatedText;
+                    translated = this.sanitizeDomPageTranslationForSource(item.text, translated);
                     if (!this.canUseDomPageTranslation(item.text, translated)) {
                         this.logDomPageDebug("node-request:rejected", {
                             reason: "suspicious-output",

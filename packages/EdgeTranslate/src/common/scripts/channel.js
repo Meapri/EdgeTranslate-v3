@@ -12,6 +12,17 @@ function formatChannelError(error) {
     }
 }
 
+function parseChannelMessage(message) {
+    if (!message) return null;
+    if (typeof message === "object") return message;
+    if (typeof message !== "string") return null;
+    try {
+        return JSON.parse(message);
+    } catch (_) {
+        return null;
+    }
+}
+
 /**
  * Channel for inter-context communication.
  *
@@ -42,7 +53,7 @@ class Channel {
          */
         chrome.runtime.onMessage.addListener(
             ((message, sender, callback) => {
-                let parsed = JSON.parse(message);
+                const parsed = parseChannelMessage(message);
 
                 if (!parsed || !parsed.type) {
                     return;
@@ -50,23 +61,34 @@ class Channel {
 
                 switch (parsed.type) {
                     case "event":
-                        this._eventManager.emit(parsed.event, parsed.detail, sender);
-                        callback && callback();
+                        try {
+                            this._eventManager.emit(parsed.event, parsed.detail, sender);
+                            callback && callback();
+                        } catch (error) {
+                            console.error("[EdgeTranslate]", formatChannelError(error));
+                            callback &&
+                                callback({
+                                    __edgeTranslateError: true,
+                                    message: formatChannelError(error),
+                                });
+                        }
                         break;
                     case "service": {
                         const server = this._services.get(parsed.service);
                         if (!server) break;
 
                         // We can call the callback only when we really provide the requested service.
-                        Promise.resolve(server(parsed.params, sender)).then(
-                            (result) => callback && callback(result),
-                            (error) =>
-                                callback &&
-                                callback({
-                                    __edgeTranslateError: true,
-                                    message: formatChannelError(error),
-                                })
-                        );
+                        Promise.resolve()
+                            .then(() => server(parsed.params, sender))
+                            .then(
+                                (result) => callback && callback(result),
+                                (error) =>
+                                    callback &&
+                                    callback({
+                                        __edgeTranslateError: true,
+                                        message: formatChannelError(error),
+                                    })
+                            );
                         return true;
                     }
                     default:
@@ -191,7 +213,8 @@ class Channel {
      * @returns {Function | null} message sender
      */
     _getTabMessageSender() {
-        if (FEATURE_FLAGS.useFirefoxTabMessaging) {
+        const featureFlags = typeof FEATURE_FLAGS !== "undefined" ? FEATURE_FLAGS : {};
+        if (featureFlags.useFirefoxTabMessaging) {
             if (!browser.tabs || !browser.tabs.sendMessage) {
                 return null;
             }

@@ -283,6 +283,7 @@ function isDictionaryCandidate(text) {
     const trimmed = String(text || "").trim();
     if (!trimmed || trimmed.length > 64) return false;
     if (/https?:\/\//i.test(trimmed)) return false;
+    if (/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/i.test(trimmed)) return false;
     if (/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(trimmed)) return false;
     if (/[.!?。！？\n\r\t]/.test(trimmed)) return false;
     if (/^[「『“"'].*[」』”"']\s*\S+/.test(trimmed)) return false;
@@ -656,6 +657,7 @@ async function warmupChromeOnDevice(from, to) {
 
 function stripSegmentMarkersForLanguageDetection(text) {
     return String(text || "")
+        .replace(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/gi, "\n")
         .replace(/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g, "\n")
         .replace(/\s+/g, " ")
         .trim();
@@ -718,7 +720,10 @@ async function detectGeminiNanoSourceLanguage(text, targetLanguage) {
 }
 
 function getSegmentMarkerPattern() {
-    return /<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=([a-z-]+))?>>>/gi;
+    // Recognize BOTH the page/caption pipeline's compact `[[n]]` / `[[n:role]]` markers and the
+    // legacy `<<<EDGE_TRANSLATE_SEGMENT_n>>>` form, so on-device segment translation preserves
+    // boundaries for page batches (which emit `[[n]]`).
+    return /\[\[(\d+)(?::([a-z][a-z0-9-]*))?]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=([a-z-]+))?>>>/gi;
 }
 
 function parseMarkedSegments(text) {
@@ -732,7 +737,7 @@ function parseMarkedSegments(text) {
         const end = next ? next.index : source.length;
         return {
             marker: match[0],
-            role: match[2] || "text",
+            role: match[2] || match[4] || "text",
             text: source.slice(start, end).trim(),
         };
     });
@@ -764,12 +769,16 @@ function restorePassthroughPunctuation(text, chars) {
 
 function unwrapSingleMarkedTranslation(translated) {
     const text = String(translated || "").trim();
-    const match = /^<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>\s*([\s\S]+)$/i.exec(text);
+    const match =
+        /^(?:\[\[\d+(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>)\s*([\s\S]+)$/i.exec(
+            text
+        );
     return match ? match[1].trim() : text;
 }
 
 function normalizeForCopiedSourceComparison(text) {
     return String(text || "")
+        .replace(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/gi, "")
         .replace(/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/gi, "")
         .replace(/\s+/g, " ")
         .trim();

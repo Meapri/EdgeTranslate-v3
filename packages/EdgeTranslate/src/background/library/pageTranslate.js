@@ -31,7 +31,9 @@ function translatePage(channel) {
             translator === "ChromeBuiltinPageTranslate"
         ) {
             const engine =
-                localConfig.mode === "openai" || localConfig.mode === "openaiCompatible"
+                localConfig.mode === "openai" ||
+                localConfig.mode === "openaiCompatible" ||
+                localConfig.mode === "chromeBuiltin"
                     ? localConfig.mode
                     : "googleAiStudio";
             const model =

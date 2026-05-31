@@ -147,7 +147,7 @@ describe("LocalTranslator multilingual quality prompts", () => {
         const combined = `${systemPrompt}\n${userPrompt}`;
         if (/\[\[\d+:[a-z][a-z0-9-]*]]|<<<EDGE_TRANSLATE_SEGMENT_\d+/.test(text)) {
             expect(userPrompt).toContain(`${from === "en" ? "English" : from}>`);
-            expect(systemPrompt).toContain("Translate page segments.");
+            expect(systemPrompt).toContain("Translate each [[n]] segment");
         } else {
             expect(userPrompt).toContain("Translate the user's text");
         }

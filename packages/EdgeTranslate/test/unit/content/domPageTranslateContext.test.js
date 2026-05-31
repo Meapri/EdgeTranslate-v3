@@ -1,16 +1,23 @@
 import {
     applyHtmlPageSection,
+    applyPageSegments,
     applyStreamedSectionChildren,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
     buildStrippedSectionHtml,
+    buildTranslationIrBatch,
     captureLeafSegmentTexts,
     captureLeafTextsFromElement,
     collectHtmlPageBlocks,
     collectHtmlPageSections,
+    collectTranslationLeaves,
+    findRemainingSourceLeaves,
     findLeafBlocksInElement,
     inferDomPageTextRole,
+    applyTranslationIrSegment,
+    parseTranslationIrReply,
+    serializeTranslationLeaf,
     splitLeafByLineBreaks,
     splitSegmentedTranslationText,
     splitTranslatedContext,
@@ -213,6 +220,139 @@ describe("DOM page translation context grouping", () => {
     });
 });
 
+describe("LLM translation IR primitives", () => {
+    it("collects content leaves while skipping page chrome, code, and target-language text", () => {
+        document.body.innerHTML = `
+            <header><h1>Site navigation title should stay out</h1></header>
+            <main id="main">
+                <article>
+                    <h1 id="title">KDE Plasma 6.7 is on the horizon</h1>
+                    <p id="intro">It is always useful to follow desktop environment development.</p>
+                    <pre><code>const version = "6.7";</code></pre>
+                    <p id="korean">이미 한국어로 번역된 문장입니다 그리고 충분히 깁니다.</p>
+                    <ul>
+                        <li id="item">Bug fixes landed before the release window closed.</li>
+                    </ul>
+                </article>
+            </main>
+            <footer><p id="footer">Subscribe to our newsletter.</p></footer>
+        `;
+
+        const leaves = collectTranslationLeaves([document.getElementById("main")], {
+            targetLanguage: "ko",
+        });
+
+        expect(leaves.map((leaf) => leaf.element.id)).toEqual(["title", "intro", "item"]);
+        expect(leaves.map((leaf) => leaf.role)).toEqual(["title", "paragraph", "list-item"]);
+    });
+
+    it("keeps article prose inside ad-insertion marker classes while skipping ad chrome", () => {
+        document.body.innerHTML = `
+            <main id="main">
+                <article>
+                    <section class="article-body adsninja-injected-repeatable-ad-beforeend">
+                        <p id="lead" class="adsninja-injected-repeatable-ad-afterend">
+                            This real article paragraph sits next to an inserted ad marker but should still translate.
+                        </p>
+                        <p id="ad">Remove Ads googletag.display('article-slot')</p>
+                        <p id="body">
+                            A second normal article paragraph should also remain in the translation payload.
+                        </p>
+                    </section>
+                </article>
+            </main>
+        `;
+
+        const leaves = collectTranslationLeaves([document.getElementById("main")]);
+
+        expect(leaves.map((leaf) => leaf.element.id)).toEqual(["lead", "body"]);
+    });
+
+    it("serializes inline content without exposing real DOM attributes", () => {
+        document.body.innerHTML = `
+            <p id="line">
+                Over on <a href="https://kde.org" class="external" data-track="1">the official news feed</a>, KDE announced it.
+            </p>
+        `;
+
+        const leaf = serializeTranslationLeaf(document.getElementById("line"));
+
+        expect(leaf.text).toBe("Over on <a>the official news feed</a>, KDE announced it.");
+        expect(leaf.text).not.toContain("href=");
+        expect(leaf.text).not.toContain("class=");
+        expect(leaf.text).not.toContain("data-track");
+        expect(leaf.plainText).toBe("Over on the official news feed, KDE announced it.");
+    });
+
+    it("builds a compact IR batch and reports partial parse diagnostics", () => {
+        document.body.innerHTML = `
+            <article>
+                <h1 id="title">Article title</h1>
+                <p id="body">Article body sentence.</p>
+            </article>
+        `;
+        const leaves = collectTranslationLeaves([document.querySelector("article")]);
+        const batch = buildTranslationIrBatch(leaves, { compactMarkers: true });
+
+        expect(batch.text).toBe("[[1]]\nArticle title\n[[2]]\nArticle body sentence.");
+        expect(batch.segments.map((segment) => segment.id)).toEqual([1, 2]);
+
+        const parsed = parseTranslationIrReply(
+            [
+                "Here is the translation:",
+                "[[1]]",
+                "기사 제목",
+                "[[3]]",
+                "알 수 없는 세그먼트",
+                "[[1]]",
+                "중복 제목",
+            ].join("\n"),
+            [1, 2]
+        );
+
+        expect(parsed.segments.get(1)).toBe("기사 제목");
+        expect(parsed.missingIds).toEqual([2]);
+        expect(parsed.unknownIds).toEqual([3]);
+        expect(parsed.duplicateIds).toEqual([1]);
+    });
+
+    it("applies an IR segment by mutating text only and preserving link attributes", () => {
+        document.body.innerHTML = `
+            <p id="line">Over on <a id="link" href="https://kde.org" class="external">the official news feed</a>, KDE announced it.</p>
+        `;
+        const paragraph = document.getElementById("line");
+        const link = document.getElementById("link");
+        const segment = serializeTranslationLeaf(paragraph);
+
+        expect(
+            applyTranslationIrSegment(
+                segment,
+                "KDE는 <a>공식 뉴스 피드</a>에서 이를 발표했습니다."
+            )
+        ).toBe(true);
+
+        expect(paragraph.textContent).toBe("KDE는 공식 뉴스 피드에서 이를 발표했습니다.");
+        expect(link.href).toBe("https://kde.org/");
+        expect(link.className).toBe("external");
+        expect(paragraph.querySelector("a")).toBe(link);
+    });
+
+    it("finds remaining source-language leaves for coverage verification", () => {
+        document.body.innerHTML = `
+            <main>
+                <p id="done">이미 한국어로 번역된 문장입니다 그리고 충분히 깁니다.</p>
+                <p id="gap">This English paragraph was left untranslated after a dropped marker.</p>
+            </main>
+        `;
+
+        const remaining = findRemainingSourceLeaves([document.querySelector("main")], {
+            targetLanguage: "ko",
+        });
+
+        expect(remaining.map((leaf) => leaf.element.id)).toEqual(["gap"]);
+    });
+});
+
 describe("HTML-native page block collector", () => {
     it("collects leaf-level translatable blocks and skips wrappers that contain them", () => {
         document.body.innerHTML = `
@@ -289,6 +429,20 @@ describe("HTML-native translation safety pipeline (buildSafeTranslatedHtml)", ()
             '안녕 <a href="javascript:alert(1)">링크</a>.'
         );
         expect(container).toBeNull();
+    });
+
+    it("applies a translation onto an inline-link block even when the text-node count differs", () => {
+        document.body.innerHTML = `<p id="lead">Over on the <a href="https://x">official news feed</a>, Valve announced it.</p>`;
+        const block = document.getElementById("lead");
+        // Original has 3 meaningful text nodes (before-link / link / after-link). EN→KO word order
+        // moves the link, so the model's reply is a single run (link flattened) — counts no longer
+        // match. The old apply REJECTED this and left the paragraph in English; now it writes the
+        // full translation onto the block's first direct run and blanks the rest.
+        const translated = "발브가 공식 뉴스 피드에서 발표했습니다.";
+        const applied = applyPageSegments([block], new Map([[1, translated]]), 0, null);
+        expect(applied).toBe(1);
+        expect(block.textContent).toContain("발표했습니다");
+        expect(block.textContent).not.toContain("Over on the");
     });
 
     it("restores critical attributes from the original block on matching tags", () => {

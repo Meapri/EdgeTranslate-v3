@@ -70,8 +70,6 @@
         return CHROME_TRANSLATOR_LANGUAGE_MAP[base] || base || raw;
     }
 
-
-
     async function detectChromeBuiltinLanguage(text, targetLanguage) {
         const detectorApi = window.LanguageDetector;
         if (!detectorApi || typeof detectorApi.create !== "function") {
@@ -101,7 +99,9 @@
 
         const translatorApi = window.Translator;
         if (!translatorApi || typeof translatorApi.create !== "function") {
-            throw new Error("Chrome built-in Translator API is not available in this browser context.");
+            throw new Error(
+                "Chrome built-in Translator API is not available in this browser context."
+            );
         }
         if (typeof translatorApi.availability === "function") {
             const availability = await translatorApi.availability({
@@ -185,7 +185,6 @@
             .replace(/^translation\s*:\s*/i, "")
             .trim();
     }
-
 
     function unescapeLooseJsonString(value) {
         return String(value || "")
@@ -464,6 +463,7 @@
 
     function stripSegmentMarkersForLanguageDetection(text) {
         return String(text || "")
+            .replace(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/gi, "\n")
             .replace(/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/g, "\n")
             .replace(/\s+/g, " ")
             .trim();
@@ -524,7 +524,10 @@
     }
 
     function getSegmentMarkerPattern() {
-        return /<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=([a-z-]+))?>>>/gi;
+        // Recognize BOTH the page/caption pipeline's compact `[[n]]` / `[[n:role]]` markers and
+        // the legacy `<<<EDGE_TRANSLATE_SEGMENT_n>>>` form, so on-device translation preserves
+        // segment boundaries for page batches (which emit `[[n]]`).
+        return /\[\[(\d+)(?::([a-z][a-z0-9-]*))?]]|<<<EDGE_TRANSLATE_SEGMENT_(\d+)(?:\s+role=([a-z-]+))?>>>/gi;
     }
 
     function parseMarkedSegments(text) {
@@ -538,7 +541,7 @@
             const end = next ? next.index : source.length;
             return {
                 marker: match[0],
-                role: match[2] || "text",
+                role: match[2] || match[4] || "text",
                 text: source.slice(start, end).trim(),
             };
         });
@@ -553,7 +556,10 @@
             if (current.length + p.length <= maxLen) {
                 current += p;
             } else {
-                if (current) { chunks.push(current); current = ""; }
+                if (current) {
+                    chunks.push(current);
+                    current = "";
+                }
                 if (p.length > maxLen) {
                     const lines = p.split(/(?<=\n)/);
                     for (const l of lines) {
@@ -611,14 +617,16 @@
 
     function unwrapSingleMarkedTranslation(translated) {
         const text = String(translated || "").trim();
-        const match = /^<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>\s*([\s\S]+)$/i.exec(
-            text
-        );
+        const match =
+            /^(?:\[\[\d+(?::[a-z][a-z0-9-]*)?]]|<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>)\s*([\s\S]+)$/i.exec(
+                text
+            );
         return match ? match[1].trim() : text;
     }
 
     function normalizeForCopiedSourceComparison(text) {
         return String(text || "")
+            .replace(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/gi, "")
             .replace(/<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/gi, "")
             .replace(/\s+/g, " ")
             .trim();
@@ -646,7 +654,6 @@
         return text;
     }
 
-
     async function promptGeminiNano(session, prompt, options = {}) {
         const { onUpdate, preferStreaming = true } = options;
         let promptSession;
@@ -658,7 +665,11 @@
         }
         try {
             const safeOnUpdate = (value) => {
-                try { onUpdate?.(value); } catch { /* isolate callback errors */ }
+                try {
+                    onUpdate?.(value);
+                } catch {
+                    /* isolate callback errors */
+                }
             };
             const readPrompt = async () => {
                 if (preferStreaming && typeof promptSession.promptStreaming === "function") {
@@ -744,7 +755,10 @@
             );
             const parsed = extractGeminiNanoTranslationText(output);
             return parsed
-                ? applyPostTranslationRules(removeCopiedSourceLines(parsed, inputText), targetLanguage)
+                ? applyPostTranslationRules(
+                      removeCopiedSourceLines(parsed, inputText),
+                      targetLanguage
+                  )
                 : parsed;
         };
 
@@ -773,15 +787,20 @@
                 );
                 const segResult = await promptAndParseChunked(segSafe, (partial) => {
                     const restored = restorePassthroughPunctuation(partial, segChars);
-                    const partialSegment = `${segment.marker}\n${unwrapSingleMarkedTranslation(restored)}`;
+                    const partialSegment = `${segment.marker}\n${unwrapSingleMarkedTranslation(
+                        restored
+                    )}`;
                     emitPartialResult([...translatedSegments, partialSegment].join("\n"));
                 });
-                if (!segResult) throw new Error("Chrome Gemini Nano returned an empty translation.");
+                if (!segResult)
+                    throw new Error("Chrome Gemini Nano returned an empty translation.");
                 const segTranslated = restorePassthroughPunctuation(
                     String(segResult).trim(),
                     segChars
                 );
-                translatedSegments.push(`${segment.marker}\n${unwrapSingleMarkedTranslation(segTranslated)}`);
+                translatedSegments.push(
+                    `${segment.marker}\n${unwrapSingleMarkedTranslation(segTranslated)}`
+                );
             }
             translated = translatedSegments.join("\n");
         } else {
