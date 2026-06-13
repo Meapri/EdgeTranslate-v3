@@ -230,61 +230,12 @@ function isExcludedHtmlSubtree(element) {
     return false;
 }
 
-function elementHasMeaningfulText(element, minLength = 2) {
-    if (!element) return false;
-    const text = normalizeBlockText(element.textContent);
-    return text.length >= minLength;
-}
-
 function elementHasNestedTranslatableBlock(element) {
     if (!element || !element.querySelector) return false;
     for (const tag of HTML_BLOCK_LEAF_TAGS) {
         if (element.querySelector(tag)) return true;
     }
     return false;
-}
-
-/**
- * Walk the DOM under `roots` and collect leaf-level translatable blocks. Each
- * returned descriptor is an HTML entry: the block element, its role marker,
- * the trimmed plain text (for cache keys + suspicious-translation detection),
- * and the innerHTML that will be sent to the model.
- */
-function collectHtmlPageBlocks(roots, options = {}) {
-    const seen = new WeakSet();
-    const skipExisting = options.skipExisting instanceof WeakSet ? options.skipExisting : null;
-    const blocks = [];
-    const sources = Array.isArray(roots) ? roots : [roots];
-    const selector = Array.from(HTML_BLOCK_LEAF_TAGS).join(",").toLowerCase();
-
-    for (const root of sources) {
-        if (!root || !root.querySelectorAll) continue;
-        if (root.tagName && HTML_BLOCK_LEAF_TAGS.has(root.tagName) && !seen.has(root)) {
-            considerHtmlBlock(root, blocks, seen, skipExisting);
-        }
-        root.querySelectorAll(selector).forEach((el) => {
-            if (!seen.has(el)) considerHtmlBlock(el, blocks, seen, skipExisting);
-        });
-    }
-    return blocks;
-}
-
-function considerHtmlBlock(element, out, seen, skipExisting) {
-    if (!element || !element.isConnected || seen.has(element)) return;
-    seen.add(element);
-    if (isExcludedHtmlSubtree(element)) return;
-    if (skipExisting && skipExisting.has(element)) return;
-    if (elementHasNestedTranslatableBlock(element)) return;
-    if (!elementHasMeaningfulText(element)) return;
-
-    const role = inferDomPageTextRole(element);
-    const plainText = normalizeBlockText(element.textContent);
-    out.push({
-        element,
-        role,
-        plainText,
-        innerHtml: element.innerHTML,
-    });
 }
 
 /**
@@ -351,11 +302,48 @@ const LEAF_BLOCK_TAG_SELECTOR = Array.from(LEAF_BLOCK_TAGS)
     .join(",");
 
 /**
+ * The text a leaf-block contributes ON ITS OWN — everything except the subtrees of
+ * nested LEAF_BLOCK descendants, which are separate leaves with their own segment.
+ * A list item like `<li>1990年（平成2年）<ul><li>…</li></ul></li>` owns "1990年（平成2年）";
+ * the sub-list is translated as its own leaf. Used to decide whether such a parent
+ * carries translatable text that would otherwise be dropped, and to capture the right
+ * hover original for it.
+ */
+function leafBlockOwnText(element) {
+    if (!element || !element.childNodes) return "";
+    let out = "";
+    const visit = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            out += node.nodeValue || "";
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const tag = String(node.tagName || "").toUpperCase();
+        if (LEAF_BLOCK_TAGS.has(tag)) return; // nested leaf-block = its own unit
+        if (HTML_BLOCK_EXCLUDE_TAGS.has(tag)) return;
+        for (const child of node.childNodes) visit(child);
+    };
+    for (const child of element.childNodes) visit(child);
+    return out;
+}
+
+function elementHasOwnLeafText(element) {
+    return normalizeBlockText(leafBlockOwnText(element)).length >= 2;
+}
+
+/**
  * Returns the leaf-level block-text elements inside `element` in document order.
- * A "leaf" is a block element that contains no nested LEAF_BLOCK_TAGS — exactly
- * the granularity we want for per-paragraph hover/original-text mapping.
+ * A "leaf" is normally a block element with no nested LEAF_BLOCK_TAGS — the
+ * granularity we want for per-paragraph hover/original-text mapping.
  *
- * If `element` itself is a leaf block (no block-level descendants), returns
+ * A block that has BOTH its own direct text AND nested leaf-blocks (e.g. a list
+ * item with a lead line plus a sub-list — pervasive in Wikipedia history/station
+ * lists) is ALSO returned: keeping only the innermost descendants would silently
+ * drop the parent's own line. Such a parent is serialized/applied over its OWN
+ * content only (nested leaf-blocks are skipped there), so its line and the sub-list
+ * each translate exactly once.
+ *
+ * If `element` itself is a leaf block with no block-level descendants, returns
  * [element] so callers can treat it uniformly.
  */
 function findLeafBlocksInElement(element) {
@@ -367,12 +355,21 @@ function findLeafBlocksInElement(element) {
         return text ? [element] : [];
     }
     const leaves = [];
+    // `element` itself may be a leaf-block that wraps nested leaf-blocks; in document
+    // order its own line comes first, so consider it before its descendants.
+    if (LEAF_BLOCK_TAGS.has(element.tagName) && elementHasOwnLeafText(element)) {
+        leaves.push(element);
+    }
     for (const node of descendants) {
         if (!LEAF_BLOCK_TAGS.has(node.tagName)) continue;
-        // Skip nodes that themselves contain a leaf-block descendant — only the
-        // innermost leaf earns a tooltip mapping.
-        if (node.querySelector(LEAF_BLOCK_TAG_SELECTOR)) continue;
         if (!String(node.textContent || "").trim()) continue;
+        if (node.querySelector(LEAF_BLOCK_TAG_SELECTOR)) {
+            // Non-innermost block: keep it only for its OWN direct line (its nested
+            // leaf-blocks are returned separately). Pure wrappers with no own text
+            // are skipped so we never emit an empty segment.
+            if (elementHasOwnLeafText(node)) leaves.push(node);
+            continue;
+        }
         leaves.push(node);
     }
     return leaves;
@@ -486,6 +483,140 @@ function wrapLeafLineSegmentsInSpans(element) {
     return spans;
 }
 
+// Sentence boundary detection across the writing systems we translate. A NUL marker is inserted at
+// each boundary, then callers split on it. Two rules avoid the classic false splits:
+//   - CJK enders (。．！？…‥ + optional closers) end a sentence immediately — CJK has no spaces.
+//   - Latin enders (.!? + optional closers) end a sentence ONLY when followed by whitespace, so a
+//     decimal ("3.14") or mid-word period never splits.
+const SENTENCE_BOUNDARY_MARK = "\u0000";
+function markSentenceBoundaries(text) {
+    return String(text || "")
+        .replace(/([。．！？…‥]+["”’」』）)\]]*)/g, `$1${SENTENCE_BOUNDARY_MARK}`)
+        .replace(/([.!?]+["')\]]*)(\s)/g, `$1${SENTENCE_BOUNDARY_MARK}$2`);
+}
+
+/**
+ * Split a string into sentences (Latin + CJK), used to give the hover-original tooltip
+ * sentence-level granularity instead of dumping a whole paragraph. Returns [text] when there is
+ * only one sentence.
+ */
+function splitTextIntoSentences(text) {
+    const value = String(text || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!value) return [];
+    const parts = markSentenceBoundaries(value)
+        .split(SENTENCE_BOUNDARY_MARK)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    return parts.length ? parts : [value];
+}
+
+/**
+ * In-place wrap each SENTENCE of a leaf's inline content in a
+ * <span data-edge-translate-segment> so the hover tooltip can show just the sentence the cursor is
+ * on. Text nodes are split at sentence boundaries (recreated — they carry no identity); inline
+ * elements (e.g. <a>) are MOVED whole into the current sentence's span so their attributes and
+ * event listeners survive. Returns the created spans in document order, or [] (leaving the DOM
+ * untouched) when the leaf is a single sentence or has no splittable text.
+ */
+function wrapLeafSentencesInSpans(element) {
+    if (!element || !element.ownerDocument || !element.childNodes) return [];
+    // Parent leaves (own line + a nested sub-list) must not be sentence-wrapped: the
+    // wrap moves whole child elements into spans, which would sweep the nested sub-list
+    // (a separate leaf) into the parent's sentence span. Such leaves keep whole-line
+    // hover only — their own line is short, so nothing is lost.
+    if (element.querySelector && element.querySelector(LEAF_BLOCK_TAG_SELECTOR)) return [];
+    // Descend to the element that actually CARRIES the text. Two common shapes put all
+    // of a leaf's text inside one inline descendant: styled wrappers
+    // (<p><span>whole paragraph</span></p>, ubiquitous on news sites) and the inline
+    // apply fallback, which writes the whole translation into the first text node —
+    // sometimes inside <a>/<b>. Splitting at the leaf level would see a single element
+    // child, produce one group, and bail to paragraph-level hover; splitting INSIDE the
+    // sole text carrier keeps its styling/attributes on every sentence span.
+    let host = element;
+    for (;;) {
+        let carrier = null;
+        let carriers = 0;
+        for (const node of host.childNodes) {
+            const text =
+                node.nodeType === Node.TEXT_NODE
+                    ? node.nodeValue
+                    : node.nodeType === Node.ELEMENT_NODE
+                    ? node.textContent
+                    : "";
+            if (String(text || "").trim()) {
+                carrier = node;
+                carriers += 1;
+                if (carriers > 1) break;
+            }
+        }
+        if (carriers !== 1 || !carrier || carrier.nodeType !== Node.ELEMENT_NODE) break;
+        if (HTML_BLOCK_EXCLUDE_TAGS.has(carrier.tagName)) return []; // code-like: never split
+        if (LEAF_BLOCK_TAGS.has(carrier.tagName)) return []; // nested block: not ours
+        host = carrier;
+    }
+    const ownerDocument = element.ownerDocument;
+    const originalChildren = Array.from(host.childNodes);
+    const groups = [];
+    let current = [];
+    const flush = () => {
+        if (current.length) {
+            groups.push(current);
+            current = [];
+        }
+    };
+    for (const child of originalChildren) {
+        if (child.nodeType === Node.TEXT_NODE) {
+            const pieces = markSentenceBoundaries(child.nodeValue || "").split(
+                SENTENCE_BOUNDARY_MARK
+            );
+            for (let i = 0; i < pieces.length; i += 1) {
+                if (pieces[i]) current.push(ownerDocument.createTextNode(pieces[i]));
+                // A boundary mark followed this piece (i.e. it is not the last piece of the node)
+                // → close the current sentence span here.
+                if (i < pieces.length - 1) flush();
+            }
+        } else {
+            // Inline element / <br> / etc.: keep it whole inside the current sentence. We MOVE the
+            // original node (no clone) so its attributes + event listeners survive.
+            current.push(child);
+        }
+    }
+    flush();
+    if (groups.length < 2) return [];
+
+    while (host.firstChild) host.removeChild(host.firstChild);
+    const spans = [];
+    for (const group of groups) {
+        const span = ownerDocument.createElement("span");
+        span.setAttribute("data-edge-translate-segment", "");
+        for (const node of group) span.appendChild(node);
+        host.appendChild(span);
+        spans.push(span);
+    }
+    return spans;
+}
+
+/**
+ * Map `translatedCount` translated-sentence spans onto `originalSentences` proportionally, so each
+ * translated sentence shows the original sentence(s) it most likely came from even when the model
+ * merged or split sentences (counts differ). When counts match this is a clean 1:1 pairing.
+ */
+function alignSentencesProportional(translatedCount, originalSentences) {
+    const originals = Array.isArray(originalSentences) ? originalSentences : [];
+    const total = originals.length;
+    const count = Math.max(1, translatedCount | 0);
+    if (!total) return new Array(count).fill("");
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+        const start = Math.min(total - 1, Math.floor((i * total) / count));
+        const end = Math.max(start + 1, Math.ceil(((i + 1) * total) / count));
+        out.push(originals.slice(start, Math.min(total, end)).join(" "));
+    }
+    return out;
+}
+
 /**
  * Combined per-leaf capture: for each leaf inside `child`, return
  *   { leafIndex, segmentTexts: [text1, text2, ...] }
@@ -497,13 +628,16 @@ function captureLeafSegmentTexts(child) {
     const leaves = findLeafBlocksInElement(child);
     const out = [];
     for (const leaf of leaves) {
-        const brSegments = splitLeafByLineBreaks(leaf);
+        // Parent leaves (own line + a nested sub-list) own only their direct line; the
+        // sub-list is captured under its own leaf. Use own-text so the hover original
+        // matches what was actually translated for this leaf, and skip <br> splitting
+        // (its segments would pull in the nested sub-list's text).
+        const hasNestedLeaf = leaf.querySelector && leaf.querySelector(LEAF_BLOCK_TAG_SELECTOR);
+        const brSegments = hasNestedLeaf ? [] : splitLeafByLineBreaks(leaf);
         if (brSegments.length >= 2) {
             out.push({ segmentTexts: brSegments.map((seg) => seg.text) });
         } else {
-            const text = String(leaf.textContent || "")
-                .replace(/\s+/g, " ")
-                .trim();
+            const text = normalizeBlockText(leafBlockOwnText(leaf));
             if (text) out.push({ segmentTexts: [text] });
             else out.push({ segmentTexts: [] });
         }
@@ -770,55 +904,6 @@ function isAlreadyInTargetLanguage(text, targetLanguage) {
     return false;
 }
 
-/**
- * Merge consecutive sections that share the same parent and whose combined
- * plainText fits under `mergeUntilChars`. Pages with lots of label-sized
- * sections (nav, settings, small cards) end up as one combined LLM request
- * instead of 10-20 round-trips.
- */
-function coalesceTinySections(sections, options = {}) {
-    if (!sections || sections.length < 2) return sections || [];
-    const mergeUntilChars = options.mergeUntilChars || 1800;
-    const tinyThreshold = options.tinyThreshold || 400;
-    const out = [];
-    let buffer = null;
-    let bufferChars = 0;
-    const flush = () => {
-        if (!buffer) return;
-        out.push(buffer);
-        buffer = null;
-        bufferChars = 0;
-    };
-    for (const section of sections) {
-        if (!section) continue;
-        const sectionChars = String(section.plainText || "").length;
-        const canMerge =
-            buffer &&
-            buffer.parent === section.parent &&
-            bufferChars + sectionChars <= mergeUntilChars;
-        if (canMerge) {
-            buffer = {
-                parent: buffer.parent,
-                children: [...buffer.children, ...section.children],
-                plainText: [buffer.plainText, section.plainText].filter(Boolean).join(" "),
-                role: buffer.role || section.role,
-            };
-            bufferChars += sectionChars;
-            continue;
-        }
-        if (sectionChars <= tinyThreshold) {
-            flush();
-            buffer = { ...section, children: section.children.slice() };
-            bufferChars = sectionChars;
-        } else {
-            flush();
-            out.push(section);
-        }
-    }
-    flush();
-    return out;
-}
-
 // Attributes the LLM doesn't need to see. Stripping these from outgoing HTML cuts prompt
 // size sharply on real pages (especially Tailwind/framework-heavy markup) without losing
 // semantic content. The originals are restored on apply via restoreHtmlCriticalAttributes,
@@ -977,7 +1062,12 @@ function topLevelChildrenMatch(originalChildren, translatedChildren) {
 // Collect an element's meaningful (non-whitespace-only) text nodes in document order.
 // This is the unit the model actually translates, and the only thing we ever mutate on
 // apply — element structure, attributes and event listeners are never touched.
-function collectMeaningfulTextNodes(element) {
+function collectMeaningfulTextNodes(element, options = {}) {
+    // excludeNestedLeafBlocks: drop text inside nested LEAF_BLOCK descendants. Set only for
+    // the ORIGINAL element on apply, where a parent leaf's nested blocks are separate leaves.
+    // It must NOT be set for the translated container: the model often wraps its reply in a
+    // block tag (`<p>…</p>`), and rejecting that text would drop the whole translation.
+    const excludeNestedLeafBlocks = options.excludeNestedLeafBlocks === true;
     const out = [];
     if (!element) return out;
     if (element.nodeType === Node.TEXT_NODE) {
@@ -994,7 +1084,12 @@ function collectMeaningfulTextNodes(element) {
             // serializeBlockSegment emitted — otherwise a single <code> span would desync the
             // positional mapping and drop the whole block.
             for (let p = node.parentElement; p && p !== element; p = p.parentElement) {
-                if (SEGMENT_UNMAPPED_TAGS.has(String(p.tagName || "").toUpperCase())) {
+                const tag = String(p.tagName || "").toUpperCase();
+                if (SEGMENT_UNMAPPED_TAGS.has(tag)) return NodeFilter.FILTER_REJECT;
+                // Nested LEAF_BLOCK: when `element` is a parent leaf (own line + a sub-list),
+                // its nested blocks are separate leaves, so their text is not collected here.
+                // (No-op for ordinary leaves, which never contain nested leaf-blocks.)
+                if (excludeNestedLeafBlocks && LEAF_BLOCK_TAGS.has(tag)) {
                     return NodeFilter.FILTER_REJECT;
                 }
             }
@@ -1015,6 +1110,21 @@ function preserveTextNodeBoundaryWhitespace(node, translated) {
     return `${lead}${translated}${trail}`;
 }
 
+// Boundary whitespace for a translated text node that borders inline siblings (links,
+// <b>, …). The MODEL'S reply is the authority on TARGET-language spacing, so honor the
+// space the model put around the run — NOT the original (source-language) node's spacing.
+// The old original-only rule was the "hyperlink eats the space" bug: a space-less source
+// (Japanese) stripped the spaces a spaced target (Korean) needs —
+// `京阪本線は<a>淀屋橋駅</a>` rendered `게이한 본선은요도야바시역` instead of
+// `게이한 본선은 요도야바시역`. Following the model also keeps the inverse correct
+// (en→ja drops the English spaces Japanese does not want around the link).
+function applyTranslatedBoundaryWhitespace(translatedNode, collapsedValue) {
+    const transRaw = String((translatedNode && translatedNode.nodeValue) || "");
+    const lead = /^\s/.test(transRaw) ? " " : "";
+    const trail = /\s$/.test(transRaw) ? " " : "";
+    return `${lead}${collapsedValue}${trail}`;
+}
+
 /**
  * THE fundamental-safety primitive for page translation: copy the model's translated
  * text onto the ORIGINAL element's text nodes, in document order, without ever touching
@@ -1029,19 +1139,23 @@ function preserveTextNodeBoundaryWhitespace(node, translated) {
  * broken page.
  */
 function applyTranslatedTextNodes(originalElement, translatedElement) {
-    const originals = collectMeaningfulTextNodes(originalElement);
+    const originals = collectMeaningfulTextNodes(originalElement, {
+        excludeNestedLeafBlocks: true,
+    });
     if (!originals.length) return false;
     const translations = collectMeaningfulTextNodes(translatedElement);
     if (!translations.length) return false;
 
     if (originals.length === translations.length) {
         // Exact structural match: map text node 1:1 so inline emphasis + links keep their
-        // translated text in place (the common, ideal case).
+        // translated text in place (the common, ideal case). Boundary whitespace follows the
+        // MODEL'S reply (target-language spacing) so a link's surrounding spaces survive on a
+        // space-less source (the ja→ko "hyperlink eats the space" bug).
         let wrote = false;
         for (let i = 0; i < originals.length; i += 1) {
             const value = normalizeBlockText(translations[i].nodeValue);
             if (!value) continue;
-            originals[i].nodeValue = preserveTextNodeBoundaryWhitespace(originals[i], value);
+            originals[i].nodeValue = applyTranslatedBoundaryWhitespace(translations[i], value);
             wrote = true;
         }
         return wrote;
@@ -1189,6 +1303,16 @@ function serializeBlockSegment(block) {
             buf.push(`</${lower}>`);
             return;
         }
+        if (LEAF_BLOCK_TAGS.has(tag)) {
+            // A NESTED leaf-block (only reachable when `block` is a parent leaf with its own
+            // line plus a sub-list): it is a separate leaf with its own segment, so emit a
+            // boundary if it splits two text runs and never its content. Mirrors how
+            // collectMeaningfulTextNodes excludes it on apply, keeping node counts aligned.
+            if (hasPayloadTextSibling(node, "previous") && hasPayloadTextSibling(node, "next")) {
+                buf.push("<wbr>");
+            }
+            return;
+        }
         // Structural / unknown element: drop the tag, keep its translatable text.
         for (const child of node.childNodes) walk(child);
     };
@@ -1251,6 +1375,15 @@ function applyPageSegments(blocks, segmentMap, baseIndex = 0, appliedSet = null)
         if (appliedSet && appliedSet.has(globalIndex)) continue;
         const segment = segmentMap.get(globalIndex);
         if (segment == null) continue;
+        // '=' keep-source sentinel (verified upstream): the block is already in the
+        // target language — count it RESOLVED with no DOM write. Without the applied
+        // count, an all-sentinel entry would report applied=0 and be released and
+        // re-dispatched forever.
+        if (String(segment).trim() === "=") {
+            if (appliedSet) appliedSet.add(globalIndex);
+            applied += 1;
+            continue;
+        }
         if (applyPageSegmentToBlock(blocks[i], segment)) {
             if (appliedSet) appliedSet.add(globalIndex);
             applied += 1;
@@ -1259,109 +1392,128 @@ function applyPageSegments(blocks, segmentMap, baseIndex = 0, appliedSet = null)
     return applied;
 }
 
-function isHiddenTranslationLeaf(element) {
-    if (!element || !element.closest) return false;
-    return Boolean(element.closest("[hidden],[aria-hidden='true']"));
+// ARIA roles (DPUB-ARIA) that unambiguously mark non-article apparatus.
+const BOILERPLATE_ROLE_VALUES = new Set([
+    "doc-bibliography",
+    "doc-biblioentry",
+    "doc-endnotes",
+    "doc-endnote",
+    "doc-noteref",
+    "doc-toc",
+]);
+
+// Generic id/class signatures of non-article "boilerplate" regions that bloat token usage on long
+// reference/encyclopedia pages: citation & footnote lists, navigation boxes, category links, the
+// table of contents, and inline edit links. Matched against a normalized id+class signature so it
+// generalizes across sites (MediaWiki/Wikipedia, doc frameworks, blogs) with no host hardcoding.
+const BOILERPLATE_SIGNATURE_RE =
+    /(^|-)(references?|citations?|footnotes?|endnotes?|bibliography|reflist|navbox|nav-box|navigation-box|navbar|navfoot|catlinks?|category-links|categories|toc|table-of-contents|editsection|edit-section|sister-projects?|see-also-nav)($|-)/;
+
+// Framework-specific signatures that are unambiguously non-article apparatus and never appear on
+// prose (e.g. <span class="mw-editsection">, <table class="navbox">). These may match on ANY tag,
+// unlike the generic tokens above which are container-gated to avoid prose false positives.
+const BOILERPLATE_STRONG_SIGNATURE_RE =
+    /(^|-)(mw-editsection|mw-references|mw-cite-backlink|reflist|navbox|catlinks|category-links)($|-)/;
+
+// Only CONTAINER elements may be flagged by a class/id signature — never a prose leaf. This keeps
+// an article paragraph like <p id="citations-in-ancient-rome"> or <h2 class="references-heading">
+// from being skipped: real boilerplate lives in a wrapping <ol>/<table>/<div>/<nav>, and its prose
+// children are caught via the ancestor walk in isBoilerplateRegion.
+const BOILERPLATE_CONTAINER_TAGS = new Set([
+    "OL",
+    "UL",
+    "DL",
+    "TABLE",
+    "THEAD",
+    "TBODY",
+    "TFOOT",
+    "NAV",
+    "ASIDE",
+    "SECTION",
+    "DIV",
+    "FOOTER",
+    "SUP",
+]);
+
+function regionSignature(element) {
+    const className =
+        typeof element.className === "string"
+            ? element.className
+            : (element.getAttribute && element.getAttribute("class")) || "";
+    return [element.id || "", className || ""]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .replace(/[_\s]+/g, "-");
 }
 
-function isChromeTranslationLeaf(element) {
-    if (!element || !element.closest) return false;
-    if (element.closest("script,style,noscript,template,svg,math,code,pre,kbd,samp")) {
-        return true;
-    }
-    if (element.closest("input,textarea,select,option,button,[role='button']")) return true;
-    if (element.closest("footer,[role='banner'],[role='contentinfo'],[role='search']")) {
-        return true;
-    }
-    const nav = element.closest("nav,[role='navigation']");
-    if (nav && !nav.closest("main,article,[role='main'],[role='article']")) return true;
-    return false;
+function elementMatchesBoilerplateSignature(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    const role = element.getAttribute && element.getAttribute("role");
+    if (role && BOILERPLATE_ROLE_VALUES.has(String(role).toLowerCase())) return true;
+    const signature = regionSignature(element);
+    if (!signature) return false;
+    // Framework-specific classes are safe to match on any element.
+    if (BOILERPLATE_STRONG_SIGNATURE_RE.test(signature)) return true;
+    // Generic tokens (references/citations/toc/…) only count on a CONTAINER — a prose leaf that
+    // merely mentions a keyword in its id/class (e.g. <p id="citations-in-ancient-rome">) must NOT
+    // be treated as boilerplate.
+    if (!BOILERPLATE_CONTAINER_TAGS.has(element.tagName)) return false;
+    return BOILERPLATE_SIGNATURE_RE.test(signature);
 }
 
-function isWidgetTranslationLeaf(element) {
-    let current = element;
-    while (current && current !== document.documentElement) {
-        const className =
-            typeof current.className === "string"
-                ? current.className
-                : current.getAttribute && current.getAttribute("class");
-        const signature = [
-            current.id || "",
-            className || "",
-            current.getAttribute && current.getAttribute("role"),
-            current.getAttribute && current.getAttribute("aria-label"),
-        ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-            .replace(/[_\s]+/g, "-");
-        if (
-            /(^|-)newsletter($|-)/.test(signature) ||
-            /(^|-)login($|-)/.test(signature) ||
-            /(^|-)follow($|-)/.test(signature) ||
-            /(^|-)(popup|modal)($|-)/.test(signature) ||
-            /(^|-)(sponsor|sponsored|promo|promotion)($|-)/.test(signature)
-        ) {
-            return true;
-        }
-        current = current.parentElement;
-    }
-    return false;
+// A leaf whose visible text is mostly hyperlink anchors AND that sits inside a table or navigation
+// region is almost always a navigation / related-links cell, not prose — common in navboxes and
+// "see also" link tables. We require SEVERAL links (≥3) so a short prose cell that happens to wrap
+// one or two long links is not mistaken for a navigation cell.
+function isDenseLinkNavLeaf(element) {
+    if (!element || !element.querySelectorAll || !element.closest) return false;
+    if (!element.closest("table,[role='navigation'],nav")) return false;
+    const total = normalizeBlockText(element.textContent).length;
+    if (total < 12) return false;
+    const anchors = element.querySelectorAll("a");
+    if (anchors.length < 3) return false;
+    let linkChars = 0;
+    anchors.forEach((anchor) => {
+        linkChars += normalizeBlockText(anchor.textContent).length;
+    });
+    return linkChars / total > 0.65;
 }
 
-function isAdChromeTranslationText(text) {
-    const value = String(text || "")
-        .replace(/\s+/g, " ")
-        .trim();
-    if (!value) return false;
-    if (/^(?:ad|ads|advertisement|sponsored)$/i.test(value)) return true;
-    if (/\bremove\s+ads?\b/i.test(value)) return true;
-    if (/\b(?:googletag|adsbygoogle|doubleclick|googleadservices|adservice)\b/i.test(value)) {
-        return true;
+// True when `element` is, or lives inside, a non-article boilerplate region. Used only when the
+// user opts into skipping boilerplate; default page translation still covers these regions.
+function isBoilerplateRegion(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    for (let el = element; el && el !== document.documentElement; el = el.parentElement) {
+        if (elementMatchesBoilerplateSignature(el)) return true;
     }
-    return false;
-}
-
-function isLowValueTranslationText(text) {
-    const value = String(text || "").trim();
-    if (!value) return true;
-    if (isAdChromeTranslationText(value)) return true;
-    if (!/\p{L}/u.test(value)) return true;
-    if (!/\s/.test(value)) {
-        if (/^(?:https?:\/\/|www\.|mailto:)/i.test(value)) return true;
-        if (/^[\w.-]+\.[a-z0-9]{1,8}$/i.test(value) && /[._-]/.test(value)) return true;
-        if (/^[0-9a-f]{7,40}$/i.test(value)) return true;
-        if (/^@?[\w-]+(?:\/[\w.-]+)+$/.test(value)) return true;
-        if (/^v?\d+(?:\.\d+){1,}(?:[-+][\w.]+)?$/i.test(value)) return true;
-    }
-    return false;
-}
-
-function isTranslationLeafEligible(element, options = {}) {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE || !element.isConnected) return false;
-    if (isExcludedHtmlSubtree(element)) return false;
-    if (isHiddenTranslationLeaf(element)) return false;
-    if (isChromeTranslationLeaf(element)) return false;
-    if (isWidgetTranslationLeaf(element)) return false;
-    if (elementHasNestedTranslatableBlock(element)) return false;
-    const plainText = normalizeBlockText(element.textContent);
-    if (plainText.length < (options.minTextLength || 2)) return false;
-    if (isLowValueTranslationText(plainText)) return false;
-    if (options.targetLanguage && isAlreadyInTargetLanguage(plainText, options.targetLanguage)) {
-        return false;
-    }
-    if (options.skipExisting instanceof WeakSet && options.skipExisting.has(element)) return false;
-    if (typeof options.isEligibleElement === "function" && !options.isEligibleElement(element)) {
-        return false;
-    }
-    return true;
+    return isDenseLinkNavLeaf(element);
 }
 
 function serializeTranslationLeaf(element, options = {}) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
-    const text = serializeBlockSegment(element);
-    const plainText = normalizeBlockText(element.textContent);
+    let text = serializeBlockSegment(element);
+    // Own-text (not full textContent): for a parent leaf the segment `text` covers only
+    // its direct line, so plainText must match — its nested sub-list is a separate leaf.
+    const plainText = normalizeBlockText(leafBlockOwnText(element));
     if (!text || !plainText) return null;
+    // Single-text-node leaf: inline tags in the payload exist ONLY to split the reply
+    // into positionally-mapped text nodes — with one node there is nothing to split.
+    // Strip them (the live DOM keeps its real elements; apply writes the node's value).
+    // Link-only rows, TOC entries and nav labels are the page's most numerous leaves,
+    // and the tag pair is paid TWICE (input + the model's echo) — measured ~22% of a
+    // wiki payload is inline tags, of which these contribute a meaningful slice.
+    if (/[<>]/.test(text)) {
+        const mappedNodes = collectMeaningfulTextNodes(element, {
+            excludeNestedLeafBlocks: true,
+        });
+        if (mappedNodes.length === 1) {
+            const collapsed = String(mappedNodes[0].nodeValue || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            if (collapsed) text = escapeSegmentHtml(collapsed);
+        }
+    }
     return {
         id: Number.isFinite(options.id) ? options.id : undefined,
         element,
@@ -1370,28 +1522,6 @@ function serializeTranslationLeaf(element, options = {}) {
         sourceText: text,
         plainText,
     };
-}
-
-function collectTranslationLeaves(roots, options = {}) {
-    const leaves = [];
-    const seen = new WeakSet();
-    const sources = Array.isArray(roots) ? roots : [roots];
-    const selector = Array.from(HTML_BLOCK_LEAF_TAGS).join(",").toLowerCase();
-    const consider = (element) => {
-        if (!element || seen.has(element)) return;
-        seen.add(element);
-        if (!isTranslationLeafEligible(element, options)) return;
-        const serialized = serializeTranslationLeaf(element);
-        if (serialized) leaves.push(serialized);
-    };
-
-    for (const root of sources) {
-        if (!root || root.nodeType !== Node.ELEMENT_NODE) continue;
-        if (HTML_BLOCK_LEAF_TAGS.has(root.tagName)) consider(root);
-        if (!root.querySelectorAll) continue;
-        root.querySelectorAll(selector).forEach(consider);
-    }
-    return leaves;
 }
 
 function getIrSegmentMarker(id, role, options = {}) {
@@ -1420,142 +1550,6 @@ function buildTranslationIrBatch(leaves, options = {}) {
         )
         .join("\n");
     return { segments, text, sourceText: text };
-}
-
-function normalizeExpectedIrIds(expectedIds) {
-    if (Array.isArray(expectedIds)) {
-        return expectedIds
-            .map((item) => (typeof item === "object" ? item.id : item))
-            .map((id) => Number(id))
-            .filter((id) => Number.isFinite(id) && id > 0);
-    }
-    const count = Number(expectedIds || 0);
-    if (!Number.isFinite(count) || count <= 0) return [];
-    return Array.from({ length: count }, (_, index) => index + 1);
-}
-
-function parseTranslationIrReply(translatedText, expectedIds = [], options = {}) {
-    const expected = normalizeExpectedIrIds(expectedIds);
-    const expectedSet = new Set(expected);
-    const allowUnknown = options.allowUnknown === true || expected.length === 0;
-    const text = String(translatedText || "");
-    const markerRe = /\[\[(\d+)(?::[a-z][a-z0-9-]*)?]]/gi;
-    const matches = [];
-    let match;
-    while ((match = markerRe.exec(text)) !== null) {
-        matches.push({ id: Number(match[1]), at: match.index, length: match[0].length });
-    }
-
-    const segments = new Map();
-    const duplicateIds = [];
-    const unknownIds = [];
-    for (let i = 0; i < matches.length; i += 1) {
-        const { id, at, length } = matches[i];
-        if (!Number.isFinite(id) || id < 1) continue;
-        const start = at + length;
-        const end = i + 1 < matches.length ? matches[i + 1].at : text.length;
-        const content = text.slice(start, end).trim();
-        if (!content) continue;
-        if (!allowUnknown && !expectedSet.has(id)) {
-            if (!unknownIds.includes(id)) unknownIds.push(id);
-            continue;
-        }
-        if (segments.has(id)) {
-            if (!duplicateIds.includes(id)) duplicateIds.push(id);
-            continue;
-        }
-        segments.set(id, content);
-    }
-
-    const missingIds = expected.filter((id) => !segments.has(id));
-    return {
-        segments,
-        missingIds,
-        duplicateIds,
-        unknownIds,
-        complete: missingIds.length === 0,
-    };
-}
-
-function applyTranslationIrSegment(segment, translatedText, options = {}) {
-    const element = segment?.element || segment?.block || segment?.leaf || null;
-    if (!element || !translatedText) return false;
-    return applyPageSegmentToBlock(element, translatedText, options);
-}
-
-function findRemainingSourceLeaves(roots, options = {}) {
-    return collectTranslationLeaves(roots, {
-        ...options,
-        targetLanguage: options.targetLanguage || options.tl || "",
-    });
-}
-
-/**
- * Streaming partial-section apply. Each time the SSE buffer grows, scan for the
- * latest closing tag matching one of the section's expected top-level child tags
- * and treat everything up to that point as "completed children". For each newly
- * completed child we write the translated text onto the original child's text
- * nodes (structure untouched) so the reader sees translations popcorn into place.
- *
- * Returns the new applied-count so the caller can persist it across stream
- * chunks. The function never re-applies an index it has already touched.
- */
-function applyStreamedSectionChildren(entry, accumulatedHtml, alreadyAppliedCount = 0) {
-    if (!entry || !entry.section || !accumulatedHtml) return alreadyAppliedCount;
-    const { parent, children } = entry.section;
-    if (!parent || !parent.isConnected) return alreadyAppliedCount;
-    if (alreadyAppliedCount >= children.length) return alreadyAppliedCount;
-
-    const expectedTags = Array.from(new Set(children.map((c) => c && c.tagName).filter(Boolean)));
-    if (!expectedTags.length) return alreadyAppliedCount;
-
-    // Find the furthest closing tag that matches a known top-level child tag —
-    // everything up to that point is structurally safe to parse.
-    let lastSafeEnd = -1;
-    for (const tag of expectedTags) {
-        const re = new RegExp(`</${tag}\\s*>`, "gi");
-        let match;
-        while ((match = re.exec(accumulatedHtml)) !== null) {
-            const end = match.index + match[0].length;
-            if (end > lastSafeEnd) lastSafeEnd = end;
-        }
-    }
-    if (lastSafeEnd <= 0) return alreadyAppliedCount;
-
-    const safeSlice = accumulatedHtml.slice(0, lastSafeEnd);
-    const ownerDocument = parent.ownerDocument;
-    const tempContainer = ownerDocument.createElement(parent.tagName);
-    try {
-        tempContainer.innerHTML = safeSlice;
-    } catch {
-        return alreadyAppliedCount;
-    }
-
-    const translatedChildren = Array.from(tempContainer.children);
-    if (translatedChildren.length <= alreadyAppliedCount) return alreadyAppliedCount;
-
-    if (!sanitizeTranslatedHtmlContainer(tempContainer)) return alreadyAppliedCount;
-
-    const refreshedChildren = Array.from(tempContainer.children);
-    const targetCount = Math.min(refreshedChildren.length, children.length);
-
-    let applied = alreadyAppliedCount;
-    for (let i = alreadyAppliedCount; i < targetCount; i += 1) {
-        const original = children[i];
-        if (!original || !original.parentElement) continue;
-        const translated = refreshedChildren[i];
-        if (!translated) continue;
-        if (original.tagName !== translated.tagName) return applied;
-
-        // Write the translated text onto the ORIGINAL child's text nodes. We never
-        // swap the element in, so its structure/attributes/listeners are untouched and
-        // the layout can't break. If the text-node counts diverge (model reshaped its
-        // markup), stop here and leave this + later children untranslated for now —
-        // the final full-section apply will retry the tail once the whole response is in.
-        if (!applyTranslatedTextNodes(original, translated)) return applied;
-        applied = i + 1;
-    }
-    return applied;
 }
 
 /**
@@ -1806,7 +1800,6 @@ export {
     applyHtmlPageSection,
     applyPageSegments,
     applyPageSegmentToBlock,
-    applyStreamedSectionChildren,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
@@ -1814,22 +1807,21 @@ export {
     buildTranslationIrBatch,
     captureLeafSegmentTexts,
     captureLeafTextsFromElement,
-    coalesceTinySections,
-    collectHtmlPageBlocks,
     collectHtmlPageSections,
-    collectTranslationLeaves,
-    findRemainingSourceLeaves,
     findLeafBlocksInElement,
+    leafBlockOwnText,
     inferDomPageTextRole,
     isAlreadyInTargetLanguage,
-    applyTranslationIrSegment,
+    isBoilerplateRegion,
     parsePageSegmentMap,
-    parseTranslationIrReply,
+    alignSentencesProportional,
     serializeBlockSegment,
     serializeTranslationLeaf,
     splitLeafByLineBreaks,
+    splitTextIntoSentences,
     splitSegmentedTranslationText,
     splitTranslatedContext,
     stripPresentationAttrs,
     wrapLeafLineSegmentsInSpans,
+    wrapLeafSentencesInSpans,
 };

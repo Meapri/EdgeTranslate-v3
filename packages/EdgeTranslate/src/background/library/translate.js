@@ -12,7 +12,49 @@ import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
 
 const GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS = 2;
-const LOCAL_AI_TRANSLATION_CACHE_VERSION = "local-ai-prompt-2026-06-25-04";
+const LOCAL_AI_TRANSLATION_CACHE_VERSION = "local-ai-prompt-2026-06-10-lean-v4";
+
+function fnv1a32Hash(str) {
+    let hash = 0x811c9dc5;
+    const value = String(str || "");
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = (hash * 0x01000193) >>> 0;
+    }
+    return hash.toString(36);
+}
+
+// Cheap, deterministic dominant-script detection. The AI translator's detect() returns "auto"
+// (an LLM round-trip just for detection is not worth it), which silently broke mutual-mode
+// language swapping and degraded TTS to English for AI translations. A Unicode-range scan
+// covers the common unambiguous scripts at zero latency; Latin-script languages stay "auto"
+// (indistinguishable without a model).
+function detectDominantScriptLanguage(text) {
+    const sample = String(text || "").slice(0, 400);
+    const letters = sample.match(/\p{L}/gu);
+    if (!letters || letters.length < 2) return "";
+    const total = letters.length;
+    const count = (re) => (sample.match(re) || []).length;
+    const hangul = count(/[가-힯ᄀ-ᇿ]/g);
+    const kana = count(/[぀-ゟ゠-ヿ]/g);
+    const han = count(/[㐀-䶿一-鿿]/g);
+    const cyrillic = count(/[Ѐ-ӿ]/g);
+    const arabic = count(/[؀-ۿ]/g);
+    const thai = count(/[฀-๿]/g);
+    const hebrew = count(/[֐-׿]/g);
+    const greek = count(/[Ͱ-Ͽ]/g);
+    const devanagari = count(/[ऀ-ॿ]/g);
+    if (hangul / total >= 0.5) return "ko";
+    if (kana / total >= 0.1 || (kana > 0 && (kana + han) / total >= 0.5)) return "ja";
+    if (han / total >= 0.5) return "zh-CN";
+    if (cyrillic / total >= 0.5) return "ru";
+    if (arabic / total >= 0.5) return "ar";
+    if (thai / total >= 0.5) return "th";
+    if (hebrew / total >= 0.5) return "he";
+    if (greek / total >= 0.5) return "el";
+    if (devanagari / total >= 0.5) return "hi";
+    return "";
+}
 
 function stripPronunciationDisplaySelections(config = {}) {
     const selections = { ...(config.selections || {}) };
@@ -962,6 +1004,26 @@ class TranslatorManager {
         );
     }
 
+    // Server-side re-enforcement of the selection-context budget. The content script already
+    // caps everything, but the background must not trust message payloads: type-check, strip
+    // control characters, and re-cap each field before anything reaches a prompt.
+    sanitizeSelectionContext(selectionContext, text = "") {
+        if (!selectionContext || typeof selectionContext !== "object") return null;
+        const clean = (value, max) =>
+            String(value || "")
+                // eslint-disable-next-line no-control-regex
+                .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, max);
+        const surrounding =
+            String(text || "").length >= 500 ? "" : clean(selectionContext.surrounding, 300);
+        const title = clean(selectionContext.title, 80);
+        const domain = clean(selectionContext.domain, 64);
+        if (!surrounding && !title && !domain) return null;
+        return { surrounding, title, domain };
+    }
+
     buildRoleSegmentText(text, role) {
         const normalizedRole = this.normalizeTextRole(role);
         return `<<<EDGE_TRANSLATE_SEGMENT_1 role=${normalizedRole}>>>\n${String(
@@ -1077,7 +1139,9 @@ class TranslatorManager {
                 sender,
                 params.textRole,
                 params.textSegments,
-                params.translationProfile
+                params.translationProfile,
+                params.overrideLang,
+                params.selectionContext
             )
         );
 
@@ -1517,7 +1581,16 @@ class TranslatorManager {
      *
      * @returns {Promise<void>} translate finished Promise
      */
-    async translate(text, position, sender, textRole, textSegments, translationProfile = "normal") {
+    async translate(
+        text,
+        position,
+        sender,
+        textRole,
+        textSegments,
+        translationProfile = "normal",
+        overrideLang = null,
+        selectionContext = null
+    ) {
         // Ensure that configurations have been initialized.
         await this.config_loader;
 
@@ -1543,14 +1616,24 @@ class TranslatorManager {
             timestamp,
         });
 
-        let sl = this.LANGUAGE_SETTING.sl;
-        let tl = this.LANGUAGE_SETTING.tl;
+        // An explicit override (e.g. the result panel's language picker) wins over the stored
+        // setting AND skips mutual-mode auto-swap — the user deliberately chose this target, and we
+        // must not depend on the async storage-change listener having updated LANGUAGE_SETTING yet.
+        let sl = (overrideLang && overrideLang.sl) || this.LANGUAGE_SETTING.sl;
+        let tl = (overrideLang && overrideLang.tl) || this.LANGUAGE_SETTING.tl;
 
         try {
-            if (sl !== "auto" && this.IN_MUTUAL_MODE) {
+            if (!overrideLang && sl !== "auto" && this.IN_MUTUAL_MODE) {
                 // mutual translate mode, detect language first.
                 // try cache first inside detect()
                 sl = await this.detect(text);
+                // AI translators return "auto" from detect() (no LLM round-trip just for
+                // detection), which silently disabled mutual swapping for AI translation.
+                // Recover with the zero-latency dominant-script heuristic so mutual pairs
+                // (KO↔JA, KO↔EN, …) work on AI engines too.
+                if (!sl || sl === "auto") {
+                    sl = detectDominantScriptLanguage(text) || "auto";
+                }
                 switch (sl) {
                     case this.LANGUAGE_SETTING.sl:
                         tl = this.LANGUAGE_SETTING.tl;
@@ -1573,7 +1656,20 @@ class TranslatorManager {
             const shouldWrapRole = false;
             const requestText = text;
             const expectedSegmentCount = 1;
-            const key = this.makeTranslateKey(requestText, sl, tl, translatorId);
+            // LLM-native extras for the AI path only: sanitized page context (sense
+            // disambiguation) and live SSE streaming into the result panel. Google/Bing
+            // call sites stay byte-identical (3-arg call, no context, no profile).
+            const isLocalAi = this.usesLocalMainTranslator(translatorId);
+            const aiContext = isLocalAi
+                ? this.sanitizeSelectionContext(selectionContext, requestText)
+                : null;
+            // Sense-aware caching: the same string can translate differently in different
+            // surroundings, so the context participates in the cache key via the profile
+            // component (AI path only — other translators keep their existing key shape).
+            const cacheProfile = aiContext?.surrounding
+                ? `selctx:${fnv1a32Hash(aiContext.surrounding)}`
+                : "";
+            const key = this.makeTranslateKey(requestText, sl, tl, translatorId, cacheProfile);
             const previousChromeBuiltinTabId = this.currentChromeBuiltinTabId;
             const previousTranslationStreamContext = this.currentTranslationStreamContext;
             this.currentChromeBuiltinTabId = currentTabId;
@@ -1592,13 +1688,45 @@ class TranslatorManager {
             let result;
             try {
                 // Try translation cache first
-                result = this.getTranslationFromCache(requestText, sl, tl, translatorId);
+                result = this.getTranslationFromCache(
+                    requestText,
+                    sl,
+                    tl,
+                    translatorId,
+                    cacheProfile
+                );
                 if (!result) {
                     if (this.inflightTranslate.has(key)) {
+                        // A duplicate concurrent request joins the in-flight one (it simply
+                        // doesn't get its own stream preview — the final result still lands).
                         result = await this.inflightTranslate.get(key);
                     } else {
-                        const promise = this.TRANSLATORS[translatorId]
-                            .translate(requestText, sl, tl)
+                        // Cloud SSE streaming for the selection panel: forward accumulated
+                        // text as preview frames through the existing stream pipeline. The
+                        // engine itself suppresses streaming for dictionary-JSON lookups.
+                        const streamContext = this.currentTranslationStreamContext;
+                        const localOptions = isLocalAi
+                            ? {
+                                  ...(aiContext ? { selectionContext: aiContext } : {}),
+                                  onProgress: (accumulated) => {
+                                      try {
+                                          this.emitTranslationStream(streamContext, accumulated);
+                                      } catch {
+                                          /* streaming is best-effort */
+                                      }
+                                  },
+                              }
+                            : null;
+                        const promise = (
+                            localOptions
+                                ? this.TRANSLATORS[translatorId].translate(
+                                      requestText,
+                                      sl,
+                                      tl,
+                                      localOptions
+                                  )
+                                : this.TRANSLATORS[translatorId].translate(requestText, sl, tl)
+                        )
                             .then((res) => {
                                 if (res)
                                     this.rememberTranslation(
@@ -1606,7 +1734,8 @@ class TranslatorManager {
                                         sl,
                                         tl,
                                         translatorId,
-                                        res
+                                        res,
+                                        cacheProfile
                                     );
                                 return res;
                             })
@@ -1637,12 +1766,13 @@ class TranslatorManager {
                         if (detected && detected !== "auto") {
                             actualSourceLanguage = detected;
                         } else {
-                            // Ultimate fallback: assume English for TTS compatibility
-                            actualSourceLanguage = "en";
+                            // AI translators detect() as "auto" — recover the TTS language
+                            // from the dominant script instead of degrading to English.
+                            actualSourceLanguage = detectDominantScriptLanguage(text) || "en";
                         }
                     } catch (e) {
-                        // If detection completely fails, assume English
-                        actualSourceLanguage = "en";
+                        // If detection completely fails, fall back by script, then English.
+                        actualSourceLanguage = detectDominantScriptLanguage(text) || "en";
                     }
                 }
             }
@@ -1842,4 +1972,4 @@ class TranslatorManager {
     }
 }
 
-export { TranslatorManager };
+export { TranslatorManager, detectDominantScriptLanguage };

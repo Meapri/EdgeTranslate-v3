@@ -1,7 +1,6 @@
 import {
     applyHtmlPageSection,
     applyPageSegments,
-    applyStreamedSectionChildren,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
@@ -9,14 +8,16 @@ import {
     buildTranslationIrBatch,
     captureLeafSegmentTexts,
     captureLeafTextsFromElement,
-    collectHtmlPageBlocks,
     collectHtmlPageSections,
-    collectTranslationLeaves,
-    findRemainingSourceLeaves,
     findLeafBlocksInElement,
+    leafBlockOwnText,
     inferDomPageTextRole,
-    applyTranslationIrSegment,
-    parseTranslationIrReply,
+    isBoilerplateRegion,
+    applyPageSegmentToBlock,
+    splitTextIntoSentences,
+    wrapLeafSentencesInSpans,
+    alignSentencesProportional,
+    serializeBlockSegment,
     serializeTranslationLeaf,
     splitLeafByLineBreaks,
     splitSegmentedTranslationText,
@@ -221,53 +222,6 @@ describe("DOM page translation context grouping", () => {
 });
 
 describe("LLM translation IR primitives", () => {
-    it("collects content leaves while skipping page chrome, code, and target-language text", () => {
-        document.body.innerHTML = `
-            <header><h1>Site navigation title should stay out</h1></header>
-            <main id="main">
-                <article>
-                    <h1 id="title">KDE Plasma 6.7 is on the horizon</h1>
-                    <p id="intro">It is always useful to follow desktop environment development.</p>
-                    <pre><code>const version = "6.7";</code></pre>
-                    <p id="korean">이미 한국어로 번역된 문장입니다 그리고 충분히 깁니다.</p>
-                    <ul>
-                        <li id="item">Bug fixes landed before the release window closed.</li>
-                    </ul>
-                </article>
-            </main>
-            <footer><p id="footer">Subscribe to our newsletter.</p></footer>
-        `;
-
-        const leaves = collectTranslationLeaves([document.getElementById("main")], {
-            targetLanguage: "ko",
-        });
-
-        expect(leaves.map((leaf) => leaf.element.id)).toEqual(["title", "intro", "item"]);
-        expect(leaves.map((leaf) => leaf.role)).toEqual(["title", "paragraph", "list-item"]);
-    });
-
-    it("keeps article prose inside ad-insertion marker classes while skipping ad chrome", () => {
-        document.body.innerHTML = `
-            <main id="main">
-                <article>
-                    <section class="article-body adsninja-injected-repeatable-ad-beforeend">
-                        <p id="lead" class="adsninja-injected-repeatable-ad-afterend">
-                            This real article paragraph sits next to an inserted ad marker but should still translate.
-                        </p>
-                        <p id="ad">Remove Ads googletag.display('article-slot')</p>
-                        <p id="body">
-                            A second normal article paragraph should also remain in the translation payload.
-                        </p>
-                    </section>
-                </article>
-            </main>
-        `;
-
-        const leaves = collectTranslationLeaves([document.getElementById("main")]);
-
-        expect(leaves.map((leaf) => leaf.element.id)).toEqual(["lead", "body"]);
-    });
-
     it("serializes inline content without exposing real DOM attributes", () => {
         document.body.innerHTML = `
             <p id="line">
@@ -284,102 +238,21 @@ describe("LLM translation IR primitives", () => {
         expect(leaf.plainText).toBe("Over on the official news feed, KDE announced it.");
     });
 
-    it("builds a compact IR batch and reports partial parse diagnostics", () => {
+    it("builds a compact IR batch with sequential markers", () => {
         document.body.innerHTML = `
             <article>
                 <h1 id="title">Article title</h1>
                 <p id="body">Article body sentence.</p>
             </article>
         `;
-        const leaves = collectTranslationLeaves([document.querySelector("article")]);
+        const leaves = [
+            { element: document.getElementById("title") },
+            { element: document.getElementById("body") },
+        ];
         const batch = buildTranslationIrBatch(leaves, { compactMarkers: true });
 
         expect(batch.text).toBe("[[1]]\nArticle title\n[[2]]\nArticle body sentence.");
         expect(batch.segments.map((segment) => segment.id)).toEqual([1, 2]);
-
-        const parsed = parseTranslationIrReply(
-            [
-                "Here is the translation:",
-                "[[1]]",
-                "기사 제목",
-                "[[3]]",
-                "알 수 없는 세그먼트",
-                "[[1]]",
-                "중복 제목",
-            ].join("\n"),
-            [1, 2]
-        );
-
-        expect(parsed.segments.get(1)).toBe("기사 제목");
-        expect(parsed.missingIds).toEqual([2]);
-        expect(parsed.unknownIds).toEqual([3]);
-        expect(parsed.duplicateIds).toEqual([1]);
-    });
-
-    it("applies an IR segment by mutating text only and preserving link attributes", () => {
-        document.body.innerHTML = `
-            <p id="line">Over on <a id="link" href="https://kde.org" class="external">the official news feed</a>, KDE announced it.</p>
-        `;
-        const paragraph = document.getElementById("line");
-        const link = document.getElementById("link");
-        const segment = serializeTranslationLeaf(paragraph);
-
-        expect(
-            applyTranslationIrSegment(
-                segment,
-                "KDE는 <a>공식 뉴스 피드</a>에서 이를 발표했습니다."
-            )
-        ).toBe(true);
-
-        expect(paragraph.textContent).toBe("KDE는 공식 뉴스 피드에서 이를 발표했습니다.");
-        expect(link.href).toBe("https://kde.org/");
-        expect(link.className).toBe("external");
-        expect(paragraph.querySelector("a")).toBe(link);
-    });
-
-    it("finds remaining source-language leaves for coverage verification", () => {
-        document.body.innerHTML = `
-            <main>
-                <p id="done">이미 한국어로 번역된 문장입니다 그리고 충분히 깁니다.</p>
-                <p id="gap">This English paragraph was left untranslated after a dropped marker.</p>
-            </main>
-        `;
-
-        const remaining = findRemainingSourceLeaves([document.querySelector("main")], {
-            targetLanguage: "ko",
-        });
-
-        expect(remaining.map((leaf) => leaf.element.id)).toEqual(["gap"]);
-    });
-});
-
-describe("HTML-native page block collector", () => {
-    it("collects leaf-level translatable blocks and skips wrappers that contain them", () => {
-        document.body.innerHTML = `
-            <article>
-                <h1>Title here</h1>
-                <p>First paragraph with <strong>inline emphasis</strong>.</p>
-                <p>Second paragraph linking to <a href="https://example.com/x">example</a>.</p>
-                <ul>
-                    <li>List item one</li>
-                    <li>List item two</li>
-                </ul>
-                <script>console.log("skip me");</script>
-                <pre><code>code.snippet()</code></pre>
-            </article>
-        `;
-        const blocks = collectHtmlPageBlocks([document.body]);
-        const tags = blocks.map((b) => b.element.tagName);
-        expect(tags).toEqual(["H1", "P", "P", "LI", "LI"]);
-        expect(blocks[1].plainText).toContain("First paragraph");
-        expect(blocks[1].innerHtml).toContain("<strong>inline emphasis</strong>");
-        expect(blocks[2].innerHtml).toContain('href="https://example.com/x"');
-    });
-
-    it("skips elements whose only text is whitespace", () => {
-        document.body.innerHTML = `<p>   </p><p>real</p>`;
-        const blocks = collectHtmlPageBlocks([document.body]);
-        expect(blocks.map((b) => b.plainText)).toEqual(["real"]);
     });
 });
 
@@ -443,6 +316,51 @@ describe("HTML-native translation safety pipeline (buildSafeTranslatedHtml)", ()
         expect(applied).toBe(1);
         expect(block.textContent).toContain("발표했습니다");
         expect(block.textContent).not.toContain("Over on the");
+    });
+
+    it("strips inline tags from a single-text-node leaf payload (nothing to split)", () => {
+        // Link-only rows/TOC entries: the tag pair is paid twice (input + model echo) but
+        // with ONE mapped text node it carries zero information for the 1:1 apply.
+        document.body.innerHTML = `<li id="l"><a href="/wiki/概要">概要</a></li>`;
+        const seg = serializeTranslationLeaf(document.getElementById("l"));
+        expect(seg.text).toBe("概要"); // no <a> tags in the payload
+        // The plain reply still applies INTO the link's text node — href intact.
+        applyPageSegments([document.getElementById("l")], new Map([[1, "개요"]]), 0, null);
+        const link = document.querySelector("#l a");
+        expect(link.textContent).toBe("개요");
+        expect(link.getAttribute("href")).toBe("/wiki/概要");
+    });
+
+    it("keeps inline tags when the leaf has multiple text nodes (boundaries needed)", () => {
+        document.body.innerHTML = `<p id="p">前文<a href="/x">リンク</a>後文</p>`;
+        const seg = serializeTranslationLeaf(document.getElementById("p"));
+        expect(seg.text).toContain("<a>");
+        expect(seg.text).toContain("</a>");
+    });
+
+    it("keeps the model's spaces around inline links on a space-less source (ja→ko)", () => {
+        // The space-less Japanese source used to strip the spaces Korean needs around the
+        // links — `게이한 본선은요도야바시역` instead of `게이한 본선은 요도야바시역`. The
+        // 1:1 apply now follows the MODEL's target-language spacing.
+        document.body.innerHTML = `<p id="p">京阪本線は<a href="/x">淀屋橋駅</a>から<a href="/y">三条駅</a>までを結ぶ。</p>`;
+        const block = document.getElementById("p");
+        applyPageSegments(
+            [block],
+            new Map([[1, "게이한 본선은 <a>요도야바시역</a>에서 <a>산조역</a>까지를 잇는다."]]),
+            0,
+            null
+        );
+        expect(block.textContent).toBe("게이한 본선은 요도야바시역에서 산조역까지를 잇는다.");
+        // Links survive in place with their hrefs.
+        expect(block.querySelectorAll("a")).toHaveLength(2);
+        expect(block.querySelector("a").getAttribute("href")).toBe("/x");
+    });
+
+    it("does NOT inject source spaces a no-space target rejects (en→ja around a link)", () => {
+        document.body.innerHTML = `<p id="p">foo <a href="/x">bar</a> baz</p>`;
+        const block = document.getElementById("p");
+        applyPageSegments([block], new Map([[1, "フー<a>バー</a>バズ"]]), 0, null);
+        expect(block.textContent).toBe("フーバーバズ");
     });
 
     it("restores critical attributes from the original block on matching tags", () => {
@@ -728,72 +646,6 @@ describe("Section maxChars / lead-chunk ttfb tuning", () => {
 });
 
 describe("Streaming partial-section apply (popcorn UX)", () => {
-    it("applies completed top-level children as the stream buffer grows", () => {
-        document.body.innerHTML = `
-            <article id="art">
-                <h1 class="title">Title</h1>
-                <p class="prose">First.</p>
-                <p class="prose">Second.</p>
-            </article>
-        `;
-        const article = document.querySelector("#art");
-        const entry = {
-            section: {
-                parent: article,
-                children: Array.from(article.children),
-            },
-        };
-        // First chunk: only h1 is complete.
-        let applied = applyStreamedSectionChildren(entry, "<h1>제목</h1><p>안녕", 0);
-        expect(applied).toBe(1);
-        expect(article.children[0].textContent).toBe("제목");
-        // Class survived because attr restoration ran on the streamed child.
-        expect(article.children[0].getAttribute("class")).toBe("title");
-        expect(article.children[1].textContent).toBe("First.");
-
-        // Second chunk: h1 + first p complete, second p mid-stream.
-        applied = applyStreamedSectionChildren(entry, "<h1>제목</h1><p>안녕.</p><p>둘째", applied);
-        expect(applied).toBe(2);
-        expect(article.children[1].textContent).toBe("안녕.");
-        expect(article.children[1].getAttribute("class")).toBe("prose");
-
-        // Third chunk: all 3 complete.
-        applied = applyStreamedSectionChildren(
-            entry,
-            "<h1>제목</h1><p>안녕.</p><p>둘째.</p>",
-            applied
-        );
-        expect(applied).toBe(3);
-        expect(article.children[2].textContent).toBe("둘째.");
-    });
-
-    it("does not stream-apply children when the model changes top-level tags", () => {
-        document.body.innerHTML = `<article id="art"><h2>Title</h2><p>Body.</p></article>`;
-        const article = document.querySelector("#art");
-        const entry = {
-            section: { parent: article, children: Array.from(article.children) },
-        };
-
-        const applied = applyStreamedSectionChildren(entry, "<p>제목</p><p>본문.</p>", 0);
-
-        expect(applied).toBe(0);
-        expect(article.children[0].tagName).toBe("H2");
-        expect(article.children[0].textContent).toBe("Title");
-    });
-
-    it("never re-applies an index already streamed", () => {
-        document.body.innerHTML = `<article id="art"><p>First.</p><p>Second.</p></article>`;
-        const article = document.querySelector("#art");
-        const entry = {
-            section: { parent: article, children: Array.from(article.children) },
-        };
-        let applied = applyStreamedSectionChildren(entry, "<p>안녕.</p><p>둘째.</p>", 0);
-        expect(applied).toBe(2);
-        // Calling again with the same buffer is a no-op (applied count already matches).
-        const after = applyStreamedSectionChildren(entry, "<p>안녕.</p><p>둘째.</p>", applied);
-        expect(after).toBe(2);
-    });
-
     it("applyHtmlPageSection translates by writing text nodes, never swapping elements", () => {
         // The apply writes translated text onto the ORIGINAL child elements — their
         // structure, attributes and identity are never touched — so the layout cannot break
@@ -892,6 +744,70 @@ describe("Leaf-level original text capture (per-paragraph tooltips)", () => {
     });
 });
 
+// Wikipedia history/station lists pack a year line plus a sub-list of events into one
+// <li>. Keeping only innermost leaves silently dropped the parent's own line — the
+// "translation still has untranslated parts" bug. The parent line must be its OWN leaf,
+// translated over its direct content only (never the sub-list, which is a separate leaf).
+describe("Nested list-item own line (parent-leaf coverage)", () => {
+    it("returns BOTH the parent line and the nested item as leaves, in document order", () => {
+        document.body.innerHTML = `
+            <ul><li id="outer">1990年（平成2年）<ul><li id="inner">3月16日：開業。</li></ul></li></ul>
+        `;
+        const outer = document.getElementById("outer");
+        const inner = document.getElementById("inner");
+        const leaves = findLeafBlocksInElement(document.querySelector("ul"));
+        expect(leaves).toEqual([outer, inner]);
+    });
+
+    it("serializes the parent leaf over its OWN line only (nested item excluded)", () => {
+        document.body.innerHTML = `
+            <li id="outer">1990年（平成2年）<ul><li>3月16日：開業。</li></ul></li>
+        `;
+        const outer = document.getElementById("outer");
+        expect(serializeBlockSegment(outer)).toBe("1990年（平成2年）");
+        expect(leafBlockOwnText(outer).trim()).toBe("1990年（平成2年）");
+    });
+
+    it("skips a pure wrapper li that has only a nested sub-list (no own line)", () => {
+        document.body.innerHTML = `
+            <ul><li id="outer"><ul><li id="inner">only nested.</li></ul></li></ul>
+        `;
+        const inner = document.getElementById("inner");
+        const leaves = findLeafBlocksInElement(document.querySelector("ul"));
+        expect(leaves).toEqual([inner]);
+    });
+
+    it("applies translation to the parent line without touching the nested item", () => {
+        document.body.innerHTML = `
+            <li id="outer">1990年（平成2年）<ul><li id="inner">3月16日：開業。</li></ul></li>
+        `;
+        const outer = document.getElementById("outer");
+        const inner = document.getElementById("inner");
+        // Translate the parent's own line; the nested <li> is a separate leaf, untouched here.
+        const ok = applyPageSegmentToBlock(outer, "1990년(헤이세이 2년)");
+        expect(ok).toBe(true);
+        expect(inner.textContent).toBe("3月16日：開業。");
+        expect(leafBlockOwnText(outer).replace(/\s+/g, " ").trim()).toBe("1990년(헤이세이 2년)");
+    });
+
+    it("translates parent line and nested item exactly once each via a [[n]] batch", () => {
+        document.body.innerHTML = `
+            <ul><li id="outer">1990年（平成2年）<ul><li id="inner">3月16日：開業。</li></ul></li></ul>
+        `;
+        const outer = document.getElementById("outer");
+        const inner = document.getElementById("inner");
+        const leaves = findLeafBlocksInElement(document.querySelector("ul")); // [outer, inner]
+        const map = new Map([
+            [1, "1990년(헤이세이 2년)"],
+            [2, "3월 16일: 개업."],
+        ]);
+        const applied = applyPageSegments(leaves, map);
+        expect(applied).toBe(2);
+        expect(leafBlockOwnText(outer).replace(/\s+/g, " ").trim()).toBe("1990년(헤이세이 2년)");
+        expect(inner.textContent).toBe("3월 16일: 개업.");
+    });
+});
+
 describe("Per-line-break segment mapping (single-<p>-with-<br> tooltip fix)", () => {
     it("splits a leaf's inline content by <br> into normalized line segments", () => {
         document.body.innerHTML = `
@@ -968,5 +884,203 @@ describe("Per-line-break segment mapping (single-<p>-with-<br> tooltip fix)", ()
         const spans = wrapLeafLineSegmentsInSpans(leaf);
         expect(spans).toEqual([]);
         expect(leaf.innerHTML).toBe(before);
+    });
+});
+
+describe("Sentence-level hover original (split + wrap + align)", () => {
+    it("splits Latin and CJK text into sentences", () => {
+        expect(splitTextIntoSentences("First sentence. Second one! Third?")).toEqual([
+            "First sentence.",
+            "Second one!",
+            "Third?",
+        ]);
+        expect(splitTextIntoSentences("これは一文目です。これは二文目です。")).toEqual([
+            "これは一文目です。",
+            "これは二文目です。",
+        ]);
+    });
+
+    it("returns a single sentence unchanged and merges decimal mis-splits", () => {
+        expect(splitTextIntoSentences("Just one sentence with no terminal punctuation")).toEqual([
+            "Just one sentence with no terminal punctuation",
+        ]);
+        // "3.14" must not split into "3." + "14".
+        expect(splitTextIntoSentences("Pi is about 3.14 today.")).toEqual([
+            "Pi is about 3.14 today.",
+        ]);
+    });
+
+    it("wraps each sentence of a leaf in a segment span, preserving inline elements", () => {
+        document.body.innerHTML = `<p id="p">First sentence. Click <a href="/x" id="lnk">here</a> now. Third sentence.</p>`;
+        const leaf = document.getElementById("p");
+        const link = document.getElementById("lnk");
+        const spans = wrapLeafSentencesInSpans(leaf);
+        expect(spans.length).toBe(3);
+        spans.forEach((s) => expect(s.hasAttribute("data-edge-translate-segment")).toBe(true));
+        // The inline <a> (same node identity, href intact) stays inside its sentence span.
+        expect(spans[1].contains(link)).toBe(true);
+        expect(link.getAttribute("href")).toBe("/x");
+        // No visible text is lost by the wrapping.
+        expect(leaf.textContent.replace(/\s+/g, " ").trim()).toBe(
+            "First sentence. Click here now. Third sentence."
+        );
+    });
+
+    it("splits sentences inside a sole styled wrapper (news-site <p><span>…</span></p>)", () => {
+        document.body.innerHTML = `<p id="p"><span class="styled">첫 문장이다. 둘째 문장이다.</span></p>`;
+        const leaf = document.getElementById("p");
+        const spans = wrapLeafSentencesInSpans(leaf);
+        expect(spans.length).toBe(2);
+        // The spans live INSIDE the styled wrapper so its styling applies to every sentence.
+        const wrapper = leaf.querySelector(".styled");
+        expect(wrapper).not.toBeNull();
+        spans.forEach((span) => expect(span.parentElement).toBe(wrapper));
+        expect(leaf.textContent).toBe("첫 문장이다. 둘째 문장이다.");
+    });
+
+    it("splits sentences inside a sole inline carrier (apply fallback wrote into <a>)", () => {
+        document.body.innerHTML = `<li id="l"><a href="/x">첫 문장이다. 둘째 문장이다.</a></li>`;
+        const leaf = document.getElementById("l");
+        const spans = wrapLeafSentencesInSpans(leaf);
+        expect(spans.length).toBe(2);
+        spans.forEach((span) => expect(span.closest("a")).not.toBeNull());
+    });
+
+    it("never sentence-splits inside code-like carriers", () => {
+        document.body.innerHTML = `<p id="p"><code>a.b. c.d. e.f.</code></p>`;
+        const leaf = document.getElementById("p");
+        expect(wrapLeafSentencesInSpans(leaf)).toEqual([]);
+        expect(leaf.querySelector("[data-edge-translate-segment]")).toBeNull();
+    });
+
+    it("leaves a single-sentence leaf untouched (no spans)", () => {
+        document.body.innerHTML = `<p id="p">Only one sentence here.</p>`;
+        const leaf = document.getElementById("p");
+        const before = leaf.innerHTML;
+        expect(wrapLeafSentencesInSpans(leaf)).toEqual([]);
+        expect(leaf.innerHTML).toBe(before);
+    });
+
+    it("aligns translated sentences to original sentences proportionally", () => {
+        // 1:1 when counts match.
+        expect(alignSentencesProportional(2, ["가", "나"])).toEqual(["가", "나"]);
+        // Model merged 4 source sentences into 2 — each translated span maps to a 2-sentence range.
+        expect(alignSentencesProportional(2, ["a", "b", "c", "d"])).toEqual(["a b", "c d"]);
+        // Model split 1 source sentence into 3 — all map back to the single original.
+        expect(alignSentencesProportional(3, ["only"])).toEqual(["only", "only", "only"]);
+    });
+});
+
+describe("Boilerplate region detection (opt-in token saver)", () => {
+    function frag(html) {
+        document.body.innerHTML = html;
+        return document.body;
+    }
+
+    it("flags reference / citation lists by class and role", () => {
+        frag(`
+            <ol class="references"><li id="cite">Some citation text, retrieved 2024.</li></ol>
+            <section role="doc-bibliography"><p id="bib">Bibliography entry.</p></section>
+        `);
+        expect(isBoilerplateRegion(document.getElementById("cite"))).toBe(true);
+        expect(isBoilerplateRegion(document.getElementById("bib"))).toBe(true);
+    });
+
+    it("flags navboxes, category links, the TOC and edit links", () => {
+        frag(`
+            <table class="navbox"><tr><td id="nav">Related lines and stations</td></tr></table>
+            <div class="catlinks"><p id="cat">Categories list</p></div>
+            <div id="toc" class="toc"><p id="tocItem">Contents</p></div>
+            <span class="mw-editsection"><a id="edit" href="#">edit</a></span>
+        `);
+        expect(isBoilerplateRegion(document.getElementById("nav"))).toBe(true);
+        expect(isBoilerplateRegion(document.getElementById("cat"))).toBe(true);
+        expect(isBoilerplateRegion(document.getElementById("tocItem"))).toBe(true);
+        expect(isBoilerplateRegion(document.getElementById("edit"))).toBe(true);
+    });
+
+    it("flags dense-link navigation cells inside tables", () => {
+        frag(`
+            <table><tr><td id="links"><a href="#">One</a> <a href="#">Two</a> <a href="#">Three</a></td></tr></table>
+        `);
+        expect(isBoilerplateRegion(document.getElementById("links"))).toBe(true);
+    });
+
+    it("does NOT flag ordinary article prose", () => {
+        frag(`
+            <article class="mw-parser-output">
+                <p id="lead">The line opened in 1910 and has been expanded several times since.</p>
+                <p id="body">It connects two major cities and carries heavy commuter traffic with <a href="#">one inline link</a> only.</p>
+            </article>
+        `);
+        expect(isBoilerplateRegion(document.getElementById("lead"))).toBe(false);
+        expect(isBoilerplateRegion(document.getElementById("body"))).toBe(false);
+    });
+
+    it("does NOT flag prose whose id/class merely contains a keyword (container-gated)", () => {
+        frag(`
+            <article>
+                <h2 id="citations-in-ancient-rome">Citations in ancient Rome</h2>
+                <p class="references-explained">References were recorded on wax tablets back then.</p>
+                <p id="see-also-history">See also the history of the categories of Roman law.</p>
+            </article>
+        `);
+        expect(isBoilerplateRegion(document.getElementById("citations-in-ancient-rome"))).toBe(
+            false
+        );
+        expect(isBoilerplateRegion(document.querySelector(".references-explained"))).toBe(false);
+        expect(isBoilerplateRegion(document.getElementById("see-also-history"))).toBe(false);
+    });
+
+    it("does NOT flag a prose table cell with only a couple of links", () => {
+        frag(`
+            <table><tr><td id="cell">See <a href="#">Tokyo</a> and <a href="#">Osaka</a> for details.</td></tr></table>
+        `);
+        expect(isBoilerplateRegion(document.getElementById("cell"))).toBe(false);
+    });
+});
+
+// '=' keep-source protocol (speed redesign W3): the sentinel is VERIFIED upstream
+// (BannerController), so the apply layer treats a literal "=" as "this block is already
+// in the target language" — counted resolved, applied-set updated, DOM untouched.
+describe("'=' keep-source segment apply (applyPageSegments)", () => {
+    it("counts a '=' segment as applied without writing to the DOM", () => {
+        document.body.innerHTML = `<p id="keep">이미 번역된 한국어 문장입니다.</p>`;
+        const block = document.getElementById("keep");
+        const appliedSet = new Set();
+
+        const applied = applyPageSegments([block], new Map([[1, "="]]), 0, appliedSet);
+
+        // Counted resolved (an all-sentinel entry must never report applied=0 and loop)…
+        expect(applied).toBe(1);
+        expect(appliedSet.has(1)).toBe(true);
+        // …with the original text left exactly as-is.
+        expect(block.textContent).toBe("이미 번역된 한국어 문장입니다.");
+    });
+
+    it("applies a mixed map of '=' and a real translation in one pass", () => {
+        document.body.innerHTML = `
+            <p id="keep">이미 번역된 한국어 문장입니다.</p>
+            <p id="translate">Hello world.</p>
+        `;
+        const keep = document.getElementById("keep");
+        const translate = document.getElementById("translate");
+        const appliedSet = new Set();
+
+        const applied = applyPageSegments(
+            [keep, translate],
+            new Map([
+                [1, "="],
+                [2, "안녕 세상."],
+            ]),
+            0,
+            appliedSet
+        );
+
+        expect(applied).toBe(2);
+        expect(appliedSet.has(1)).toBe(true);
+        expect(appliedSet.has(2)).toBe(true);
+        expect(keep.textContent).toBe("이미 번역된 한국어 문장입니다.");
+        expect(translate.textContent).toBe("안녕 세상.");
     });
 });

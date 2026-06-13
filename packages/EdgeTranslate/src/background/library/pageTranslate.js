@@ -9,10 +9,16 @@ import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settin
  */
 function translatePage(channel) {
     getOrSetDefaultSettings(
-        ["DefaultPageTranslator", "languageSetting", "LocalTranslatorConfig"],
+        [
+            "DefaultPageTranslator",
+            "languageSetting",
+            "LocalTranslatorConfig",
+            "AiPageTranslateConfig",
+        ],
         DEFAULT_SETTINGS
     ).then((result) => {
         const localConfig = result.LocalTranslatorConfig || {};
+        const aiPageConfig = result.AiPageTranslateConfig || {};
         const translator = result.DefaultPageTranslator;
 
         // Page translation is currently Chrome-only.
@@ -48,6 +54,7 @@ function translatePage(channel) {
                 translatorId: "LocalTranslate",
                 sl: (result.languageSetting && result.languageSetting.sl) || "auto",
                 tl: (result.languageSetting && result.languageSetting.tl) || "en",
+                aiPageConfig,
             });
             return;
         }

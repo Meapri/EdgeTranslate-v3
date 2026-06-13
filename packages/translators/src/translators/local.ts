@@ -32,6 +32,17 @@ export type LocalTranslationOptions = {
      * UI updates. When omitted, the request runs without streaming.
      */
     onProgress?: (accumulatedText: string) => void;
+    /**
+     * LLM-only page context for selection translation: a budgeted window of the text
+     * around the selection plus page title/hostname. Used purely for sense
+     * disambiguation and tone — never translated, never echoed (the system prompt
+     * carries the anti-echo rule). All fields are pre-capped by the caller.
+     */
+    selectionContext?: {
+        surrounding?: string;
+        title?: string;
+        domain?: string;
+    };
 };
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -122,7 +133,7 @@ const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_COMPATIBLE_MODEL = "gpt-oss-20b";
 // Bump whenever the prompts below or the user-message layout changes so cached translations
 // from older prompts are invalidated and rebuilt with the new shape.
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-05-28-page-compact-v2";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-06-10-lean-v4";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 // Speed-first: lift the in-process limiter to 32 to match the page-translate dispatch's
@@ -148,13 +159,19 @@ const AI_TRANSLATION_SYSTEM_PROMPT = [
     "- Use the target language's customary writing system. For Han-script source text (Chinese, Japanese kanji), translate complete semantic units. Never create mixed-script words by combining source-script characters. Do not partially translate compound nouns. Silently scan the final answer for mixed-script words and rewrite them.",
     "- Subtitles: keep subtitle cue numbers, timestamps, and speaker labels intact.",
     "- When structured JSON is requested, return one valid JSON object only.",
+    '- When the user message contains "Page:" or "Context:" lines, they are reference material for word-sense and tone only. Never translate, echo, or summarize them. Translate ONLY the text after the "Text to translate:" line.',
 ].join("\n");
 
 const PAGE_HTML_TRANSLATION_SYSTEM_PROMPT =
     "Translate visible HTML text only. Preserve tags, attrs, order exactly. Output translated HTML only.";
 
+// Sent on EVERY page-batch request (uncached on most engines), so it is kept lean — only
+// load-bearing rules: the [[n]] protocol, inline-tag/number preservation + target spacing,
+// the no-mixed-script rule (the #1 CJK quality failure), and the "=" keep-source sentinel.
+// (Token count is mirrored by AI_PAGE_PER_REQUEST_OVERHEAD_TOK in banner_controller.js — keep
+// the two in sync; the batch-size floor is derived from it.)
 const PAGE_SEGMENTED_TRANSLATION_SYSTEM_PROMPT =
-    "Translate each [[n]] segment into the target language. Output every [[n]] marker exactly once, in order, each on its own line, with that segment's translation right after it. Keep inline tags (<a>,<b>,<i>,<code>…), numbers, URLs and code identifiers intact. Translate only the visible text — output only the [[n]] segments, nothing else.";
+    "Translate each [[n]] segment into natural, fluent target-language text. Output every [[n]] marker exactly once, in order, on its own line, with the translation right after it — nothing else. Keep inline tags (<a>,<b>,<i>,<code>…), numbers and URLs intact, with the target language's natural spacing around tags. Never mix scripts or leave source-script characters; render Han-script (kanji/Chinese) terms as complete target-language words. If a segment is already fully in the target language, output its marker then = only; never use = for source-script text.";
 
 const REALTIME_CAPTION_SYSTEM_PROMPT =
     "You are a subtitle translator. Return only translated subtitles.";
@@ -629,6 +646,16 @@ function buildOpenAiCompletionLimit(model: string, tokenBudget: number) {
         return { max_completion_tokens: budget };
     }
     return { max_tokens: budget };
+}
+
+// Model families whose EVERY snapshot accepts completion budgets well beyond the legacy
+// 4096 cap. Gating on the family (not "not legacy") keeps unknown/proxy model names on
+// the safe 4096 ceiling — a too-high cap is a hard 400, not a truncation. gpt-4o is
+// deliberately EXCLUDED: gpt-4o-2024-05-13 caps at 4096 while later snapshots take 16384,
+// and the banner cannot know which snapshot serves the alias. o-series is excluded too —
+// it takes max_completion_tokens, which buildOpenAiCompletionLimit only sends for gpt-5.
+function supportsLargeCompletionBudget(model: string) {
+    return /^(gpt-5|gpt-4\.1)/i.test(model || "");
 }
 
 function normalizeOpenAiCompatibleEndpoint(baseUrl?: string) {
@@ -1174,12 +1201,35 @@ class LocalTranslator {
             langLine,
             "Preserve proper nouns and official names. Use the target language's writing system.",
         ];
-        if (isDictionaryCandidate(text)) {
+        const isDictionary = isDictionaryCandidate(text);
+        if (isDictionary) {
             headerLines.push(
                 'Dictionary entry. Return only one valid JSON object: {"translation":"...","detailedMeanings":[{"pos":"","meaning":"","synonyms":[]}],"definitions":[{"pos":"","meaning":"","example":"","synonyms":[]}],"examples":[{"source":"","target":""}]}.',
                 "Provide at least one detailedMeaning, one definition, and two examples for ordinary terms; use empty arrays when truly not applicable.",
                 "Write translation, meanings, definitions, and target examples in the target language; keep source examples in the source language."
             );
+        }
+
+        // LLM-only page context (selection translation). Reference material, clearly fenced:
+        // the static system prompt carries the matching anti-echo rule, and a sentinel line
+        // separates the context from the actual payload so the model can't conflate them.
+        const context = options.selectionContext;
+        if (context && (context.surrounding || context.title || context.domain)) {
+            const pageLine = [context.title, context.domain ? `(${context.domain})` : ""]
+                .filter(Boolean)
+                .join(" ");
+            if (pageLine) headerLines.push(`Page: ${pageLine}`);
+            if (context.surrounding) {
+                headerLines.push(
+                    `Context (surrounding page text — reference only, translate NONE of it): """${context.surrounding}"""`
+                );
+                if (isDictionary) {
+                    headerLines.push(
+                        "Pick the word-sense that fits this Context; order detailedMeanings with the contextual sense first."
+                    );
+                }
+            }
+            headerLines.push("Text to translate:");
         }
         const header = headerLines.filter(Boolean).join("\n");
         return header ? `${header}\n${text}` : text;
@@ -1275,12 +1325,18 @@ class LocalTranslator {
     private buildGoogleAiStudioGenerationConfig(
         inputLength?: number,
         compatibilityMode: "minimal" | "bare" = "minimal",
-        options: LocalTranslationOptions = {}
+        options: LocalTranslationOptions = {},
+        isDictionary = false
     ) {
         if (compatibilityMode === "bare") return undefined;
         const config: Record<string, any> = { temperature: 0 };
         const thinkingConfig = this.buildGoogleAiStudioThinkingConfig();
         if (thinkingConfig) config.thinkingConfig = thinkingConfig;
+        // Dictionary entries are structured JSON: constrained decoding via the native JSON
+        // mime type eliminates code fences / prose-wrapped JSON (parity with the OpenAI
+        // path's response_format json_object). Mime-only — no responseSchema, which degrades
+        // on flash-lite-class models for nested schemas.
+        if (isDictionary) config.responseMimeType = "application/json";
         if (this.isRealtimeCaptionTranslation(options)) {
             config.maxOutputTokens = Math.max(96, Math.ceil((inputLength || 24) * 2));
             return config;
@@ -1407,12 +1463,16 @@ class LocalTranslator {
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const model = encodeURIComponent(this.model);
-            const useStreaming = typeof options.onProgress === "function";
+            const isDictionary = !isRealtimeCaption && isDictionaryCandidate(text);
+            // Dictionary lookups return structured JSON — streaming would flash raw JSON
+            // fragments in the panel preview, so they run non-streaming (OpenAI parity).
+            const useStreaming = typeof options.onProgress === "function" && !isDictionary;
             const requestPayload = async (compatibilityMode: "minimal" | "bare") => {
                 const generationConfig = this.buildGoogleAiStudioGenerationConfig(
                     text.length,
                     compatibilityMode,
-                    options
+                    options,
+                    isDictionary
                 );
                 const body: Record<string, any> = {
                     systemInstruction: {
@@ -1651,7 +1711,6 @@ class LocalTranslator {
             const isPageTranslation =
                 options.translationProfile === "page" || hasPageTranslationSegments(text);
             const reasoningEffort = this.getOpenAiReasoningEffort(options);
-            const expectedPageSegments = countPageSegmentMarkers(text);
             // GPT-5.x and o-series reasoning models only accept the default temperature, so
             // sending an explicit value triggers a 400 from the API.
             const supportsTemperature = !this.shouldUseOpenAiReasoningEffort();
@@ -1683,7 +1742,17 @@ class LocalTranslator {
                               text,
                               tokenMultiplier,
                               tokenMultiplier >= 8 ? 640 : 384,
-                              tokenMultiplier >= 8 ? 8192 : 4096
+                              // Modern models take a high first-attempt ceiling so an
+                              // oversized atomic section completes in ONE stream instead
+                              // of paying gen(4096) + a full regeneration; legacy models
+                              // keep the universal 4096/8192 truncate-then-retry path.
+                              supportsLargeCompletionBudget(this.openaiModel)
+                                  ? tokenMultiplier >= 8
+                                      ? 16384
+                                      : 12288
+                                  : tokenMultiplier >= 8
+                                  ? 8192
+                                  : 4096
                           )
                         : Math.max(
                               512 * Math.max(1, tokenMultiplier / 4),
@@ -1767,12 +1836,17 @@ class LocalTranslator {
             }
             let tokenUsage = extractOpenAiTokenUsage(payload);
             let rawOutput = this.parseOpenAiResponse(payload);
-            const outputSegments = countPageSegmentMarkers(rawOutput);
             const finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+            // Retry on true truncation (finish_reason "length") and on a streamed reply
+            // that ended WITHOUT any finish_reason — an SSE stream cut mid-generation
+            // (proxy drop, server error event) would otherwise pass off a truncated page
+            // reply as success. A completed reply ("stop") with missing [[n]] markers is
+            // NOT retried: near-deterministic at temperature 0, a full re-roll reproduces
+            // the same gaps for 2x tokens, while the page pipeline already heals missing
+            // markers with a missing-leaves-only request.
             const shouldRetryForCompletion =
                 !isRealtimeCaption &&
-                (finishReason === "length" ||
-                    (expectedPageSegments > 0 && outputSegments < expectedPageSegments));
+                (finishReason === "length" || (useStreaming && !finishReason));
             if (shouldRetryForCompletion) {
                 const retry = await requestPayload(includeReasoningConfig, 8);
                 if (retry.response.ok) {
@@ -1842,7 +1916,6 @@ class LocalTranslator {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const isPageTranslation =
                 options.translationProfile === "page" || hasPageTranslationSegments(text);
-            const expectedPageSegments = countPageSegmentMarkers(text);
             const buildBody = (tokenMultiplier = 4) => ({
                 model: this.openaiCompatibleModel,
                 messages: [
@@ -1886,7 +1959,10 @@ class LocalTranslator {
                 chat_template_kwargs: { enable_thinking: false },
                 reasoning_effort: "low",
             });
-            const useStreaming = typeof options.onProgress === "function";
+            // Dictionary lookups produce JSON — never stream them into the panel preview.
+            const useStreaming =
+                typeof options.onProgress === "function" &&
+                !(isDictionaryCandidate(text) && !isRealtimeCaption);
             const requestPayload = async (tokenMultiplier = 4) => {
                 const headers: Record<string, string> = {
                     "Content-Type": "application/json",
@@ -1954,12 +2030,14 @@ class LocalTranslator {
             }
             let tokenUsage = extractOpenAiTokenUsage(payload);
             let rawOutput = this.parseOpenAiResponse(payload);
-            const outputSegments = countPageSegmentMarkers(rawOutput);
             const finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+            // Truncation retry (+ streamed replies that ended with NO finish_reason — an
+            // SSE cut mid-generation, common on local servers under load). Marker gaps in
+            // COMPLETED replies are healed by the page pipeline's missing-leaves-only
+            // re-request, not a full re-roll.
             const shouldRetryForCompletion =
                 !isRealtimeCaption &&
-                (finishReason === "length" ||
-                    (expectedPageSegments > 0 && outputSegments < expectedPageSegments));
+                (finishReason === "length" || (useStreaming && !finishReason));
             if (shouldRetryForCompletion) {
                 const retry = await requestPayload(8);
                 if (retry.response.ok) {

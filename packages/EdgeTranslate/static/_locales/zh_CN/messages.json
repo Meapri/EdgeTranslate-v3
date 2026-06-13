@@ -175,6 +175,12 @@
         "message": "自动检测",
         "description": "自动检测"
     },
+    "SearchLanguage": {
+        "message": "搜索语言"
+    },
+    "NoLanguageMatch": {
+        "message": "无匹配项"
+    },
     "SourceLanguage": {
         "message": "源语言",
         "description": "源语言"
@@ -246,6 +252,14 @@
     "EnableBuiltinPdfViewer": {
         "message": "使用内置 PDF 阅读器",
         "description": "使用 EdgeTranslate 内置的 pdf.js 阅读器打开 PDF 文件，而非浏览器默认阅读器。"
+    },
+    "AiPageLazyTranslate": {
+        "message": "AI 页面延迟翻译（滚动时翻译）",
+        "description": "不一次性将整页发送给 AI，而是先翻译视口附近内容，其余部分在滚动时翻译。"
+    },
+    "AiPageSkipBoilerplate": {
+        "message": "AI 翻译页面时跳过参考文献和导航",
+        "description": "AI 页面翻译时不翻译引用/脚注列表、导航框、分类链接、目录和编辑链接。"
     },
     "GooglePageTranslate": {
         "message": "Google 网页翻译",

@@ -34,6 +34,31 @@ const DEFAULT_SETTINGS = {
     },
     DefaultTranslator: "GoogleTranslate",
     DefaultPageTranslator: "GooglePageTranslate",
+    // Behavior of AI (LLM) full-page translation on large pages.
+    //   lazyTranslate   – translate content near the viewport FIRST (ordering); the deferred
+    //                     backlog then refills idle request slots continuously, so the rest
+    //                     of the page follows at full engine parallelism instead of waiting
+    //                     for the reader to scroll.
+    //   prefetchScreens – how many viewport-heights BELOW the viewport the eager pipeline
+    //                     translates ahead of the reader. Content farther down stays in the
+    //                     backlog and translates just-in-time as the reader scrolls toward it
+    //                     (the reveal path pre-translates ~2.5 screens ahead, so it is ready
+    //                     before it is seen — nothing ever stays untranslated when viewed).
+    //                     Pages shorter than the horizon still translate fully up front; only
+    //                     very long pages (large wikis) go scroll-paced, which is what keeps
+    //                     their token cost proportional to what is actually read. 0 = no
+    //                     horizon: eagerly translate the whole page regardless of length.
+    //   tokenBudget     – soft cap (estimated input tokens) on how much the eager pipeline
+    //                     spends before the rest waits for scroll. 0 = no cap (default).
+    //   skipBoilerplate – skip reference/citation lists, navigation boxes, category links, the
+    //                     table of contents and edit links. Opt-in (off) so nothing is silently
+    //                     dropped unless the user asks for it.
+    AiPageTranslateConfig: {
+        lazyTranslate: true,
+        prefetchScreens: 8,
+        tokenBudget: 0,
+        skipBoilerplate: false,
+    },
     LocalTranslatorConfig: {
         enabled: false,
         mode: "chromeBuiltin",

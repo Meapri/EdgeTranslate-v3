@@ -175,6 +175,12 @@
         "message": "자동 감지",
         "description": "자동 감지"
     },
+    "SearchLanguage": {
+        "message": "언어 검색"
+    },
+    "NoLanguageMatch": {
+        "message": "일치 항목 없음"
+    },
     "SourceLanguage": {
         "message": "원문 언어",
         "description": "원문 언어"
@@ -246,6 +252,14 @@
     "EnableBuiltinPdfViewer": {
         "message": "내장 PDF 뷰어 사용",
         "description": "PDF 파일을 브라우저 기본 뷰어 대신 EdgeTranslate 내장 pdf.js 뷰어로 엽니다."
+    },
+    "AiPageLazyTranslate": {
+        "message": "AI 페이지 지연 번역 (스크롤 시 번역)",
+        "description": "전체 페이지를 한 번에 AI로 보내는 대신, 화면 근처 콘텐츠를 먼저 번역하고 나머지는 스크롤할 때 번역합니다."
+    },
+    "AiPageSkipBoilerplate": {
+        "message": "AI 페이지 번역 시 참고문헌·내비게이션 건너뛰기",
+        "description": "AI 페이지 번역에서 각주/참고문헌 목록, 내비게이션 박스, 분류 링크, 목차, 편집 링크를 번역하지 않습니다."
     },
     "GooglePageTranslate": {
         "message": "Google 페이지 번역",

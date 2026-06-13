@@ -84,7 +84,9 @@ function buildSyntheticPage({ sectionCount, paragraphsPerSection }) {
             ].join(" ");
             return `<p ${attrs}><span ${attrs}>${text}</span></p>`;
         }).join("\n");
-        return `<section ${attrs}><h2 ${attrs}>Release note ${index + 1}</h2>${paragraphs}</section>`;
+        return `<section ${attrs}><h2 ${attrs}>Release note ${
+            index + 1
+        }</h2>${paragraphs}</section>`;
     }).join("\n");
     return `<main ${attrs}>${sections}</main>`;
 }
@@ -249,3 +251,75 @@ const summary = {
 };
 
 printSummary(summary);
+
+// ---------------------------------------------------------------------------
+// Boilerplate-skip token reduction (opt-in). Models a long encyclopedia article
+// (à la a big Wikipedia page) whose token cost is dominated by a huge references
+// list and navigation boxes rather than the article body itself.
+// ---------------------------------------------------------------------------
+function buildEncyclopediaPage({ bodyParagraphs, references, navboxLinks }) {
+    const body = Array.from(
+        { length: bodyParagraphs },
+        (_, i) =>
+            `<p>Article body paragraph ${i + 1} describing the line's history, route, ` +
+            `stations and operations in enough prose to be worth translating for a reader.</p>`
+    ).join("\n");
+    const refs = Array.from(
+        { length: references },
+        (_, i) =>
+            `<li id="cite_note-${i + 1}"><cite class="citation">Author ${i + 1}, ` +
+            `"Cited work title number ${i + 1}", Publisher ${i + 1}, retrieved 2024-01-${
+                (i % 28) + 1
+            }.</cite></li>`
+    ).join("\n");
+    const nav = Array.from(
+        { length: navboxLinks },
+        (_, i) => `<a href="/wiki/Station_${i + 1}">Station ${i + 1}</a>`
+    ).join(" ");
+    return `<main>
+        <div class="mw-parser-output">
+            <div id="toc" class="toc"><ul><li>1 History</li><li>2 Route</li><li>3 Stations</li><li>4 References</li></ul></div>
+            ${body}
+            <h2>References <span class="mw-editsection"><a href="#">edit</a></span></h2>
+            <ol class="references">${refs}</ol>
+            <table class="navbox"><tbody><tr><td class="navbox-list">${nav}</td></tr></tbody></table>
+            <div class="catlinks"><ul><li><a href="/wiki/Category:Rail">Category: Railway lines</a></li><li><a href="/wiki/Category:1910">Category: 1910 establishments</a></li></ul></div>
+        </div>
+    </main>`;
+}
+
+function leafTokens(leaves) {
+    return leaves.reduce((sum, leaf) => sum + estimateLlmPayloadTokens(leaf.plainText || ""), 0);
+}
+
+const encyclopediaDom = new JSDOM(
+    buildEncyclopediaPage({ bodyParagraphs: 60, references: 200, navboxLinks: 80 })
+);
+const encyclopediaRoot = encyclopediaDom.window.document.querySelector("main");
+const allLeaves = context.collectTranslationLeaves([encyclopediaRoot]);
+const articleLeaves = context.collectTranslationLeaves([encyclopediaRoot], {
+    skipBoilerplate: true,
+});
+const allTokens = leafTokens(allLeaves);
+const articleTokens = leafTokens(articleLeaves);
+const boilerplateSummary = {
+    fixture: "encyclopedia (60 body paragraphs, 200 references, 80 navbox links)",
+    leavesFull: allLeaves.length,
+    leavesArticleOnly: articleLeaves.length,
+    leafReductionPct: Number(
+        (((allLeaves.length - articleLeaves.length) / allLeaves.length) * 100).toFixed(1)
+    ),
+    inputTokensFull: allTokens,
+    inputTokensArticleOnly: articleTokens,
+    tokenReductionPct: Number((((allTokens - articleTokens) / allTokens) * 100).toFixed(1)),
+};
+console.log("\nBoilerplate-skip token reduction (opt-in)");
+console.log(
+    `leaves: ${boilerplateSummary.leavesFull} -> ${boilerplateSummary.leavesArticleOnly} ` +
+        `(${boilerplateSummary.leafReductionPct}% fewer)`
+);
+console.log(
+    `input token estimate: ${boilerplateSummary.inputTokensFull} -> ${boilerplateSummary.inputTokensArticleOnly} ` +
+        `(${boilerplateSummary.tokenReductionPct}% less)`
+);
+console.log(JSON.stringify(boilerplateSummary, null, 2));

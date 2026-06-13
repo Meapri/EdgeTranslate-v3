@@ -52,7 +52,7 @@ class HybridTranslator {
     private stats = {
         requests: 0,
         cacheHits: 0,
-        errors: 0
+        errors: 0,
     };
 
     constructor(config: HybridConfig, channel: any, localConfig: LocalTranslatorConfig = {}) {
@@ -146,7 +146,9 @@ class HybridTranslator {
      */
     getAvailableTranslatorsFor(from: string, to: string) {
         const translators: HybridSupportedTranslators[] = [];
-        for (const translator of Object.keys(this.REAL_TRANSLATORS) as HybridSupportedTranslators[]) {
+        for (const translator of Object.keys(
+            this.REAL_TRANSLATORS
+        ) as HybridSupportedTranslators[]) {
             const languages = this.REAL_TRANSLATORS[translator].supportedLanguages();
             if (languages.has(from) && languages.has(to)) {
                 translators.push(translator);
@@ -231,15 +233,36 @@ class HybridTranslator {
      *
      * @returns {Promise<Object>} translation Promise
      */
-    async translateSingle(text: string, from: string, to: string) {
+    async translateSingle(
+        text: string,
+        from: string,
+        to: string,
+        options?: Record<string, unknown>
+    ) {
         // Initiate translation requests.
         let requests: Promise<[HybridSupportedTranslators, TranslationResult]>[] = [];
         for (let translator of this.CONFIG.translators) {
-            // Translate with a translator.
+            // Translate with a translator. LLM-only options (selection context, streaming
+            // callbacks) are forwarded EXCLUSIVELY to the LocalTranslate member — Google/Bing
+            // keep their exact 3-arg call so their behavior and caches are untouched.
+            const request =
+                translator === "LocalTranslate" && options
+                    ? (
+                          this.REAL_TRANSLATORS[translator] as unknown as {
+                              translate: (
+                                  text: string,
+                                  from: string,
+                                  to: string,
+                                  options?: Record<string, unknown>
+                              ) => Promise<TranslationResult>;
+                          }
+                      ).translate(text, from, to, options)
+                    : this.REAL_TRANSLATORS[translator].translate(text, from, to);
             requests.push(
-                this.REAL_TRANSLATORS[translator]
-                    .translate(text, from, to)
-                    .then((result) => [translator, result] as [HybridSupportedTranslators, TranslationResult])
+                request.then(
+                    (result) =>
+                        [translator, result] as [HybridSupportedTranslators, TranslationResult]
+                )
             );
         }
 
@@ -251,7 +274,7 @@ class HybridTranslator {
         const results = new Map(await Promise.all(requests));
         const localMainSelected = this.CONFIG.selections.mainMeaning === "LocalTranslate";
         const localResult = localMainSelected ? results.get("LocalTranslate") : null;
-        
+
         // Process each component with fallback support
         let item: keyof Selections;
         for (item in this.CONFIG.selections) {
@@ -276,7 +299,7 @@ class HybridTranslator {
                     }
                     continue;
                 }
-                
+
                 // Check if the selected translator provided the component
                 if (selectedResult[item] && this.hasValue(selectedResult[item])) {
                     // Use the value from the selected translator
@@ -305,10 +328,10 @@ class HybridTranslator {
                 this.stats.errors += 1;
             }
         }
-        
+
         // Fill passthrough originalText if empty
         if (!translation.originalText) translation.originalText = text;
-        
+
         return translation;
     }
 
@@ -321,14 +344,19 @@ class HybridTranslator {
      *
      * @returns result Promise
      */
-    async translate(text: string, from: string, to: string) {
+    async translate(text: string, from: string, to: string, options?: Record<string, unknown>) {
         // Fast paths: ignore empty/whitespace
         if (!text || !text.trim()) {
             return { originalText: text || "", mainMeaning: "" } as TranslationResult;
         }
 
-        // Normalize inputs to keep key stable
-        const key = `H|${this.cacheConfigSignature}|${from}|${to}|${fnv1a32(text)}`;
+        // Normalize inputs to keep key stable. Selection context can legitimately change the
+        // LocalTranslate member's output, so it participates in the cache key when present.
+        const selectionContext = options?.selectionContext as { surrounding?: string } | undefined;
+        const contextKey = selectionContext?.surrounding
+            ? `|ctx:${fnv1a32(String(selectionContext.surrounding))}`
+            : "";
+        const key = `H|${this.cacheConfigSignature}|${from}|${to}|${fnv1a32(text)}${contextKey}`;
 
         // Cache hit
         const cached = this.cache.get(key);
@@ -343,7 +371,7 @@ class HybridTranslator {
 
         const exec = (async (): Promise<TranslationResult> => {
             try {
-                const result = await this.translateSingle(text, from, to);
+                const result = await this.translateSingle(text, from, to, options);
                 this.stats.requests++;
                 this.cache.set(key, result);
                 return result;
@@ -403,10 +431,11 @@ class HybridTranslator {
             cacheSize: cacheStats.size,
             maxCacheSize: cacheStats.maxSize,
             cacheTTL: cacheStats.ttl,
-            hitRate: this.stats.requests > 0 
-                ? (this.stats.cacheHits / this.stats.requests * 100).toFixed(1) + '%'
-                : '0%',
-            inflight: this.inflight.size
+            hitRate:
+                this.stats.requests > 0
+                    ? ((this.stats.cacheHits / this.stats.requests) * 100).toFixed(1) + "%"
+                    : "0%",
+            inflight: this.inflight.size,
         };
 
         // Get Bing translator stats if available
@@ -433,15 +462,15 @@ class HybridTranslator {
 
     /**
      * Check if a value has meaningful content.
-     * 
+     *
      * @param value The value to check
      * @returns true if the value has meaningful content, false otherwise
      */
     private hasValue(value: any): boolean {
         if (value === null || value === undefined) return false;
-        if (typeof value === 'string') return value.trim().length > 0;
+        if (typeof value === "string") return value.trim().length > 0;
         if (Array.isArray(value)) return value.length > 0;
-        if (typeof value === 'object') {
+        if (typeof value === "object") {
             // For objects, check if they have any enumerable properties
             return Object.keys(value).length > 0;
         }

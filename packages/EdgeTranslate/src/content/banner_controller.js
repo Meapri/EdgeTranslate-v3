@@ -1,11 +1,14 @@
+import { LANGUAGES } from "@edge_translate/translators";
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import createLanguageMenu from "common/scripts/language_menu.js";
 import { isNativePdfDocument } from "./common.js";
 import {
     toChromeTranslatorLanguage,
     translateWithChromeOnDevice,
 } from "common/scripts/chrome_builtin_translate.js";
 import {
+    alignSentencesProportional,
     applyPageSegments,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
@@ -15,11 +18,15 @@ import {
     collectHtmlPageSections,
     findLeafBlocksInElement,
     isAlreadyInTargetLanguage,
+    isBoilerplateRegion,
+    leafBlockOwnText,
     parsePageSegmentMap,
     serializeTranslationLeaf,
     splitSegmentedTranslationText,
+    splitTextIntoSentences,
     splitTranslatedContext,
     wrapLeafLineSegmentsInSpans,
+    wrapLeafSentencesInSpans,
 } from "./dom_page_translate_context.js";
 
 /**
@@ -174,6 +181,13 @@ function estimateLlmPayloadTokens(text) {
     return Math.ceil(cjkChars * 0.8 + otherChars / 3.6);
 }
 
+// Single estimator for a section's LLM output size. There are exactly TWO valid call bases,
+// chosen by pipeline stage — keep every caller on the one for its stage so split/merge/dispatch
+// never disagree about the same content's size:
+//   • PRE-IR  (mergeAdjacentTinyAiPageSections, splitAiPageSectionsByOutput): no serialized form
+//     exists yet, so pass (plain, plain) — visible text only, zero structural overhead.
+//   • POST-IR (entry dispatch, batch-options fallback): the serialized IR exists, so pass
+//     (plainText, sourceText) and the markup beyond the visible text is counted at 0.8x.
 function estimateLlmOutputTokens(plainText, sourceHtml = "") {
     const visibleTokens = estimateLlmPayloadTokens(plainText || sourceHtml);
     const structuralTokens = Math.max(0, estimateLlmPayloadTokens(sourceHtml) - visibleTokens);
@@ -208,6 +222,7 @@ class BannerController {
         this._scheduleBatch = null;
         this._pendingNodes = new Set();
         this._domPageTranslateOptions = { engine: "googleAiStudio", sl: "auto", tl: "en" };
+        this._aiPageConfig = this.normalizeAiPageConfig();
         this._domResolvedSourceLanguage = null;
         this._domTranslationCache = new Map();
         this._domTranslationCacheMax = 2000;
@@ -224,6 +239,15 @@ class BannerController {
         this._domTotalTranslationEntries = 0;
         this._domCompletedTranslationEntries = 0;
         this._domBatchFailureCount = 0;
+        // How many times an entry may be re-sent to fill leaves whose [[n]] markers the model
+        // dropped (the re-send carries ONLY the missing leaves, so it is cheap). A fixed bound,
+        // never mutated per session, so it lives on the instance — the re-entry readers can
+        // trust it directly without a `|| 2` fallback.
+        this._aiSectionMaxPartialRetries = 3;
+        // Circuit-breaker latch + its pending recovery timer (owned/cleared by the reset
+        // contract; declared here so the first read is never undefined).
+        this._domCircuitBreakerActive = false;
+        this._domCircuitBreakerTimer = null;
         this._aiPageSectionBatchScale = 1;
         this._aiPageSectionBatchSuccessStreak = 0;
         this._aiPageSectionBatchFailureStreak = 0;
@@ -232,7 +256,21 @@ class BannerController {
         this._aiPageConcurrencyLatencyEmaMs = 0;
         this._aiPageConcurrencyQueueWaitEmaMs = 0;
         this._aiPageDynamicMaxConcurrentTranslations = null;
+        // Dynamic batch-balance signal (marker-drop quality EMA) + the self-discovered
+        // per-request marker cap (null = seed lazily from the engine).
+        this._aiPageMarkerDropEma = 0;
+        this._aiPageLeafCapAdaptive = null;
         this._domTranslationSessionId = 0;
+        // Deferred-entry promotion backlog (continuous slot top-up).
+        this._domDeferredEntryBacklog = [];
+        this._domBacklogPromoting = false;
+        this._domBacklogPromotionScheduled = false;
+        this._domBacklogNeedsRank = false;
+        this._domBacklogRankMap = null;
+        this._domEagerPromotedTokens = 0;
+        // Persistent-cache prefetch promise + first-wave race latch (speed redesign W2).
+        this._domPersistentPrefetchReady = null;
+        this._domFirstWaveRaceDone = false;
         this._domTokenUsage = {
             inputTokens: 0,
             outputTokens: 0,
@@ -444,37 +482,21 @@ class BannerController {
             model: detail.model || "",
             translatorId: detail.translatorId || "LocalTranslate",
         };
+        this._aiPageConfig = this.normalizeAiPageConfig(detail.aiPageConfig);
         this.currentTranslator = "dom";
+        // Single session-init boundary: resetDomPageRuntimeState owns the whole per-session
+        // state block (counters, queue, caches-to-keep, lazy/tuning groups, breaker latch).
         this.resetDomPageRuntimeState();
-        this._domTranslationQueue = [];
-        this._domActiveTranslations = 0;
-        this._domCompletedTranslationEntries = 0;
-        this._domTotalTranslationEntries = 0;
-        this._domBatchFailureCount = 0;
-        // How many times an entry may be re-sent to fill leaves whose [[n]] markers the model
-        // dropped. Bounded so a block the model simply won't translate can't loop forever.
-        this._aiSectionMaxPartialRetries = 2;
-        // Completion-sweep state (final safety net for still-untranslated leaves).
-        this._domSweepCount = 0;
-        this._domSweptElements = null;
-        this._domGapCandidateElements = null;
-        // Per-leaf re-collection cap for dropped [[n]] markers (see finalizeAppliedAiPageEntry).
-        this._aiSectionLeafRetries = new WeakMap();
-        this.resetAiPageSectionBatchTuning();
-        this._domCoverageScanCount = 0;
-        this._domCoverageStableScanCount = 0;
-        this._domOwnMutationSuppressUntil = 0;
-        this._domTokenUsage = {
-            inputTokens: 0,
-            outputTokens: 0,
-            reasoningTokens: 0,
-            cachedInputTokens: 0,
-            totalTokens: 0,
-        };
         this._domMaxConcurrentTranslations = this.getDomPageMaxConcurrentTranslations();
         this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
             this._domPageTranslateOptions.sl
         );
+        // Kick the persistent-cache prefetch NOW (after reset cleared the session URL hash,
+        // before collection/banner work) so its round-trip overlaps everything below and the
+        // first wave can race it — the difference between a zero-token instant revisit paint
+        // and re-paying full generation for visible content.
+        this._domPersistentPrefetchReady =
+            this.prefetchPersistentTranslationCache() || Promise.resolve();
         this._domPageRootElements = this.getDomPageTranslationRoots();
         this.logDomPageDebug("start", {
             source: this._domResolvedSourceLanguage,
@@ -489,7 +511,7 @@ class BannerController {
 
     startConfiguredPdfPageTranslate() {
         getOrSetDefaultSettings(
-            ["languageSetting", "LocalTranslatorConfig"],
+            ["languageSetting", "LocalTranslatorConfig", "AiPageTranslateConfig"],
             DEFAULT_SETTINGS
         ).then((result) => {
             const localConfig = result.LocalTranslatorConfig || {};
@@ -509,8 +531,80 @@ class BannerController {
                 translatorId: "LocalTranslate",
                 sl: (result.languageSetting && result.languageSetting.sl) || "auto",
                 tl: (result.languageSetting && result.languageSetting.tl) || "en",
+                aiPageConfig: result.AiPageTranslateConfig,
             });
         });
+    }
+
+    // Normalize the AI page-translation behavior config coming from settings (or absent in tests)
+    // into a fully-populated object with safe defaults, so every consumer can read flags directly.
+    normalizeAiPageConfig(config = {}) {
+        const source = config && typeof config === "object" ? config : {};
+        let budget = Number(source.tokenBudget);
+        // Migration: 16000 was the ORIGINAL shipped default — there has never been UI for
+        // this value, so a stored 16000 is the old default persisted by getOrSetDefault,
+        // not a user choice. The default is now 0 (translate the whole page); honor any
+        // other explicitly-edited value.
+        if (budget === 16000) budget = 0;
+        // Geometric eager horizon (viewport-heights below the viewport). Absent/invalid →
+        // default 8; an EXPLICIT 0 means "no horizon" (eagerly drain the whole page).
+        let prefetchScreens = Number(source.prefetchScreens);
+        if (!Number.isFinite(prefetchScreens) || prefetchScreens < 0) prefetchScreens = 8;
+        return {
+            // Lazy on-scroll translation: translate near-viewport content first, defer the rest.
+            lazyTranslate: source.lazyTranslate !== false,
+            // How far below the viewport the eager pipeline pre-translates. Beyond it, the
+            // backlog is scroll-paced: the reveal path keeps ~2.5 screens ahead of the reader,
+            // so on very long pages tokens scale with what is actually read instead of page
+            // size, while short/medium pages still translate fully up front.
+            prefetchScreens,
+            // Soft cap on estimated input tokens the eager pipeline spends. 0 / invalid = no
+            // cap — the deferred backlog drains up to the prefetch horizon at full parallelism.
+            tokenBudget: Number.isFinite(budget) && budget > 0 ? budget : 0,
+            // Skip boilerplate regions (references, navboxes, categories, TOC, edit links).
+            skipBoilerplate: source.skipBoilerplate === true,
+        };
+    }
+
+    isAiPageLazyTranslateEnabled() {
+        return Boolean(this._aiPageConfig && this._aiPageConfig.lazyTranslate);
+    }
+
+    isAiPageBoilerplateSkipEnabled() {
+        return Boolean(this._aiPageConfig && this._aiPageConfig.skipBoilerplate);
+    }
+
+    // Estimated-input-token budget for a single non-gap dispatch wave; the remainder is deferred
+    // to the lazy on-scroll path. 0 disables the cap (viewport windowing still applies).
+    getAiPageLazyTokenBudget() {
+        const budget = this._aiPageConfig && this._aiPageConfig.tokenBudget;
+        return Number.isFinite(budget) && budget > 0 ? budget : 0;
+    }
+
+    // How many viewport-heights of below-fold (and above-fold) content a dispatch wave eagerly
+    // translates before deferring the rest to scroll. Generous so short/medium pages translate
+    // fully in one wave and only very long pages defer.
+    getAiPageLazyScreensBelow() {
+        return 2.5;
+    }
+
+    // Geometric horizon for EAGER backlog promotion (viewport-heights below the viewport).
+    // Inside it the pump drains at full parallelism; beyond it entries wait for the reveal
+    // path (which pre-translates getAiPageLazyScreensBelow() ahead of the reader). 0 = no
+    // horizon — drain the whole page eagerly regardless of length.
+    getAiPagePrefetchScreens() {
+        const screens = this._aiPageConfig && this._aiPageConfig.prefetchScreens;
+        return Number.isFinite(screens) && screens >= 0 ? screens : 8;
+    }
+
+    // Above-viewport slice of the eager-promotion horizon: content the reader scrolled past
+    // rarely gets re-read, so keep it small; scrolling up re-reveals it just-in-time.
+    getAiPagePrefetchScreensAbove() {
+        return 2;
+    }
+
+    getAiPageLazyScreensAbove() {
+        return 1;
     }
 
     normalizeDomPageTranslateEngine(engine) {
@@ -586,7 +680,66 @@ class BannerController {
     }
 
     getDomPageAuxiliaryContentRoots(primaryRoot) {
-        return this.getDomPageCommentRootsOutsideRoot(primaryRoot);
+        return [
+            ...this.getDomPageCommentRootsOutsideRoot(primaryRoot),
+            ...this.getDomPageInPageNavRootsOutsideRoot(primaryRoot),
+        ];
+    }
+
+    // In-page table-of-contents navigation OUTSIDE the primary content root (e.g. the
+    // Wikipedia Vector-2022 sidebar TOC lives in an aside next to <main>). Its entries
+    // mirror the article's headings, so leaving it untranslated reads as a hole in the
+    // page. Detection is generic, not site-specific: a nav-like region whose links
+    // overwhelmingly point at fragments WITHIN this page is content-derived navigation —
+    // global site chrome links to other pages and never matches.
+    // A nav/list whose links overwhelmingly point at fragments WITHIN this page is content-
+    // derived navigation (a table of contents, an on-page index) — NOT global site chrome,
+    // which links to OTHER pages. Generic, not site-specific: it is the signal that both
+    // adds the TOC as a translation root AND exempts it from the chrome text-node filter.
+    isInPageContentNav(el) {
+        if (!el || !el.querySelectorAll) return false;
+        const links = el.querySelectorAll("a[href]");
+        if (links.length < 3) return false;
+        let fragmentLinks = 0;
+        const targets = new Set();
+        for (const link of links) {
+            const href = link.getAttribute("href") || "";
+            // A real in-page anchor: "#section" — not "#" alone and not an SPA hash-router
+            // path ("#/..." / "#!...").
+            if (/^#(?![/!])./.test(href)) {
+                fragmentLinks += 1;
+                targets.add(href);
+            }
+        }
+        return targets.size >= 3 && fragmentLinks / links.length >= 0.7;
+    }
+
+    getDomPageInPageNavRootsOutsideRoot(primaryRoot) {
+        const out = [];
+        let candidates;
+        try {
+            candidates = document.querySelectorAll(
+                "nav, [role='navigation'], [role='directory'], [id*='toc' i], [class*='toc' i]"
+            );
+        } catch {
+            return out;
+        }
+        for (const el of candidates) {
+            if (out.length >= 3) break;
+            if (!el || !el.isConnected || primaryRoot.contains(el)) continue;
+            if (el.closest && el.closest("footer,[role='contentinfo'],[aria-hidden='true']")) {
+                continue;
+            }
+            // Already covered by a candidate we kept (outermost wins).
+            if (out.some((kept) => kept.contains(el))) continue;
+            if (!this.isInPageContentNav(el)) continue;
+            const text = String(el.textContent || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            if (text.length < 8) continue;
+            out.push(el);
+        }
+        return out;
     }
 
     getDomPageCommentRootSelector() {
@@ -3106,7 +3259,7 @@ class BannerController {
         if (this.currentTranslator !== "dom") return;
         if (this._domCircuitBreakerActive) return;
         if (this._domCoverageScanTimer) return;
-        if (this._domCoverageScanCount >= 2) {
+        if (this._domCoverageScanCount >= 6) {
             this.finalizeDomPageCoverageAfterScanLimit();
             return;
         }
@@ -3146,18 +3299,21 @@ class BannerController {
         return true;
     }
 
-    // Final safety net for "translation complete but a block is still in the source language".
-    // Walks the translation roots for meaningful, not-yet-target text and un-marks its section
-    // so the next dispatch re-collects it (the eligibility walker then sends only the leaves
-    // that are still source text; cached ones are excluded). Two bounds guarantee convergence:
-    // a global sweep cap, and a per-element WeakSet so a block the model simply refuses to
-    // translate (e.g. all proper nouns) is swept at most once and then left as-is.
+    // Final safety net for "translation complete but a block is still in the source language"
+    // (typically leaves whose [[n]] marker the model dropped in a large batch). Walks the
+    // translation roots for meaningful, not-yet-target text and un-marks its section so the next
+    // dispatch re-collects it (the eligibility walker then sends only the leaves that are still
+    // source text; cached ones are excluded). Convergence is guaranteed two ways: a per-element
+    // WeakSet (each leaf is swept at most once, so a block the model truly won't translate — e.g.
+    // all proper nouns — can't loop), and a bounded number of sweep passes. The pass/leaf caps
+    // are generous enough to drain the dozens of gaps a long page can accumulate instead of
+    // capping at a single handful and leaving the rest permanently untranslated.
     sweepUntranslatedDomPageLeaves() {
-        if ((this._domSweepCount || 0) >= 1) return false;
+        if ((this._domSweepCount || 0) >= 4) return false;
         const targetLang = this._domPageTranslateOptions?.tl || "";
         if (!this._domSweptElements) this._domSweptElements = new WeakSet();
         let found = 0;
-        const maxFound = 8;
+        const maxFound = 40;
         for (const root of this._domPageRootElements || []) {
             if (!root || !root.isConnected) continue;
             const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -3165,6 +3321,9 @@ class BannerController {
             while ((node = walker.nextNode())) {
                 if (!this.isMeaningfulDomPageTextNode(node)) continue;
                 if (this.isDomPageTextAlreadyInTargetLanguage(node.nodeValue, targetLang)) continue;
+                // Provable identity (instant keep-source): correctly untranslated — don't
+                // burn the bounded sweep budget releasing and re-collecting it.
+                if (this.isInstantKeepSourceLeafText(node.nodeValue)) continue;
                 const el = node.parentElement;
                 if (!el || this._domSweptElements.has(el)) continue;
                 if (
@@ -3331,9 +3490,15 @@ class BannerController {
             return true;
         }
         // Navigation: skip only SITE-LEVEL nav (outside the article/main content). An in-content
-        // TOC / breadcrumbs / "related" nav inside the article IS translated.
+        // TOC / breadcrumbs / "related" nav inside the article IS translated — and so is an
+        // in-PAGE table of contents that sits OUTSIDE main (the Wikipedia Vector-2022 sidebar
+        // TOC): its links are on-page fragments, so it is content navigation, not site chrome.
         const nav = el.closest("nav,[role='navigation']");
-        if (nav && !nav.closest("main,article,[role='main'],[role='article']")) {
+        if (
+            nav &&
+            !nav.closest("main,article,[role='main'],[role='article']") &&
+            !this.isInPageContentNav(nav)
+        ) {
             return true;
         }
         return false;
@@ -3754,6 +3919,24 @@ class BannerController {
         this._aiPageConcurrencyQueueWaitEmaMs = 0;
         this._aiPageDynamicMaxConcurrentTranslations = this.getAiPageConcurrencyLimits().initial;
         this._domMaxConcurrentTranslations = this.getDomPageMaxConcurrentTranslations();
+        // Dynamic batch-balance signal (marker-drop quality EMA). Zero = "no data yet".
+        // The adaptive marker cap re-seeds from the engine on the next read (null).
+        this._aiPageMarkerDropEma = 0;
+        this._aiPageLeafCapAdaptive = null;
+    }
+
+    // QUALITY signal: fraction of a reply's [[n]] blocks the model failed to resolve
+    // (dropped markers / rejected echoes). Rises with batch size on weak models — the
+    // balance controller shrinks the batch target while this is elevated and grows it
+    // back as clean batches decay the EMA (0.7^n).
+    recordAiPageBatchQualityTelemetry({ blocks = 0, unresolved = 0 } = {}) {
+        if (!Number.isFinite(blocks) || blocks <= 0) return;
+        const rate = Math.min(1, Math.max(0, unresolved / blocks));
+        this._aiPageMarkerDropEma = Number.isFinite(this._aiPageMarkerDropEma)
+            ? this._aiPageMarkerDropEma * 0.7 + rate * 0.3
+            : rate;
+        // AIMD self-discovery of the per-request marker cap (see updateAiPageMarkerCap).
+        this.updateAiPageMarkerCap(blocks, rate);
     }
 
     getAiPageConcurrencyLimits() {
@@ -3865,16 +4048,37 @@ class BannerController {
 
     scaleAiPageSectionBatchOptions(options) {
         const scale = this.getAiPageSectionBatchScale();
-        if (scale === 1) return options;
-        return {
-            maxChars: Math.max(1, Math.round(options.maxChars * scale)),
-            maxInputTokens: Math.max(1, Math.round(options.maxInputTokens * scale)),
-            maxOutputTokens: Math.max(1, Math.round(options.maxOutputTokens * scale)),
-            maxItems:
-                scale > 1
-                    ? Math.max(1, Math.ceil(options.maxItems * Math.min(scale, 1.25)))
-                    : Math.max(1, Math.floor(options.maxItems * scale)),
-        };
+        const scaled =
+            scale === 1
+                ? options
+                : {
+                      maxChars: Math.max(1, Math.round(options.maxChars * scale)),
+                      maxInputTokens: Math.max(1, Math.round(options.maxInputTokens * scale)),
+                      maxOutputTokens: Math.max(1, Math.round(options.maxOutputTokens * scale)),
+                      maxItems:
+                          scale > 1
+                              ? Math.max(1, Math.ceil(options.maxItems * Math.min(scale, 1.25)))
+                              : Math.max(1, Math.floor(options.maxItems * scale)),
+                  };
+        return this.clampAiPageSectionBatchOutputCeiling(scaled);
+    }
+
+    // POST-scale clamp: keep a packed batch's estimated output under the ENGINE's
+    // first-attempt completion ceiling (see local.ts), so batch growth (batchScale up
+    // to 1.6x/1.35x) can never push a healthy batch into the truncation→regenerate
+    // double-generation path. openai: 0.9 × the universal 4096 floor (the banner does
+    // not know the model, so it must fit the lowest ceiling); openaiCompatible: 0.9 ×
+    // the 1536 local-slot budget (1.35 × 1450 = 1958 would silently truncate today).
+    // googleAiStudio / on-device have no pinned engine cap — no clamp.
+    clampAiPageSectionBatchOutputCeiling(options) {
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openai") {
+            return { ...options, maxOutputTokens: Math.min(options.maxOutputTokens, 3686) };
+        }
+        if (engine === "openaiCompatible") {
+            return { ...options, maxOutputTokens: Math.min(options.maxOutputTokens, 1382) };
+        }
+        return options;
     }
 
     recordAiPageSectionBatchTelemetry({
@@ -3937,7 +4141,14 @@ class BannerController {
         if (this._domCircuitBreakerActive) return;
         this._domCircuitBreakerActive = true;
         this.updateDomPageBannerStatus("error");
-        setTimeout(() => {
+        // Store the handle + session-guard the callback so a breaker armed in one session can
+        // never re-flush/re-scan a DIFFERENT session 15s later (resetDomPageRuntimeState clears
+        // both the flag and this timer, so the orphan is normally already gone — this guard is
+        // the cheap belt-and-braces matching the isStaleRun idiom).
+        const breakerSessionId = this._domTranslationSessionId;
+        this._domCircuitBreakerTimer = setTimeout(() => {
+            this._domCircuitBreakerTimer = null;
+            if (breakerSessionId !== this._domTranslationSessionId) return;
             this._domCircuitBreakerActive = false;
             this._domBatchFailureCount = 0;
             this.updateDomPageBannerStatus();
@@ -4053,6 +4264,27 @@ class BannerController {
 
     resetDomPageRuntimeState() {
         this._domTranslationSessionId += 1;
+        // Tear down any lazy on-scroll watchers from a previous session before starting fresh.
+        this.teardownAiPageLazyState();
+        // Per-session counters/queue/accounting — the single owner. startDomPageTranslate and
+        // cancelDomPageTranslate both route through here, so neither carries its own divergent
+        // copy of this block (the bug class where one path zeroed a field the other forgot).
+        this._domTranslationQueue = [];
+        this._domActiveTranslations = 0;
+        this._domTotalTranslationEntries = 0;
+        this._domCompletedTranslationEntries = 0;
+        this._domBatchFailureCount = 0;
+        // Completion-sweep state (final safety net for still-untranslated leaves).
+        this._domSweepCount = 0;
+        this._domSweptElements = null;
+        this._domCoverageScanCount = 0;
+        this._domTokenUsage = {
+            inputTokens: 0,
+            outputTokens: 0,
+            reasoningTokens: 0,
+            cachedInputTokens: 0,
+            totalTokens: 0,
+        };
         this._translatedSet = new WeakSet();
         this._translatedBlocks = new WeakSet();
         this._domPendingTextNodes = new WeakSet();
@@ -4063,10 +4295,25 @@ class BannerController {
         this._domNextApplySequence = 0;
         this._domNextApplyToFlush = 0;
         this._aiSectionTranslatedChildren = new WeakSet();
+        // Per-leaf re-collection cap for dropped [[n]] markers (see finalizeAppliedAiPageEntry).
         this._aiSectionLeafRetries = new WeakMap();
+        // Per-ELEMENT genuine-translation-failure cap. A child that fails this many times is
+        // given up on — kept marked so NO re-entry path (incremental scan, coverage sweep,
+        // gap-fill) re-collects it. The hard stop for the "fails → released → re-collected →
+        // fails …" token runaway: worst case it stays in the source language, never a loop.
+        this._domElementFailures = new WeakMap();
+        // Session token backstop: estimated output committed vs actually spent. If spend runs
+        // far past the page's own estimate, something is looping — stop dispatching.
+        this._domAiPageEstOutCommitted = 0;
+        this._domAiPageBudgetExceeded = false;
         this._aiSectionLeadDispatched = false;
         this._aiSectionFirstDispatchHooksRan = false;
         this._aiSectionPersistentUrlHash = "";
+        this._domPersistentPrefetchReady = null;
+        this._domFirstWaveRaceDone = false;
+        // Drop any coalesced stream applies from the previous session — a pending rAF
+        // drain must never write old-session text into the (possibly re-translating) page.
+        if (this._domBatchStreamPending) this._domBatchStreamPending.clear();
         this.resetAiPageSectionBatchTuning();
         if (this._domIncrementalScanTimer) {
             clearTimeout(this._domIncrementalScanTimer);
@@ -4075,6 +4322,14 @@ class BannerController {
         if (this._domCoverageScanTimer) {
             clearTimeout(this._domCoverageScanTimer);
             this._domCoverageScanTimer = null;
+        }
+        // Clear the circuit-breaker latch + its pending 15s recovery timer so a breaker armed
+        // in the previous session can neither block this one (dead-window) nor fire its
+        // re-flush/re-scan into it (stale-flush).
+        this._domCircuitBreakerActive = false;
+        if (this._domCircuitBreakerTimer) {
+            clearTimeout(this._domCircuitBreakerTimer);
+            this._domCircuitBreakerTimer = null;
         }
         this._domCoverageStableScanCount = 0;
         this._domGapCandidateElements = null;
@@ -4110,6 +4365,17 @@ class BannerController {
             if (gapOnly) this._domGapCandidateElements = null;
             return count;
         };
+        // Session token backstop (defense-in-depth over the per-element give-up cap): if the
+        // page has already SPENT far more output tokens than its own committed estimate,
+        // something is re-translating in a loop — stop dispatching new work. Worst case the
+        // tail stays in the source language; never an unbounded token burn.
+        if (this.isAiPageOutputBudgetExceeded()) {
+            this.logDomPageDebug("ai-section-dispatch:budget-stop", {
+                committed: this._domAiPageEstOutCommitted,
+                spent: this._domTokenUsage?.outputTokens || 0,
+            });
+            return finishDispatch(0);
+        }
         // Side-effects we want on the very first dispatch of a translation session:
         //   - DNS prefetch + TCP preconnect for the AI engine's host so the TLS
         //     handshake overlaps with our section collection (~100-200ms saved).
@@ -4121,7 +4387,13 @@ class BannerController {
             this._aiSectionFirstDispatchHooksRan = true;
             const engine = this._domPageTranslateOptions && this._domPageTranslateOptions.engine;
             injectDnsPrefetchForEngine(engine);
-            this.prefetchPersistentTranslationCache();
+            // startDomPageTranslate already issued the prefetch (synchronously, so it can
+            // overlap collection); this hook only covers dispatch paths that skip it
+            // (PDF viewer / direct test dispatch). Never query the IDB twice per session.
+            if (!this._domPersistentPrefetchReady) {
+                this._domPersistentPrefetchReady =
+                    this.prefetchPersistentTranslationCache() || Promise.resolve();
+            }
         }
         let sections = collectHtmlPageSections(this._domPageRootElements, {
             maxChars: this.getAiPageSectionMaxChars(),
@@ -4134,15 +4406,45 @@ class BannerController {
         if (!sections.length) return finishDispatch(0);
 
         // Lead-chunk fast path: on the very first dispatch of a translation session, split
-        // the first section's children into a small prefix (~1-2k chars) so it completes
-        // in ~0.5-1s and the user sees a translated paragraph almost immediately, while
-        // the remaining full-size sections stream in the background.
+        // a small prefix (~1-2k chars) off the best VISIBLE section so it completes in
+        // ~0.5-1s and the user sees a translated paragraph almost immediately, while the
+        // remaining full-size sections stream in the background. Spending the one-shot
+        // lead on sections[0] blindly wastes it on a mid-page invocation — document-top
+        // content the lazy window immediately defers. No tier-0 section (jsdom/no-layout,
+        // top-of-page) falls back to sections[0], preserving today's behavior exactly.
         if (!this._aiSectionLeadDispatched) {
             this._aiSectionLeadDispatched = true;
             const leadChars = this.getAiPageSectionLeadChars();
-            const split = this.splitSectionLeadChunk(sections[0], leadChars);
-            if (split) sections = [split.lead, split.remainder, ...sections.slice(1)];
+            let leadIndex = 0;
+            let bestDistance = Infinity;
+            for (let i = 0; i < sections.length; i += 1) {
+                const rank = this.getAiPageSectionViewportRank({ section: sections[i] }, i);
+                if (rank.tier === 0 && rank.distance < bestDistance) {
+                    bestDistance = rank.distance;
+                    leadIndex = i;
+                    if (rank.distance === 0) break; // starts at/above the viewport top
+                }
+            }
+            const split = this.splitSectionLeadChunk(sections[leadIndex], leadChars);
+            if (split) {
+                sections = [
+                    ...sections.slice(0, leadIndex),
+                    split.lead,
+                    split.remainder,
+                    ...sections.slice(leadIndex + 1),
+                ];
+            }
         }
+
+        // SPEED: split any section large enough to bind a request longer than the makespan
+        // target so it parallelizes across slots instead of pinning the page's completion
+        // time (one huge wiki section was ~9.8K output ≈ 33s alone). Costs ~125 overhead
+        // tokens per new unit; the smart batcher re-bundles small units so tokens stay flat.
+        sections = this.splitAiPageSectionsByOutput(sections);
+        // EFFICIENCY: coalesce runs of tiny infobox/list/fact fragments (one ja article =
+        // 117 sections, mostly micro) into fewer real translation units — fewer cache keys,
+        // captures, progress ticks and requests, with no loss of coverage.
+        sections = this.mergeAdjacentTinyAiPageSections(sections);
 
         const { tl } = this._domPageTranslateOptions;
         const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
@@ -4197,6 +4499,14 @@ class BannerController {
                     const segment = serializeTranslationLeaf(leaf);
                     const text = segment?.text || "";
                     if (!text) continue;
+                    // Provable identity (short Latin identifier on a non-Latin page): resolve
+                    // locally — the model would only answer '=' for it. Zero tokens.
+                    if (this.isInstantKeepSourceLeafText(segment.plainText)) {
+                        this._aiSectionTranslatedChildren.add(leaf);
+                        markElementTranslatedForRendering(leaf);
+                        cachedApplied += 1;
+                        continue;
+                    }
                     // Already translated this session (repeated string, SPA re-render, scroll
                     // back)? Apply straight from the per-string cache here — 0 tokens, instant —
                     // and keep it out of the request. This is what stops tokens from climbing as
@@ -4245,29 +4555,59 @@ class BannerController {
                 attempt: 0,
                 sessionId: this._domTranslationSessionId,
             };
-            // Snapshot the per-leaf original text now (before any translation overwrites
-            // it) so the hover-to-see-original tooltip can be wired up on apply.
-            entry.originalCapture = this.captureAiPageSectionOriginalTexts(entry, 0);
-            // Mark children as pending so subsequent scans skip them while in flight.
-            for (const child of untranslatedChildren) {
-                this._aiSectionTranslatedChildren.add(child);
-            }
+            // Defer the original-text snapshot + child marking until AFTER the lazy window decides
+            // which entries actually translate this wave — a deferred section is re-collected when
+            // the reader scrolls toward it, so capturing/marking it now would be wasted work and,
+            // worse, would mark it "in flight" and hide it from the lazy reveal path.
+            entry._untranslatedChildren = untranslatedChildren;
             enqueued.push(entry);
         }
         if (!enqueued.length) return finishDispatch(0);
-        this._domTotalTranslationEntries += enqueued.length;
+        // Order entries visible-first so the lazy window keeps the content nearest the reader.
+        // The returned rank Map is reused by the lazy window and the visible/offscreen split, so
+        // each section's position is measured exactly once for the whole wave.
+        const rankByEntry = this.prioritizeAiPageSectionEntriesByViewport(enqueued);
+        // Lazy windowing: on a normal (non-gap) wave, translate the sections within ~a couple of
+        // screens of the viewport now and defer the rest until the reader scrolls toward them.
+        // Gap-fill waves (gapOnly) are explicitly requested re-collections — never deferred.
+        const { keep, deferred } =
+            !gapOnly && this.isAiPageLazyTranslateEnabled()
+                ? this.selectAiPageEntriesForLazyWindow(enqueued, rankByEntry)
+                : { keep: enqueued, deferred: [] };
+        if (deferred.length) {
+            // Deferred entries are fully built (segTexts/cacheKey/inputTokens) — keep them
+            // in the promotion backlog so idle slots can pull them without a re-collect.
+            this.addAiPageBacklogEntries(deferred);
+            this.observeDeferredAiPageEntries(deferred);
+        }
+        if (!keep.length) return finishDispatch(0);
+        // Commit the kept entries: snapshot per-leaf originals (before any translation overwrites
+        // them) and mark children as pending so concurrent scans skip them while in flight.
+        for (const entry of keep) {
+            entry.originalCapture = this.captureAiPageSectionOriginalTexts(entry, 0);
+            for (const child of entry._untranslatedChildren || []) {
+                this._aiSectionTranslatedChildren.add(child);
+            }
+            // Session token backstop: accumulate the page's OWN estimate of work committed.
+            this._domAiPageEstOutCommitted =
+                (this._domAiPageEstOutCommitted || 0) + (entry.outputTokens || 0);
+        }
+        this._domTotalTranslationEntries += keep.length;
         this._domCoverageStableScanCount = 0;
         this.updateDomPageBannerStatus();
         this.logDomPageDebug("ai-section-dispatch", {
             reason,
             sections: sections.length,
-            enqueued: enqueued.length,
+            enqueued: keep.length,
+            deferred: deferred.length,
         });
-        this.prioritizeAiPageSectionEntriesByViewport(enqueued);
         const visibleEntries = [];
         const offscreenEntries = [];
-        for (const entry of enqueued) {
-            if (this.getAiPageSectionViewportTier(entry) === 0) visibleEntries.push(entry);
+        for (const entry of keep) {
+            // Reuse the wave's rank for the tier; only re-measure if this entry was not ranked.
+            const rank = rankByEntry && rankByEntry.get(entry);
+            const tier = rank ? rank.tier : this.getAiPageSectionViewportTier(entry);
+            if (tier === 0) visibleEntries.push(entry);
             else offscreenEntries.push(entry);
         }
         const streamingLimit = this.getAiPageVisibleStreamingLimit(visibleEntries.length);
@@ -4278,7 +4618,551 @@ class BannerController {
         this.buildAiPageSectionBatches(batchEntries).forEach((batch) =>
             this.enqueueAiPageSectionBatchTranslation(batch)
         );
-        return finishDispatch(enqueued.length);
+        return finishDispatch(keep.length);
+    }
+
+    // Split viewport-ordered entries into the ones to translate now (near the viewport and within
+    // the per-wave token budget) and the ones to defer until the reader scrolls toward them. At
+    // least the highest-priority entry is always kept so a wave never no-ops while work remains.
+    selectAiPageEntriesForLazyWindow(entries, rankByEntry = null) {
+        const keep = [];
+        const deferred = [];
+        const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+        const belowLimit = vh * (1 + this.getAiPageLazyScreensBelow());
+        const aboveLimit = vh * this.getAiPageLazyScreensAbove();
+        const budget = this.getAiPageLazyTokenBudget();
+        let tokens = 0;
+        for (const entry of entries) {
+            // Reuse the rank's already-measured geometry when the caller supplied the wave's
+            // rank Map; only fall back to a fresh measurement if this entry was not ranked.
+            const rank = rankByEntry && rankByEntry.get(entry);
+            const within = rank
+                ? this.isLazyWindowRankWithin(rank, belowLimit, aboveLimit)
+                : this.isEntryWithinLazyViewportWindow(entry, belowLimit, aboveLimit);
+            const fitsBudget = budget <= 0 || tokens + (entry.inputTokens || 0) <= budget;
+            if (!keep.length || (within && fitsBudget)) {
+                keep.push(entry);
+                tokens += entry.inputTokens || 0;
+            } else {
+                deferred.push(entry);
+            }
+        }
+        return { keep, deferred };
+    }
+
+    // ------------------------------------------------------------------------------
+    // Deferred-entry backlog + continuous slot top-up (speed redesign).
+    // ------------------------------------------------------------------------------
+    // Deferred sections keep their fully-built entries in a viewport-ranked backlog
+    // instead of being discarded and re-collected on scroll. Whenever the request queue
+    // drains with slots free, the pump promotes just enough backlog to refill them — so
+    // the engine's parallelism stays saturated for the whole page instead of being
+    // scroll-paced. Lazy semantics survive via the token-budget gate: eager (non-revealed)
+    // promotion stops at getAiPageLazyTokenBudget(); reveal-boosted entries always promote.
+
+    addAiPageBacklogEntries(entries) {
+        if (!entries || !entries.length) return;
+        if (!this._domDeferredEntryBacklog) this._domDeferredEntryBacklog = [];
+        const backlog = this._domDeferredEntryBacklog;
+        const seen = new Set(backlog.map((e) => e && e.cacheKey));
+        for (const entry of entries) {
+            if (!entry || !entry.cacheKey || seen.has(entry.cacheKey)) continue;
+            entry.sessionId = this._domTranslationSessionId;
+            seen.add(entry.cacheKey);
+            backlog.push(entry);
+        }
+    }
+
+    // True when the backlog still holds entries the pump may promote right now — used to
+    // keep the coverage machinery from declaring the page done while eager promotion is
+    // still draining. Entries blocked SOLELY by the token-budget gate or the prefetch
+    // horizon do not count (they are scroll-paced, not pending), so near-viewport
+    // dropped-marker gaps sweep without waiting for a reveal.
+    hasPromotableAiPageBacklogEntries() {
+        const backlog = this._domDeferredEntryBacklog;
+        if (!backlog || !backlog.length) return false;
+        if (backlog.some((entry) => entry && entry._lazyBoost)) return true;
+        const budget = this.getAiPageLazyTokenBudget();
+        if (budget > 0 && this._domEagerPromotedTokens >= budget) return false;
+        const prefetchScreens = this.getAiPagePrefetchScreens();
+        if (prefetchScreens <= 0) return true;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+        const belowLimit = vh * (1 + prefetchScreens);
+        const aboveLimit = vh * this.getAiPagePrefetchScreensAbove();
+        // Backlog is viewport-ordered, so the nearest entry is checked first and this
+        // usually short-circuits after one cached rank lookup.
+        return backlog.some(
+            (entry) =>
+                entry &&
+                this.isLazyWindowRankWithin(
+                    this.getAiPageBacklogEntryRank(entry),
+                    belowLimit,
+                    aboveLimit
+                )
+        );
+    }
+
+    // Per-entry viewport rank for backlog gating, cached across pump passes in
+    // _domBacklogRankMap. The map is the cross-wave companion to the per-wave rank Map in
+    // dispatchAiPageSections: it is refreshed wholesale when _domBacklogNeedsRank signals a
+    // scroll/reveal, and lazily filled for entries deferred after the last refresh — so each
+    // backlog entry costs one getBoundingClientRect per viewport change, not per pass.
+    getAiPageBacklogEntryRank(entry) {
+        if (!this._domBacklogRankMap) this._domBacklogRankMap = new Map();
+        // _domBacklogNeedsRank is the single staleness authority: while it is raised the
+        // cached ranks describe a viewport that has since moved, so measure fresh (and
+        // refresh the cache entry). The pump's re-rank pass clears the flag and replaces
+        // the whole map; until then every reader pays a live read instead of acting on
+        // stale geometry — otherwise a scrolled-toward entry between the reveal margin and
+        // the horizon could stay blocked with no reveal left to unblock it.
+        let rank = this._domBacklogNeedsRank ? null : this._domBacklogRankMap.get(entry);
+        if (!rank) {
+            rank = this.getAiPageSectionViewportRank(entry);
+            this._domBacklogRankMap.set(entry, rank);
+        }
+        return rank;
+    }
+
+    // Schedule a promotion pass on a microtask. The indirection matters: flush runs inside
+    // dispatch/enqueue synchronous bodies, and promoting inline there would let offscreen
+    // backlog batches claim slots BEFORE the dispatch finishes enqueueing its own
+    // higher-priority viewport work. A microtask runs right after the current synchronous
+    // body, costing nothing.
+    scheduleAiPageBacklogPromotion() {
+        if (this._domBacklogPromotionScheduled) return;
+        if (!this.hasPromotableAiPageBacklogEntries()) return;
+        this._domBacklogPromotionScheduled = true;
+        const sessionId = this._domTranslationSessionId;
+        const runPromotion = () => {
+            this._domBacklogPromotionScheduled = false;
+            if (sessionId !== this._domTranslationSessionId) return;
+            if (this.currentTranslator !== "dom") return;
+            const before = this._domDeferredEntryBacklog ? this._domDeferredEntryBacklog.length : 0;
+            const promoted = this.promoteAiPageBacklogEntries();
+            const after = this._domDeferredEntryBacklog ? this._domDeferredEntryBacklog.length : 0;
+            // Nothing promoted but entries were resolved/dropped (cache hits, stale, gone):
+            // re-run the flush tail so the coverage/done trigger gets re-evaluated. Guarded
+            // against looping: when the backlog did not shrink, promotion is slot- or
+            // budget-blocked and the next run completion re-triggers the pump anyway.
+            if (!promoted && after < before) this.flushDomTranslationQueue();
+        };
+        if (typeof queueMicrotask === "function") queueMicrotask(runPromotion);
+        else Promise.resolve().then(runPromotion);
+    }
+
+    promoteAiPageBacklogEntries() {
+        const backlog = this._domDeferredEntryBacklog;
+        if (!backlog || !backlog.length) return 0;
+        if (this._domBacklogPromoting) return 0;
+        if (this._domCircuitBreakerActive) return 0;
+        if (this.currentTranslator !== "dom") return 0;
+        // Token-runaway backstop is a session-wide admission gate: the deferred backlog
+        // promotes NEW output-token work outside dispatchAiPageSections, so it must honor
+        // the same latch (in-flight requests + cheap dropped-marker heals still finish).
+        if (this.isAiPageOutputBudgetExceeded()) return 0;
+        this._domBacklogPromoting = true;
+        try {
+            const cap = Math.max(1, this._domMaxConcurrentTranslations || 1);
+            const queueLen = this._domTranslationQueue ? this._domTranslationQueue.length : 0;
+            const freeSlots = cap - this._domActiveTranslations - queueLen;
+            if (freeSlots <= 0) return 0;
+            // Small-cap engines (local LLM / on-device): while work is in flight, keep the
+            // last slot for reveal-boosted visible content so it never queues behind an
+            // offscreen backlog batch. When fully idle there is nothing to reserve for.
+            const boostedOnly = cap <= 8 && freeSlots <= 1 && this._domActiveTranslations > 0;
+            // Re-rank by viewport only when a scroll/reveal happened since the last sort;
+            // boosted entries stay in front (stable partition). The fresh rank Map replaces
+            // the cached backlog ranks so the horizon gate below reads current geometry.
+            if (this._domBacklogNeedsRank) {
+                this._domBacklogNeedsRank = false;
+                this._domBacklogRankMap = this.prioritizeAiPageSectionEntriesByViewport(backlog);
+                const boosted = backlog.filter((e) => e && e._lazyBoost);
+                if (boosted.length) {
+                    const rest = backlog.filter((e) => e && !e._lazyBoost);
+                    backlog.length = 0;
+                    backlog.push(...boosted, ...rest);
+                }
+            }
+            const budget = this.getAiPageLazyTokenBudget();
+            // Geometric eager horizon: non-boosted entries beyond it stay in the backlog and
+            // translate just-in-time when the reveal path boosts them. This is what keeps a
+            // very long page's token cost proportional to what is actually read — the page
+            // still translates fully, paced by scroll instead of all up front.
+            const prefetchScreens = this.getAiPagePrefetchScreens();
+            const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+            const horizonBelow = prefetchScreens > 0 ? vh * (1 + prefetchScreens) : Infinity;
+            const horizonAbove = vh * this.getAiPagePrefetchScreensAbove();
+            const { maxChars } = this.getAiPageSectionBatchOptions();
+            const minBatchChars =
+                this._domPageTranslateOptions.engine === "openaiCompatible" ? 1200 : 3000;
+            const backlogChars = backlog.reduce(
+                (sum, e) => sum + String(e?.sourceText || "").length,
+                0
+            );
+            // ~one batch per free slot per pass: enough to refill the engine, small enough
+            // that the next pass re-ranks against the latest viewport before promoting more.
+            const perBatchTarget = Math.min(
+                maxChars,
+                Math.max(minBatchChars, Math.ceil(backlogChars / cap))
+            );
+            const charBudget = freeSlots * perBatchTarget;
+            const promoted = [];
+            const remaining = [];
+            let accumChars = 0;
+            for (const entry of backlog) {
+                if (!entry) continue;
+                if (accumChars >= charBudget) {
+                    remaining.push(entry);
+                    continue;
+                }
+                const isBoosted = Boolean(entry._lazyBoost);
+                if (boostedOnly && !isBoosted) {
+                    remaining.push(entry);
+                    continue;
+                }
+                if (!isBoosted && budget > 0 && this._domEagerPromotedTokens >= budget) {
+                    remaining.push(entry);
+                    continue;
+                }
+                if (
+                    !isBoosted &&
+                    horizonBelow !== Infinity &&
+                    !this.isLazyWindowRankWithin(
+                        this.getAiPageBacklogEntryRank(entry),
+                        horizonBelow,
+                        horizonAbove
+                    )
+                ) {
+                    remaining.push(entry);
+                    continue;
+                }
+                const state = this.validateAiPageBacklogEntry(entry);
+                if (state !== "promote") continue; // resolved ("skip") or re-routed ("stale")
+                // Commit exactly like the dispatch keep-path: snapshot originals, mark
+                // children pending, count the entry, reset coverage stability.
+                entry.originalCapture = this.captureAiPageSectionOriginalTexts(entry, 0);
+                for (const child of entry._untranslatedChildren || []) {
+                    this._aiSectionTranslatedChildren.add(child);
+                }
+                this._domAiPageEstOutCommitted =
+                    (this._domAiPageEstOutCommitted || 0) + (entry.outputTokens || 0);
+                this._domTotalTranslationEntries += 1;
+                promoted.push(entry);
+                accumChars += String(entry.sourceText || "").length;
+                if (!isBoosted) this._domEagerPromotedTokens += entry.inputTokens || 0;
+            }
+            this._domDeferredEntryBacklog = remaining;
+            this._domHasDeferredSections =
+                remaining.length > 0 ||
+                Boolean(this._domLazyDeferredChildren && this._domLazyDeferredChildren.size > 0);
+            if (!promoted.length) return 0;
+            this._domCoverageStableScanCount = 0;
+            this.updateDomPageBannerStatus();
+            this.logDomPageDebug("ai-backlog:promote", {
+                entries: promoted.length,
+                chars: accumChars,
+                freeSlots,
+            });
+            this.buildAiPageSectionBatches(promoted).forEach((batch) =>
+                this.enqueueAiPageSectionBatchTranslation(batch)
+            );
+            return promoted.length;
+        } finally {
+            this._domBacklogPromoting = false;
+        }
+    }
+
+    // Re-validate a deferred entry IMMEDIATELY before committing it: the page may have
+    // mutated under it (SPA re-render), another wave may have translated it, or its
+    // strings may have entered the per-string cache since deferral. Returns:
+    //   "promote" — fresh; commit and request it.
+    //   "skip"    — resolved with zero tokens (translated meanwhile / fully cached).
+    //   "stale"   — DOM drifted; routed to the gap-fill re-collection instead.
+    validateAiPageBacklogEntry(entry) {
+        if (!entry || entry.sessionId !== this._domTranslationSessionId) return "skip";
+        const children = entry._untranslatedChildren || entry.section?.children || [];
+        if (!children.length) return "skip";
+        const dropToGapFallback = () => {
+            let anyConnected = false;
+            for (const child of children) {
+                if (child && child.isConnected) {
+                    this.addDomGapCandidateElement(child);
+                    anyConnected = true;
+                }
+            }
+            if (anyConnected) this.scheduleDomPageIncrementalScan(120);
+            return "stale";
+        };
+        const eligibleChildren = [];
+        for (const child of children) {
+            if (!child || !child.isConnected) return dropToGapFallback();
+            if (this.isAiPageSectionElementEligible(child)) eligibleChildren.push(child);
+        }
+        if (!eligibleChildren.length) return "skip"; // translated by another wave meanwhile
+        if (eligibleChildren.length !== children.length) return dropToGapFallback();
+        // Re-serialize and compare to the deferral-time snapshot: any drift means the
+        // snapshot (and its cacheKey) no longer describes the DOM — re-collect instead.
+        const freshLeaves = [];
+        const freshTexts = [];
+        for (const child of children) {
+            for (const leaf of findLeafBlocksInElement(child)) {
+                if (!this.isAiPageSectionElementEligible(leaf)) continue;
+                const segment = serializeTranslationLeaf(leaf);
+                if (!segment || !segment.text) continue;
+                freshLeaves.push(leaf);
+                freshTexts.push(segment.text);
+            }
+        }
+        const stored = entry.segTexts || [];
+        if (
+            freshTexts.length !== stored.length ||
+            freshTexts.some((text, i) => text !== stored[i])
+        ) {
+            return dropToGapFallback();
+        }
+        // Per-string cache re-check: strings translated since deferral paint instantly here
+        // (zero tokens). A fully-cached entry never needs the request at all.
+        let uncached = 0;
+        for (let i = 0; i < freshLeaves.length; i += 1) {
+            const cached = this.getCachedSegmentText(freshTexts[i]);
+            if (cached != null && this.applyCachedLeafTranslation(freshLeaves[i], cached)) {
+                continue;
+            }
+            uncached += 1;
+        }
+        if (!uncached) {
+            for (const child of children) {
+                this._aiSectionTranslatedChildren.add(child);
+                markElementTranslatedForRendering(child);
+            }
+            return "skip";
+        }
+        return "promote";
+    }
+
+    // True when the entry's leading element sits within the eager-translation window (a few
+    // screens around the viewport). Unlaid-out elements (jsdom, display:none) count as "within"
+    // so they are never deferred on environments/elements without a real layout box.
+    isEntryWithinLazyViewportWindow(entry, belowLimit, aboveLimit) {
+        const el = entry && entry.section && entry.section.children && entry.section.children[0];
+        if (!el || typeof el.getBoundingClientRect !== "function") return true;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return true;
+        return rect.top < belowLimit && rect.bottom > -aboveLimit;
+    }
+
+    // Lazy-window membership from a pre-measured viewport rank (same test as
+    // isEntryWithinLazyViewportWindow, but on the rank's captured top/bottom — no fresh layout
+    // read). A rank with no usable geometry counts as in-window, matching the rect-path fallback.
+    isLazyWindowRankWithin(rank, belowLimit, aboveLimit) {
+        if (!rank || !rank.hasRect) return true;
+        return rank.top < belowLimit && rank.bottom > -aboveLimit;
+    }
+
+    // rootMargin for the lazy IntersectionObserver: pre-translate content a couple of screens
+    // before it scrolls into view so it is ready by the time the reader reaches it.
+    getAiPageLazyRootMargin() {
+        const pct = Math.round(this.getAiPageLazyScreensBelow() * 100);
+        return `${pct}% 0px ${pct}% 0px`;
+    }
+
+    ensureAiPageLazyObserver() {
+        if (this._domLazyObserver) return this._domLazyObserver;
+        if (typeof IntersectionObserver !== "function") return null;
+        try {
+            this._domLazyObserver = new IntersectionObserver(
+                (records) => this.onAiPageLazyAnchorsIntersect(records),
+                { root: null, rootMargin: this.getAiPageLazyRootMargin(), threshold: 0 }
+            );
+        } catch {
+            this._domLazyObserver = null;
+        }
+        return this._domLazyObserver;
+    }
+
+    // Watch each deferred section's leading element; when it scrolls within range, re-collect and
+    // translate just that section via the gap-fill path. Falls back to a throttled scroll rescan
+    // when IntersectionObserver is unavailable.
+    observeDeferredAiPageEntries(entries) {
+        if (!entries || !entries.length) return;
+        if (!this._domLazyDeferredChildren) this._domLazyDeferredChildren = new Map();
+        const observer = this.ensureAiPageLazyObserver();
+        for (const entry of entries) {
+            const children = (entry && entry._untranslatedChildren) || [];
+            const anchor = children[0];
+            if (!anchor || !anchor.isConnected) continue;
+            this._domLazyDeferredChildren.set(
+                anchor,
+                children.filter((c) => c && c.isConnected)
+            );
+            // Re-check isConnected right before observing: observe() on a detached element never
+            // fires (per spec) and would leave a stale map entry that keeps _domHasDeferredSections
+            // pinned true. Skip it — the completion sweep / incremental scan still covers the rest.
+            if (observer && anchor.isConnected) {
+                try {
+                    observer.observe(anchor);
+                } catch {
+                    /* observe is best-effort */
+                }
+            }
+        }
+        this._domHasDeferredSections = this._domLazyDeferredChildren.size > 0;
+        if (!observer && this._domHasDeferredSections) this.ensureAiPageLazyScrollFallback();
+    }
+
+    onAiPageLazyAnchorsIntersect(records) {
+        if (this.currentTranslator !== "dom") return;
+        let revealed = false;
+        for (const record of records || []) {
+            if (!record || !record.isIntersecting) continue;
+            const anchor = record.target;
+            if (this._domLazyObserver) {
+                try {
+                    this._domLazyObserver.unobserve(anchor);
+                } catch {
+                    /* noop */
+                }
+            }
+            const children = this._domLazyDeferredChildren
+                ? this._domLazyDeferredChildren.get(anchor)
+                : null;
+            if (this._domLazyDeferredChildren) this._domLazyDeferredChildren.delete(anchor);
+            const targets = children && children.length ? children : [anchor];
+            for (const target of targets) {
+                if (target && target.isConnected) {
+                    this.addDomGapCandidateElement(target);
+                    revealed = true;
+                }
+            }
+        }
+        if (this._domLazyDeferredChildren) {
+            this._domHasDeferredSections = this._domLazyDeferredChildren.size > 0;
+        }
+        if (revealed) this.scheduleAiPageLazyReveal();
+    }
+
+    // Reveal path: the reader scrolled toward deferred content. Boost the matching backlog
+    // entries to the front and promote them immediately — they are pre-serialized, so
+    // reveal-to-request is ~0ms (the old path paid a 120ms debounce + a full re-collect).
+    // A gap-fill re-collection survives only as the fallback for revealed content with no
+    // fresh backlog entry (stale, consumed, or never deferred as an entry).
+    scheduleAiPageLazyReveal() {
+        if (this.currentTranslator !== "dom") return;
+        if (this._domCircuitBreakerActive) return;
+        // Reveal is a NEW-output-token admission point, so it honors the same machine-wide token
+        // backstop as the eager dispatch and backlog promotion: once spend has run away past the
+        // page's own estimate, no path admits fresh work (in-flight + cheap marker-heal finish).
+        if (this.isAiPageOutputBudgetExceeded()) return;
+        // Newly revealed content deserves another coverage look, so re-arm convergence detection
+        // (_domCoverageStableScanCount). But do NOT fully refill the global scan/sweep budget on
+        // every reveal — a scroll-storm would then run unbounded scan waves. Grant only a bounded
+        // slice back; the real bound is the per-element _domSweptElements WeakSet +
+        // _domElementFailures WeakMap (never reset on reveal), so each leaf is still swept at most
+        // once and a given-up leaf stays given up.
+        this._domCoverageStableScanCount = 0;
+        this._domCoverageScanCount = Math.max(0, (this._domCoverageScanCount || 0) - 2);
+        this._domSweepCount = Math.max(0, (this._domSweepCount || 0) - 1);
+        const backlog = this._domDeferredEntryBacklog || [];
+        const candidates = this._domGapCandidateElements;
+        let boosted = 0;
+        for (const entry of backlog) {
+            if (!entry || entry._lazyBoost) continue;
+            const children = entry._untranslatedChildren || entry.section?.children || [];
+            if (children.some((c) => this.isElementRelatedToDomGapCandidate(c, candidates))) {
+                entry._lazyBoost = true;
+                boosted += 1;
+            }
+        }
+        // A reveal implies the viewport moved: re-rank the backlog on the next promotion.
+        this._domBacklogNeedsRank = true;
+        if (boosted) {
+            // Stable partition: boosted entries first, viewport order preserved within groups.
+            this._domDeferredEntryBacklog = [
+                ...backlog.filter((e) => e && e._lazyBoost),
+                ...backlog.filter((e) => e && !e._lazyBoost),
+            ];
+        }
+        // Revealed candidates not covered by any (current or just-boosted) backlog entry
+        // need the re-collection fallback — their entry was stale, consumed, or never built.
+        let unmatched = false;
+        if (candidates && candidates.size) {
+            const boostedEntries = (this._domDeferredEntryBacklog || []).filter(
+                (e) => e && e._lazyBoost
+            );
+            for (const candidate of candidates) {
+                if (!candidate || !candidate.isConnected) continue;
+                const covered = boostedEntries.some((entry) =>
+                    (entry._untranslatedChildren || []).some(
+                        (child) =>
+                            child === candidate ||
+                            (child.contains && child.contains(candidate)) ||
+                            (candidate.contains && candidate.contains(child))
+                    )
+                );
+                if (!covered) {
+                    unmatched = true;
+                    break;
+                }
+            }
+        }
+        if (boosted) {
+            this.promoteAiPageBacklogEntries();
+            this.flushDomTranslationQueue();
+        }
+        if (!boosted || unmatched) {
+            this._domPageRootElements = this.getDomPageTranslationRoots();
+            this.dispatchAiPageSections({ reason: "lazy-scroll", gapOnly: true });
+        } else {
+            // Every revealed candidate is owned by a boosted entry; consume the candidate
+            // set so the next reveal wave starts clean (the gapOnly dispatch would have).
+            this._domGapCandidateElements = null;
+        }
+    }
+
+    ensureAiPageLazyScrollFallback() {
+        if (this._domLazyScrollHandler) return;
+        this._domLazyScrollHandler = () => {
+            if (!this._domHasDeferredSections) return;
+            this.scheduleDomPageIncrementalScan(200);
+        };
+        try {
+            window.addEventListener("scroll", this._domLazyScrollHandler, { passive: true });
+        } catch {
+            this._domLazyScrollHandler = null;
+        }
+    }
+
+    teardownAiPageLazyState() {
+        if (this._domLazyObserver) {
+            try {
+                this._domLazyObserver.disconnect();
+            } catch {
+                /* noop */
+            }
+            this._domLazyObserver = null;
+        }
+        if (this._domLazyRevealTimer) {
+            clearTimeout(this._domLazyRevealTimer);
+            this._domLazyRevealTimer = null;
+        }
+        if (this._domLazyScrollHandler) {
+            try {
+                window.removeEventListener("scroll", this._domLazyScrollHandler);
+            } catch {
+                /* noop */
+            }
+            this._domLazyScrollHandler = null;
+        }
+        this._domLazyDeferredChildren = null;
+        this._domHasDeferredSections = false;
+        // Promotion backlog is session state: a reset/cancel invalidates every deferred
+        // entry (sessionId bumps too, so a stray scheduled promotion becomes a no-op).
+        this._domDeferredEntryBacklog = [];
+        this._domBacklogPromoting = false;
+        this._domBacklogPromotionScheduled = false;
+        this._domBacklogNeedsRank = false;
+        this._domBacklogRankMap = null;
+        this._domEagerPromotedTokens = 0;
     }
 
     getAiPageSectionMaxChars() {
@@ -4305,9 +5189,14 @@ class BannerController {
      * for throughput. Returns 0 to disable the split entirely.
      */
     getAiPageSectionLeadChars() {
+        // First-paint lead: a tiny prefix that streams in almost immediately. Size it to the
+        // engine's decode speed so the FIRST translated paragraph appears fast everywhere —
+        // a slow engine needs a smaller lead to hit the same time-to-first-paint.
         const engine = this._domPageTranslateOptions.engine;
-        if (engine === "openaiCompatible") return 800;
-        return 2000;
+        if (this.isOnDeviceDomPageEngine()) return 600; // on-device (sequential) — smallest lead
+        if (engine === "openaiCompatible") return 800; // local server
+        if (engine === "openai") return 1200; // cloud but rate-limited / slower decode
+        return 2000; // googleAiStudio — fast
     }
 
     /**
@@ -4407,6 +5296,8 @@ class BannerController {
         if (!element || !element.isConnected) return false;
         if (this.isElementMarkedAsTranslatedAiSection(element)) return false;
         if (element.closest && element.closest("[hidden],[aria-hidden='true']")) return false;
+        // Opt-in: skip reference/citation lists, navboxes, category links, the TOC and edit links.
+        if (this.isAiPageBoilerplateSkipEnabled() && isBoilerplateRegion(element)) return false;
         const targetLang = this._domPageTranslateOptions?.tl || "";
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
         let node;
@@ -4424,11 +5315,16 @@ class BannerController {
 
     getAiPageSectionViewportRank(entry, index = 0) {
         const element = entry?.section?.children?.[0];
-        const fallback = { tier: 4, distance: Number.MAX_SAFE_INTEGER, index };
+        // hasRect=false marks "no usable geometry" — the lazy window treats those as in-window
+        // (translate now) and the tier sort sinks them last (tier 4). The rect's top/bottom ride
+        // along so the SAME measurement answers the tier sort, the lazy-window test and the
+        // visible/offscreen split — one getBoundingClientRect per entry per wave, not three.
+        const fallback = { tier: 4, distance: Number.MAX_SAFE_INTEGER, index, hasRect: false };
         if (!element || typeof element.getBoundingClientRect !== "function") return fallback;
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
         const rect = element.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return fallback;
+        const geom = { top: rect.top, bottom: rect.bottom, hasRect: true };
         const visibleTop = Math.max(0, rect.top);
         const visibleBottom = Math.min(viewportHeight, rect.bottom);
         const visiblePx = Math.max(0, visibleBottom - visibleTop);
@@ -4439,6 +5335,7 @@ class BannerController {
                 visiblePx: -visiblePx,
                 inputTokens: entry.inputTokens || 0,
                 index,
+                ...geom,
             };
         }
         if (rect.top >= viewportHeight && rect.top < viewportHeight * 2) {
@@ -4447,6 +5344,7 @@ class BannerController {
                 distance: rect.top - viewportHeight,
                 visiblePx: 0,
                 index,
+                ...geom,
             };
         }
         if (rect.bottom <= 0 && rect.bottom >= -viewportHeight) {
@@ -4455,6 +5353,7 @@ class BannerController {
                 distance: Math.abs(rect.bottom),
                 visiblePx: 0,
                 index,
+                ...geom,
             };
         }
         return {
@@ -4463,24 +5362,34 @@ class BannerController {
                 rect.top >= viewportHeight ? rect.top - viewportHeight : Math.abs(rect.bottom),
             visiblePx: 0,
             index,
+            ...geom,
         };
     }
 
+    // Rank every entry once and return a local entry->rank Map the whole dispatch wave reuses.
+    // Side effect: reorders `entries` in place visible-first (when there are 2+ to order). The Map
+    // is intentionally local — it is NEVER stamped on the entry, so it cannot leak into the
+    // cross-wave backlog, where _domBacklogNeedsRank stays the single staleness authority.
     prioritizeAiPageSectionEntriesByViewport(entries) {
-        if (!entries || entries.length < 2) return;
-        const ranked = entries.map((entry, index) => ({
-            entry,
-            ...this.getAiPageSectionViewportRank(entry, index),
-        }));
-        ranked.sort(
-            (a, b) =>
-                a.tier - b.tier ||
-                a.distance - b.distance ||
-                (a.visiblePx || 0) - (b.visiblePx || 0) ||
-                (a.inputTokens || 0) - (b.inputTokens || 0) ||
-                a.index - b.index
-        );
-        for (let i = 0; i < ranked.length; i += 1) entries[i] = ranked[i].entry;
+        const rankByEntry = new Map();
+        if (!entries || !entries.length) return rankByEntry;
+        const ranked = entries.map((entry, index) => {
+            const rank = this.getAiPageSectionViewportRank(entry, index);
+            rankByEntry.set(entry, rank);
+            return { entry, ...rank };
+        });
+        if (ranked.length >= 2) {
+            ranked.sort(
+                (a, b) =>
+                    a.tier - b.tier ||
+                    a.distance - b.distance ||
+                    (a.visiblePx || 0) - (b.visiblePx || 0) ||
+                    (a.inputTokens || 0) - (b.inputTokens || 0) ||
+                    a.index - b.index
+            );
+            for (let i = 0; i < ranked.length; i += 1) entries[i] = ranked[i].entry;
+        }
+        return rankByEntry;
     }
 
     getAiPageSectionBatchOptions() {
@@ -4524,7 +5433,68 @@ class BannerController {
             }
             return this.scaleAiPageSectionBatchOptions(options);
         }
+        if (engine === "openai") {
+            // openai-specific tiers: sized so the batch's ESTIMATED OUTPUT stays under the
+            // engine's universal 4096 first-attempt completion ceiling (local.ts) even
+            // after batchScale growth — otherwise every full-size CJK batch truncates and
+            // regenerates (input billed twice, ~2x wall-clock on exactly the big batches).
+            if (failures >= 2) {
+                options = {
+                    maxChars: 4000,
+                    maxInputTokens: 1200,
+                    maxOutputTokens: 1600,
+                    maxItems: 4,
+                };
+            } else if (failures >= 1) {
+                options = {
+                    maxChars: 6000,
+                    maxInputTokens: 1800,
+                    maxOutputTokens: 2400,
+                    maxItems: 8,
+                };
+            } else {
+                options = {
+                    maxChars: 9500,
+                    maxInputTokens: 2800,
+                    maxOutputTokens: 3600,
+                    maxItems: 12,
+                };
+            }
+            return this.scaleAiPageSectionBatchOptions(options);
+        }
+        if (engine === "googleAiStudio") {
+            // Gemini does NOT truncate big page batches — its API output budget scales with
+            // input (local.ts: maxOutputTokens = inputChars × 2) and the context is 1M — so
+            // these are GENEROUS truncation-safety ceilings, not real limits. The actual
+            // batch SIZE is chosen by getAiPageUnitOutputTarget (makespan) + the per-request
+            // leaf/marker cap; these just keep a runaway bin bounded. Roomy values let the
+            // page bundle into a handful of large balanced requests.
+            if (failures >= 2) {
+                options = {
+                    maxChars: 12000,
+                    maxInputTokens: 3600,
+                    maxOutputTokens: 4800,
+                    maxItems: 16,
+                };
+            } else if (failures >= 1) {
+                options = {
+                    maxChars: 28000,
+                    maxInputTokens: 8000,
+                    maxOutputTokens: 11000,
+                    maxItems: 40,
+                };
+            } else {
+                options = {
+                    maxChars: 64000,
+                    maxInputTokens: 18000,
+                    maxOutputTokens: 18000,
+                    maxItems: 96,
+                };
+            }
+            return this.scaleAiPageSectionBatchOptions(options);
+        }
         if (failures >= 2) {
+            // Default / unknown cloud engine — conservative (we don't know its output limit).
             options = {
                 maxChars: 6000,
                 maxInputTokens: 1800,
@@ -4539,12 +5509,6 @@ class BannerController {
                 maxItems: 4,
             };
         } else {
-            // Aggressive bundling by COUNT, not size: pack many small sections into one
-            // request (maxItems 8 -> 24) so a page full of little blocks goes out as a few
-            // batches instead of dozens. maxChars / output-token caps are unchanged, so each
-            // batch's reply stays within the model's output budget — no truncation/retries
-            // (important on Gemini 3, where we don't pin maxOutputTokens). The concurrency cap
-            // runs the batches in parallel, and a slow batch no longer throttles concurrency.
             options = {
                 maxChars: 24000,
                 maxInputTokens: 7000,
@@ -4555,21 +5519,292 @@ class BannerController {
         return this.scaleAiPageSectionBatchOptions(options);
     }
 
+    // The output-token size every translation UNIT (an entry, and a packed batch) aims for.
+    // This single knob balances all three axes:
+    //
+    //   SPEED  – a request's wall-clock is outputTokens / decodeRate, and the page finishes
+    //            only when its SLOWEST request does. So we cap every unit at ~one makespan
+    //            target's worth of generation: tokPerSec × AI_PAGE_MAKESPAN_TARGET_SEC, using
+    //            the MEASURED decode rate. Oversized sections are split down to this (see
+    //            splitAiPageSectionsByOutput) so no single atomic request pins the page.
+    //   TOKENS – never below the efficiency floor (~1200 out): under it the fixed ~125-token
+    //            per-request overhead exceeds ~5%. Small entries bundle UP to the target, so
+    //            request count stays ≈ totalOutput / target — not one-per-section.
+    //   QUALITY– shrink while the model drops [[n]] markers (rises with batch size on weak
+    //            models). Clean replies decay the EMA (0.7^n) and the target grows back, so
+    //            the controller continuously tracks the largest size the model handles cleanly.
+    //
+    // Engine caps (maxOutputTokens etc.) remain hard truncation-safety ceilings on top.
+    getAiPageUnitOutputTarget() {
+        // The smallest output-token batch worth making to fill a parallel slot — DERIVED, not
+        // hand-picked: every request re-pays a fixed overhead (the static system prompt +
+        // language header), so to keep that overhead under a target fraction of the batch, a
+        // batch must carry at least overhead/fraction tokens. The batcher then fans the page
+        // across up to `concurrency` bins of ≥ this floor, so a one-wave page finishes in
+        // ~(totalOutput/concurrency)/decodeRate — the parallel minimum — while no bin is small
+        // enough to be overhead-dominated. This is also the per-unit SPLIT/MERGE size.
+        const AI_PAGE_PER_REQUEST_OVERHEAD_TOK = 160; // static system prompt (~155) + header
+        const AI_PAGE_MAX_OVERHEAD_FRACTION = 0.06; // keep fixed per-request cost ≤ ~6% of a batch
+        const AI_PAGE_HARD_FLOOR_OUT = 1200;
+        const derivedFloor = Math.ceil(
+            AI_PAGE_PER_REQUEST_OVERHEAD_TOK / AI_PAGE_MAX_OVERHEAD_FRACTION
+        );
+        const engine = this._domPageTranslateOptions.engine;
+        const { maxOutputTokens } = this.getAiPageSectionBatchOptions();
+        // openai is slow + hard output-capped: its bins ARE the cap (bigger is impossible, and
+        // a slow engine's huge batch just blocks a slot), so size to the cap. Everyone else
+        // uses the overhead-derived floor + slot-fill.
+        const base = engine === "openai" ? maxOutputTokens : derivedFloor;
+        // Shrink under the live marker-drop signal (smaller batches → fewer markers → fewer
+        // drops); clean replies decay the EMA and it grows back.
+        const dropEma = Number.isFinite(this._aiPageMarkerDropEma) ? this._aiPageMarkerDropEma : 0;
+        const qualityFactor = dropEma < 0.005 ? 1 : Math.max(0.4, 1 - dropEma * 8);
+        return Math.min(
+            maxOutputTokens,
+            Math.max(AI_PAGE_HARD_FLOOR_OUT, Math.round(base * qualityFactor))
+        );
+    }
+
+    // Max translatable LEAVES (= [[n]] markers) per request. This is the real reliability
+    // limit — the more markers a reply must echo back in order, the likelier a weak model
+    // drops or reorders one — so it caps both how aggressively tiny sections merge and how
+    // many a batch bundles, independent of token size. Shrinks under the live marker-drop
+    // signal and grows back as replies come clean (same EMA as the output target).
+    // Per-request [[n]]-marker reliability cap, SELF-DISCOVERED at runtime (AIMD) instead of
+    // a hand-picked constant: it additively grows while the model echoes full batches cleanly
+    // and multiplicatively shrinks the instant it drops markers, so it converges on whatever
+    // the live engine+model actually handles (a strong Gemini walks up to ~hundreds; a weak
+    // model settles low) with no per-model magic number. The engine seed is only a starting
+    // point; FLOOR/CEILING are safety rails (above the ceiling the output cap binds anyway).
+    getAiPageMarkerCapBounds() {
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "googleAiStudio") return { seed: 200, floor: 64, ceiling: 384 };
+        if (engine === "openai") return { seed: 180, floor: 64, ceiling: 288 };
+        return { seed: 150, floor: 56, ceiling: 224 };
+    }
+
+    getAiPageMaxLeavesPerBatch() {
+        const { seed } = this.getAiPageMarkerCapBounds();
+        if (!Number.isFinite(this._aiPageLeafCapAdaptive) || this._aiPageLeafCapAdaptive <= 0) {
+            this._aiPageLeafCapAdaptive = seed;
+        }
+        return Math.round(this._aiPageLeafCapAdaptive);
+    }
+
+    // Fold one batch's marker outcome into the adaptive cap. Grow only when a batch actually
+    // EXERCISED the cap (≈full) and came back clean — proof the engine handles that size;
+    // shrink proportionally to the drop severity the moment markers go missing.
+    updateAiPageMarkerCap(blocks, dropRate) {
+        const { seed, floor, ceiling } = this.getAiPageMarkerCapBounds();
+        if (!Number.isFinite(this._aiPageLeafCapAdaptive) || this._aiPageLeafCapAdaptive <= 0) {
+            this._aiPageLeafCapAdaptive = seed;
+        }
+        const cap = this._aiPageLeafCapAdaptive;
+        if (dropRate >= 0.01) {
+            // Multiplicative decrease (AIMD): heavier drops cut deeper, bottoming at ×0.5.
+            this._aiPageLeafCapAdaptive = Math.max(
+                floor,
+                Math.round(cap * (1 - Math.min(0.5, dropRate * 3)))
+            );
+        } else if (blocks >= 0.7 * cap) {
+            // Clean AND near-full → additive increase: probe a slightly bigger batch.
+            this._aiPageLeafCapAdaptive = Math.min(ceiling, cap + 16);
+        }
+    }
+
+    // Encyclopedia infoboxes, fact tables and short list rows shatter a page into dozens of
+    // sub-600-char sections (one ja article = 117 sections, 84 of them under 50 output
+    // tokens). Each is its own translation unit: an extra cache key, original-capture,
+    // progress tick and — once they bundle past the per-batch marker cap — an extra request.
+    // Coalesce RUNS of small adjacent sections into units bounded by the makespan + marker
+    // caps. Normal-sized sections pass through untouched so viewport/lazy granularity on big
+    // articles is preserved; merging only ever joins fragments that were going to share a
+    // request anyway. Safe because a section is consumed only as a flat children list +
+    // children[0] (no cross-parent DOM assumption).
+    mergeAdjacentTinyAiPageSections(sections) {
+        if (!Array.isArray(sections) || sections.length < 2) return sections || [];
+        const engine = this._domPageTranslateOptions.engine;
+        // Local/on-device size by ctx slot — leave their section granularity alone.
+        if (engine === "openaiCompatible" || this.isOnDeviceDomPageEngine()) return sections;
+        const SMALL_OUT = 300; // a section under this is a fragment worth coalescing
+        const targetOut = this.getAiPageUnitOutputTarget();
+        const maxLeaves = this.getAiPageMaxLeavesPerBatch();
+        const normalize = (el) =>
+            String((el && el.textContent) || "")
+                .replace(/\s+/g, " ")
+                .trim();
+        const sectionOut = (children) => {
+            const plain = children.map(normalize).filter(Boolean).join(" ");
+            // PRE-IR basis: plain-only (must match splitAiPageSectionsByOutput, see estimator doc).
+            return estimateLlmOutputTokens(plain, plain);
+        };
+        const sectionLeaves = (children) => {
+            let n = 0;
+            for (const ch of children) n += findLeafBlocksInElement(ch).length || 0;
+            return n;
+        };
+        const out = [];
+        let group = null;
+        const flush = () => {
+            if (!group) return;
+            out.push({
+                parent: group.parent,
+                children: group.children,
+                plainText: group.children.map(normalize).filter(Boolean).join(" "),
+                role: group.role,
+            });
+            group = null;
+        };
+        for (const section of sections) {
+            const children = (section && section.children) || [];
+            const outTok = sectionOut(children);
+            if (outTok >= SMALL_OUT) {
+                // Normal section — flush any pending fragment run, emit as-is.
+                flush();
+                out.push(section);
+                continue;
+            }
+            // Only coalesce fragments in the SAME viewport tier so a near (eager) fragment is
+            // never merged with a far (deferred) one — that would defeat lazy windowing by
+            // pulling offscreen content into the eager wave.
+            const tier = this.getAiPageSectionViewportRank({ section }, 0).tier;
+            const leaves = sectionLeaves(children);
+            if (
+                group &&
+                (group.tier !== tier ||
+                    group.out + outTok > targetOut ||
+                    group.leaves + leaves > maxLeaves)
+            ) {
+                flush();
+            }
+            if (!group) {
+                group = {
+                    parent: section.parent,
+                    children: [],
+                    out: 0,
+                    leaves: 0,
+                    role: section.role,
+                    tier,
+                };
+            }
+            group.children.push(...children);
+            group.out += outTok;
+            group.leaves += leaves;
+        }
+        flush();
+        return out;
+    }
+
+    // Split a section whose leaves would generate more than one makespan target into
+    // contiguous child-groups each ≤ the target, so the smart dispatcher can run them in
+    // PARALLEL instead of one request binding the whole page's completion time. Each leaf
+    // is an independent [[n]] segment, so splitting costs only ~125 overhead tokens per new
+    // unit and no translation context (leaves never shared cross-segment context anyway).
+    splitAiPageSectionsByOutput(sections) {
+        const target = this.getAiPageUnitOutputTarget();
+        if (!Array.isArray(sections) || !sections.length || !target) return sections || [];
+        // Local/on-device engines size by ctx slot, not generation time — leave them whole.
+        const engine = this._domPageTranslateOptions.engine;
+        if (engine === "openaiCompatible" || this.isOnDeviceDomPageEngine()) return sections;
+        const normalize = (el) =>
+            String((el && el.textContent) || "")
+                .replace(/\s+/g, " ")
+                .trim();
+        const out = [];
+        for (const section of sections) {
+            const children = (section && section.children) || [];
+            if (children.length < 2) {
+                out.push(section);
+                continue;
+            }
+            const childOut = children.map((c) => {
+                // Size on PLAIN text (same structural basis as mergeAdjacentTinyAiPageSections),
+                // not innerHTML — split and merge must agree on a section's output size or they
+                // make inconsistent group/split decisions on the same content.
+                const plain = normalize(c);
+                return estimateLlmOutputTokens(plain, plain);
+            });
+            const total = childOut.reduce((sum, v) => sum + v, 0);
+            if (total <= target) {
+                out.push(section);
+                continue;
+            }
+            const buildSub = (group) => ({
+                parent: section.parent,
+                children: group,
+                plainText: group.map(normalize).filter(Boolean).join(" "),
+                role: section.role,
+            });
+            let group = [];
+            let acc = 0;
+            for (let i = 0; i < children.length; i += 1) {
+                if (group.length && acc + childOut[i] > target) {
+                    out.push(buildSub(group));
+                    group = [];
+                    acc = 0;
+                }
+                group.push(children[i]);
+                acc += childOut[i];
+            }
+            if (group.length) out.push(buildSub(group));
+        }
+        return out;
+    }
+
     buildAiPageSectionBatches(entries) {
         if (!entries || !entries.length) return [];
-        const { maxChars, maxInputTokens, maxOutputTokens, maxItems } =
-            this.getAiPageSectionBatchOptions();
-        // SPEED: size batches to SATURATE the parallel-request slots, not to minimise request
-        // count. Completion time ≈ (number of waves) × (per-batch generation time), and
-        // generation time grows with batch size — so a handful of huge batches finish far
-        // SLOWER than ~concurrency medium batches all generating at once. Target ~one parallel
-        // wave: aim for `concurrency` batches, each totalChars/concurrency, clamped to
-        // [minBatch, maxChars]. Tiny sections still bundle (maxItems), big pages still cap at
-        // maxChars (no truncation); request count stays bounded by concurrency.
+        const options = this.getAiPageSectionBatchOptions();
+        const { maxChars, maxInputTokens, maxOutputTokens, maxItems } = options;
         const concurrency = Math.max(1, this.getDomPageMaxConcurrentTranslations());
-        const totalChars = entries.reduce((sum, e) => sum + String(e?.sourceText || "").length, 0);
-        const minBatchChars =
-            this._domPageTranslateOptions.engine === "openaiCompatible" ? 1200 : 3000;
+        const engine = this._domPageTranslateOptions.engine;
+        const isCloudEngine = engine !== "openaiCompatible" && !this.isOnDeviceDomPageEngine();
+        const measured = entries.map((entry) => ({
+            entry,
+            len: String(entry?.sourceText || "").length,
+            inputTokens: entry?.inputTokens || estimateLlmPayloadTokens(entry?.sourceText || ""),
+            outputTokens:
+                entry?.outputTokens ||
+                estimateLlmOutputTokens(entry?.plainText || "", entry?.sourceText || ""),
+            leaves: Array.isArray(entry?.segBlocks) ? entry.segBlocks.length : 0,
+        }));
+        if (isCloudEngine) {
+            // Cloud, SPEED-FIRST: the page finishes when its SLOWEST request does, so spread
+            // the work across as many of the parallel slots as the page warrants and balance
+            // them to equal generation time (LPT). The page-fits-one-wave makespan is then
+            // ~(totalOutput/concurrency)/decodeRate — the parallel minimum. Bin count is the
+            // GREATEST of:
+            //   • slot-fill: min(concurrency, ceil(totalOut/unit)) — use the slots, but never
+            //     fragment into bins smaller than the unit floor (overhead),
+            //   • reliability: ceil(totalLeaves/maxLeaves) — cap [[n]] markers per request,
+            //   • truncation: ceil(totalOut/maxOutputTokens) — never blow the engine's cap.
+            // The last two can exceed `concurrency` for a genuinely huge page → extra waves
+            // (unavoidable); LPT keeps every wave balanced.
+            const unitTarget = this.getAiPageUnitOutputTarget();
+            const maxLeaves = this.getAiPageMaxLeavesPerBatch();
+            const totalOut = measured.reduce((sum, m) => sum + m.outputTokens, 0);
+            const totalLeaves = measured.reduce((sum, m) => sum + (m.leaves || 0), 0);
+            const binCount = Math.max(
+                1,
+                Math.min(
+                    measured.length,
+                    Math.max(
+                        Math.min(concurrency, Math.ceil(totalOut / unitTarget)),
+                        Math.ceil(totalLeaves / Math.max(1, maxLeaves)),
+                        Math.ceil(totalOut / Math.max(1, maxOutputTokens))
+                    )
+                )
+            );
+            return this.packAiPageBatchesLpt(measured, binCount, {
+                maxItems,
+                maxInputTokens,
+                maxOutputTokens,
+                maxLeaves,
+            });
+        }
+        // Local/on-device: ctx-slot constrained — char-targeted one-per-slot greedy sizing
+        // (per-request overhead is dwarfed by local slot scheduling).
+        const totalChars = measured.reduce((sum, m) => sum + m.len, 0);
+        const minBatchChars = engine === "openaiCompatible" ? 1200 : 3000;
         const targetChars = Math.min(
             maxChars,
             Math.max(minBatchChars, Math.ceil(totalChars / concurrency))
@@ -4579,19 +5814,13 @@ class BannerController {
         let currentChars = 0;
         let currentInputTokens = 0;
         let currentOutputTokens = 0;
-        for (const entry of entries) {
-            const len = String(entry?.sourceText || "").length;
-            const inputTokens =
-                entry?.inputTokens || estimateLlmPayloadTokens(entry?.sourceText || "");
-            const outputTokens =
-                entry?.outputTokens ||
-                estimateLlmOutputTokens(entry?.plainText || "", entry?.sourceText || "");
+        for (const m of measured) {
             const wouldOverflowItems = current.length >= maxItems;
-            const wouldOverflowChars = current.length > 0 && currentChars + len > targetChars;
+            const wouldOverflowChars = current.length > 0 && currentChars + m.len > targetChars;
             const wouldOverflowTokens =
-                current.length > 0 && currentInputTokens + inputTokens > maxInputTokens;
+                current.length > 0 && currentInputTokens + m.inputTokens > maxInputTokens;
             const wouldOverflowOutput =
-                current.length > 0 && currentOutputTokens + outputTokens > maxOutputTokens;
+                current.length > 0 && currentOutputTokens + m.outputTokens > maxOutputTokens;
             if (
                 wouldOverflowItems ||
                 wouldOverflowChars ||
@@ -4604,13 +5833,52 @@ class BannerController {
                 currentInputTokens = 0;
                 currentOutputTokens = 0;
             }
-            current.push(entry);
-            currentChars += len;
-            currentInputTokens += inputTokens;
-            currentOutputTokens += outputTokens;
+            current.push(m.entry);
+            currentChars += m.len;
+            currentInputTokens += m.inputTokens;
+            currentOutputTokens += m.outputTokens;
         }
         if (current.length) batches.push(current);
         return batches;
+    }
+
+    // Greedy LPT (Longest Processing Time) bin-packing: place each entry — largest output
+    // first — into the bin with the least output so far, so the bins finish at nearly the
+    // same time (the makespan is the heaviest bin). A bin that would breach a HARD engine
+    // cap (items / input / output truncation safety) spills into a fresh appended bin, so
+    // caps are never violated even if that adds a bin beyond binCount.
+    packAiPageBatchesLpt(measured, binCount, caps) {
+        const maxLeaves = caps.maxLeaves || Infinity;
+        const sorted = measured.slice().sort((a, b) => b.outputTokens - a.outputTokens);
+        const bins = Array.from({ length: Math.max(1, binCount) }, () => ({
+            entries: [],
+            out: 0,
+            in: 0,
+            leaves: 0,
+        }));
+        const fits = (bin, m) =>
+            bin.entries.length < caps.maxItems &&
+            (bin.entries.length === 0 || bin.out + m.outputTokens <= caps.maxOutputTokens) &&
+            (bin.entries.length === 0 || bin.in + m.inputTokens <= caps.maxInputTokens) &&
+            (bin.entries.length === 0 || bin.leaves + (m.leaves || 0) <= maxLeaves);
+        for (const m of sorted) {
+            let target = null;
+            for (const bin of bins) {
+                if (!fits(bin, m)) continue;
+                if (!target || bin.out < target.out) target = bin;
+            }
+            if (!target) {
+                // Every existing bin is at a hard cap — append one (truncation safety wins
+                // over the bin-count target).
+                target = { entries: [], out: 0, in: 0, leaves: 0 };
+                bins.push(target);
+            }
+            target.entries.push(m.entry);
+            target.out += m.outputTokens;
+            target.in += m.inputTokens;
+            target.leaves += m.leaves || 0;
+        }
+        return bins.filter((bin) => bin.entries.length).map((bin) => bin.entries);
     }
 
     // Apply a [[n]] segment reply onto the entry's leaf blocks by writing text-node
@@ -4623,21 +5891,115 @@ class BannerController {
     // "source + translation" answers down to the target-language chunk before anything can
     // touch the DOM or cache. `map` keys are 1-based and align with entry.segBlocks[n-1] /
     // entry.segTexts[n-1].
-    stripEchoSegmentsFromMap(map, entry) {
-        this.sanitizeAiPageSegmentMap(map, entry);
+    // SINGLE SOURCE OF TRUTH for turning ONE fresh model-reply segment into its final form,
+    // shared by the three fresh-reply ingest points (sanitizeAiPageSegmentMap,
+    // entryLocalSegmentMap's fresh branch, salvageStreamedAiPageBatchUnits). Returns:
+    //   null      → drop it (unverified '=' or a sanitize-rejected echo/bilingual reply) so
+    //               the leaf stays unresolved and flows into the bounded retry path,
+    //   "="       → verified keep-source sentinel (the apply layer leaves the source text),
+    //   <string>  → the sanitized translation to write.
+    // The store/read/cached-payload family is deliberately NOT routed here: those values were
+    // already verified at store time and must not be re-normalized.
+    resolveFreshReplySegment(sourceText, rawContent) {
+        const normalized = this.normalizeKeepSourceSegmentContent(sourceText, rawContent);
+        if (normalized === null || normalized === "=") return normalized;
+        return this.sanitizeAiPageSegmentTranslation(sourceText, normalized) || null;
     }
 
     sanitizeAiPageSegmentMap(map, entry) {
         if (!map || !map.size || !entry || !entry.segTexts) return;
         for (const [n, content] of Array.from(map)) {
-            const sourceText = entry.segTexts[n - 1];
-            const sanitized = this.sanitizeAiPageSegmentTranslation(sourceText, content);
-            if (!sanitized) {
-                map.delete(n);
-            } else if (sanitized !== content) {
-                map.set(n, sanitized);
-            }
+            const resolved = this.resolveFreshReplySegment(entry.segTexts[n - 1], content);
+            if (resolved === null) map.delete(n);
+            else if (resolved !== content) map.set(n, resolved);
         }
+    }
+
+    // ------------------------------------------------------------------------------
+    // '=' keep-source protocol (speed redesign W3).
+    // ------------------------------------------------------------------------------
+    // The page prompt lets the model answer `[[n]] =` for a segment that is already in
+    // the target language. Without it, a legitimately-unchanged segment is echoed →
+    // rejected as a source echo → retried (up to 3×) → swept: up to 4 paid sends and 1-2
+    // serial tail waves to reach the visible state the page already had. Every sentinel
+    // is VERIFIED client-side before acceptance, and sentinels are session-only (never
+    // persisted), so a wrong '=' can never become permanent or cross-page.
+
+    isKeepSourceSentinelContent(content) {
+        return String(content == null ? "" : content).trim() === "=";
+    }
+
+    // Accept '=' ONLY when the source is verifiably already-in-target, or is a short
+    // identifier whose letters (if any) are ALL Latin ("KH01", "1067mm", "§3.2").
+    // Everything else is rejected — degrading to exactly today's retry behavior, never
+    // worse. The Latin-only requirement matters: the per-language script patterns are
+    // deliberately narrow (ja matches kana only, because han is ambiguous with zh), so
+    // kanji-only Japanese would otherwise slip through as an "identifier".
+    isAcceptableKeepSourceSentinel(sourceText) {
+        const source = String(sourceText || "").trim();
+        if (!source) return false;
+        const tl = this._domPageTranslateOptions?.tl || "";
+        if (isAlreadyInTargetLanguage(source, tl)) return true;
+        if (source.length > 120) return false;
+        if (!/\p{L}/u.test(source)) return true; // pure digits/symbols/punctuation
+        const sl = String(
+            this._domResolvedSourceLanguage || this._domPageTranslateOptions?.sl || ""
+        ).split("-")[0];
+        const sourcePattern = BannerController._targetLangPatterns[sl];
+        if (!sourcePattern) {
+            // Latin-script (or unknown) source language: letters could be source-language
+            // words — be conservative and reject (the normal retry path still owns it).
+            return false;
+        }
+        const sourceScriptLetters = source.match(sourcePattern.target);
+        if (sourceScriptLetters && sourceScriptLetters.length) return false;
+        // Any NON-Latin letter (kanji, hangul, cyrillic, thai…) means real language
+        // content the narrow source pattern may not cover — not an identifier.
+        const nonLatin = source.replace(/\p{Script=Latin}/gu, "");
+        return !/\p{L}/u.test(nonLatin);
+    }
+
+    // A leaf whose translation is PROVABLY the identity — a short Latin/digit identifier
+    // on a non-Latin-script source page ("KH01", "1067mm", "ISBN 978-…") — resolves
+    // locally without ever being sent: the model could only echo '=' back, so the round
+    // trip (content + [[n]] marker in input, marker + '=' in output) is pure waste.
+    // Deliberately conservative: at most 2 letter-bearing words and ≤32 chars, so real
+    // foreign-language prose (an English quote on a Japanese page) still goes to the
+    // model; the same isAcceptableKeepSourceSentinel gate as the '=' protocol decides.
+    isInstantKeepSourceLeafText(plainText) {
+        const text = String(plainText || "").trim();
+        if (!text || text.length > 32) return false;
+        const letterWords = text.match(/[\p{L}][\p{L}\p{N}.-]*/gu) || [];
+        if (letterWords.length > 2) return false;
+        return this.isAcceptableKeepSourceSentinel(text);
+    }
+
+    // Normalize one reply segment w.r.t. the keep-source protocol:
+    //   exactly '='  → '=' when verified, null when not (caller deletes the segment)
+    //   '= text…'    → protocol misread by a weak model (key=value style): strip the
+    //                  prefix unless the SOURCE itself starts with '='
+    //   source echo  → '=' when the source VERIFIABLY needs no translation (already in
+    //                  the target language / identifier class). Without this, every
+    //                  identifier-ish leaf the model echoes is rejected → front-queued
+    //                  partial retries (×3) → sweep waves — the "end-of-page retry
+    //                  token burn". The verification is the same strict gate as '='.
+    //   anything else → returned unchanged
+    normalizeKeepSourceSegmentContent(sourceText, content) {
+        const raw = String(content == null ? "" : content);
+        const trimmed = raw.trim();
+        if (trimmed === "=") {
+            return this.isAcceptableKeepSourceSentinel(sourceText) ? "=" : null;
+        }
+        if (/^=\s/.test(trimmed) && !/^=/.test(String(sourceText || "").trim())) {
+            return trimmed.replace(/^=\s+/, "");
+        }
+        if (
+            this.isDomPageSourceEchoTranslation(sourceText, raw) &&
+            this.isAcceptableKeepSourceSentinel(sourceText)
+        ) {
+            return "=";
+        }
+        return raw;
     }
 
     applyAiPageSectionTranslation(entry, translatedText, appliedSet = null) {
@@ -4645,7 +6007,7 @@ class BannerController {
         const map = parsePageSegmentMap(translatedText);
         // Drop source echoes (the model returned the original text) so the block isn't marked
         // "done" in the source language — it stays eligible for retry/re-collection.
-        this.stripEchoSegmentsFromMap(map, entry);
+        this.sanitizeAiPageSegmentMap(map, entry);
         if (!map.size) return false;
         if (appliedSet) entry._segAppliedSet = appliedSet;
         this.noteDomPageOwnMutation();
@@ -4710,7 +6072,7 @@ class BannerController {
         }
         entry._needsPartialRetry =
             this.countUnresolvedEntryBlocks(entry, appliedSet) > 0 &&
-            (entry._partialApplyAttempts || 0) < (this._aiSectionMaxPartialRetries || 2);
+            (entry._partialApplyAttempts || 0) < this._aiSectionMaxPartialRetries;
     }
 
     // Apply a per-string-cache hit straight onto a single leaf at dispatch time — text-node
@@ -4721,9 +6083,21 @@ class BannerController {
         if (!this._aiSectionTranslatedChildren) {
             this._aiSectionTranslatedChildren = new WeakSet();
         }
-        const original = String(leaf.textContent || "")
+        // Own-text, not full textContent: a parent leaf (own line + a nested sub-list) is
+        // cached/applied over its direct line only, so the source we sanitize against and the
+        // hover original we register must be that line — its sub-list is a separate leaf.
+        const original = String(leafBlockOwnText(leaf) || "")
             .replace(/\s+/g, " ")
             .trim();
+        // '=' keep-source sentinel: the leaf is already in the target language. Mark it
+        // done with NO DOM write and no hover registration (the tooltip would show
+        // identical text). Re-verified here — never trust a bare '=' blindly.
+        if (this.isKeepSourceSentinelContent(cachedText)) {
+            if (!this.isAcceptableKeepSourceSentinel(original)) return false;
+            this._aiSectionTranslatedChildren.add(leaf);
+            markElementTranslatedForRendering(leaf);
+            return true;
+        }
         const cleanCachedText = this.sanitizeAiPageSegmentTranslation(original, cachedText);
         if (!cleanCachedText) return false;
         this.noteDomPageOwnMutation();
@@ -4734,7 +6108,10 @@ class BannerController {
         if (!applied) return false;
         this._aiSectionTranslatedChildren.add(leaf);
         markElementTranslatedForRendering(leaf);
-        if (original) this.registerDomOriginalTextOnce(leaf, original);
+        // Register at SENTENCE granularity, same as the fresh-translation path, so a leaf filled
+        // from the per-string cache (a repeated string / revisit) gets the identical hover-original
+        // behavior instead of falling back to whole-paragraph.
+        if (original) this.registerAiPageLeafOriginalBySentence(leaf, original);
         return true;
     }
 
@@ -4743,12 +6120,28 @@ class BannerController {
     // IDB store (fire-and-forget) for cross-session / cross-page reuse.
     storeEntrySegmentCache(entry, map) {
         if (!entry || !entry.segTexts || !map || !map.size) return;
+        // Durable-write structural gate: an entry carries the sessionId it was built under
+        // (stamped at dispatch). If that no longer matches the live session, this reply belongs
+        // to a superseded run — never let it write into the per-string OR persistent cache.
+        // This makes the "no stale write" rule a property of the durable sink itself rather than
+        // a check each caller has to remember (the string-keyed sinks stay un-gated by design —
+        // they have mixed-session callers and are re-verified on read).
+        if (entry.sessionId !== undefined && entry.sessionId !== this._domTranslationSessionId) {
+            return;
+        }
         const saves = [];
         for (let i = 0; i < entry.segBlocks.length; i += 1) {
             const translation = map.get(i + 1);
             if (translation == null) continue;
             const text = entry.segTexts[i];
             if (!text) continue;
+            // '=' keep-source sentinel: SESSION-ONLY. The per-string store re-verifies it;
+            // it never enters the persistent (IDB) store, so a false '=' can never become
+            // permanent or leak cross-page (a revisit pays ~2 output tokens to re-confirm).
+            if (this.isKeepSourceSentinelContent(translation)) {
+                this.storeCachedSegmentText(text, "=");
+                continue;
+            }
             // Skip source echoes and clean bilingual source+target payloads before they can
             // pollute the in-memory OR persistent (IDB) cache.
             const sanitized = this.sanitizeAiPageSegmentTranslation(text, translation);
@@ -4774,7 +6167,13 @@ class BannerController {
         for (let i = 0; i < entry.segBlocks.length; i += 1) {
             const source = entry.segTexts && entry.segTexts[i];
             // Session-cached block: resolve immediately, independent of the model reply.
+            // A cached '=' sentinel was verified at store time — pass it through (the
+            // sanitize pipeline would mangle it).
             if (cached && cached[i] != null) {
+                if (this.isKeepSourceSentinelContent(cached[i])) {
+                    local.set(i + 1, "=");
+                    continue;
+                }
                 const sanitized = this.sanitizeAiPageSegmentTranslation(source, cached[i]);
                 if (sanitized) local.set(i + 1, sanitized);
                 continue;
@@ -4788,8 +6187,8 @@ class BannerController {
             // applied would mark the leaf "done" while it's still in the source language — instead
             // leave it unresolved so it stays eligible and is retried/re-collected.
             if (content != null) {
-                const sanitized = this.sanitizeAiPageSegmentTranslation(source, content);
-                if (sanitized) local.set(i + 1, sanitized);
+                const resolved = this.resolveFreshReplySegment(source, content);
+                if (resolved !== null) local.set(i + 1, resolved); // '=' or sanitized
             }
         }
         return local;
@@ -4816,8 +6215,16 @@ class BannerController {
         }
         if (!this._aiSectionLeafRetries) this._aiSectionLeafRetries = new WeakMap();
         entry._segApplied = (entry._segApplied || 0) + (appliedThisCall || 0);
+        // Stream applies record into _segAppliedSet WITHOUT crediting _segApplied, and the
+        // final apply skips already-applied indices — so a fully stream-applied entry
+        // reports appliedThisCall=0. Without this credit, a perfectly TRANSLATED entry is
+        // classified "nothing ever applied": released, telemetried as a failure, batch
+        // scale collapses and a burst of healthy streamed batches can trip the breaker.
+        if (!entry._segApplied && entry._segAppliedSet && entry._segAppliedSet.size) {
+            entry._segApplied = entry._segAppliedSet.size;
+        }
         if (!entry._segApplied) {
-            this.releaseAiPageSectionEntry(entry);
+            this.releaseAiPageSectionEntry(entry, { countFailure: true });
             return false;
         }
         // A leaf whose [[n]] marker the model dropped is STILL in the source language. The old
@@ -4835,13 +6242,16 @@ class BannerController {
             if (entry._segAppliedSet && entry._segAppliedSet.has(i + 1)) continue; // applied
             const tries = (this._aiSectionLeafRetries.get(leaf) || 0) + 1;
             this._aiSectionLeafRetries.set(leaf, tries);
-            if (tries <= (this._aiSectionMaxPartialRetries || 2)) {
+            if (tries <= this._aiSectionMaxPartialRetries) {
                 pendingLeaves.add(leaf);
                 this.addDomGapCandidateElement(leaf);
             }
         }
         for (const child of entry.section.children) {
-            if (!child) continue;
+            // The section was captured earlier; a child may have been detached by a page mutation
+            // since then. Skip disconnected nodes (consistent with the rest of the DOM-page path)
+            // so we never mark / restyle a node that is no longer in the document.
+            if (!child || !child.isConnected) continue;
             if (pendingLeaves.size && this.elementContainsAnyLeaf(child, pendingLeaves)) continue;
             this._aiSectionTranslatedChildren.add(child);
             // content-visibility: auto lets off-screen translated regions skip
@@ -4856,9 +6266,15 @@ class BannerController {
         }
         if (cacheText && this.countUnresolvedEntryBlocks(entry, entry._segAppliedSet) === 0) {
             this.cacheDomPageTranslation(entry.cacheKey, cacheText);
-            // Fire-forget save to the IDB-backed persistent cache so a revisit to
-            // this URL paints instantly without re-translating.
-            this.savePersistentTranslationCacheEntry(entry, cacheText);
+            // Fire-forget save to the IDB-backed persistent cache so a revisit to this URL
+            // paints instantly without re-translating. '=' keep-source segments are
+            // SESSION-ONLY by design — strip them from the persisted payload (a revisit
+            // re-confirms those leaves for ~2 output tokens each; a wrong '=' must never
+            // become permanent).
+            const persistedCacheText = cacheText.replace(/\[\[\d+]]\n=(?:\n|$)/g, "").trim();
+            if (persistedCacheText) {
+                this.savePersistentTranslationCacheEntry(entry, persistedCacheText);
+            }
         }
         return true;
     }
@@ -4918,39 +6334,64 @@ class BannerController {
     prefetchPersistentTranslationCache() {
         try {
             const tl = this._domPageTranslateOptions && this._domPageTranslateOptions.tl;
-            if (!tl) return;
+            if (!tl) return Promise.resolve();
             const urlHash = computePersistentCacheUrlHash(tl);
-            if (!urlHash) return;
+            if (!urlHash) return Promise.resolve();
             this._aiSectionPersistentUrlHash = urlHash;
-            if (!this.channel || typeof this.channel.request !== "function") return;
-            schedulePostTask(() => {
-                let pending;
-                try {
-                    pending = this.channel.request("persistent_cache_prefetch", { urlHash });
-                } catch {
-                    return;
-                }
-                if (!pending || typeof pending.then !== "function") return;
-                pending
-                    .then((entries) => {
-                        if (!Array.isArray(entries) || !entries.length) return;
-                        for (const { key, value } of entries) {
-                            if (!key || !value) continue;
-                            this.cacheDomPageTranslation(key, value);
-                        }
-                    })
-                    .catch(() => null);
-            }, "user-visible");
+            if (!this.channel || typeof this.channel.request !== "function") {
+                return Promise.resolve();
+            }
+            // Issue the request SYNCHRONOUSLY: behind a post-task it could never beat the
+            // first wave's cache checks (flush runs each request to its first await in the
+            // same task), so repeat visits re-paid full TTFT+generation on exactly the most
+            // visible content. Issued here, the SW+IDB round-trip (5-30ms warm) overlaps
+            // section collection and the banner reflow. Response handling stays async and
+            // opportunistic; the returned promise lets the first wave race it (bounded).
+            let pending;
+            try {
+                pending = this.channel.request("persistent_cache_prefetch", { urlHash });
+            } catch {
+                return Promise.resolve();
+            }
+            if (!pending || typeof pending.then !== "function") return Promise.resolve();
+            return pending
+                .then((entries) => {
+                    if (!Array.isArray(entries) || !entries.length) return;
+                    for (const { key, value } of entries) {
+                        if (!key || !value) continue;
+                        this.cacheDomPageTranslation(key, value);
+                    }
+                })
+                .catch(() => null);
         } catch {
             /* persistent cache is opportunistic — never block translation */
+            return Promise.resolve();
         }
+    }
+
+    // First-wave only: give the synchronously-issued persistent prefetch a bounded window
+    // (≤150ms; typically 5-30ms on a warm SW) to land before the first requests consult
+    // the caches — this is what turns a revisit into a zero-token instant paint. Later
+    // waves resolve immediately (the race already ran; never wait twice).
+    async awaitPersistentPrefetchForFirstWave() {
+        const ready = this._domPersistentPrefetchReady;
+        if (!ready) return;
+        if (this._domFirstWaveRaceDone) return;
+        this._domFirstWaveRaceDone = true;
+        await Promise.race([ready, new Promise((resolve) => setTimeout(resolve, 150))]);
     }
 
     savePersistentTranslationCacheEntry(entry, translatedHtml) {
         try {
             if (!entry?.cacheKey || !translatedHtml) return;
             if (!this.channel || typeof this.channel.emit !== "function") return;
-            const urlHash = this._aiSectionPersistentUrlHash || "";
+            // Fall back to computing the URL hash here if the prefetch hook hasn't set it yet:
+            // saving a per-URL entry under "" would make it unrecoverable by the per-URL prefetch
+            // on the next visit (the prefetch queries the urlHash index).
+            const urlHash =
+                this._aiSectionPersistentUrlHash ||
+                computePersistentCacheUrlHash(this._domPageTranslateOptions?.tl) ||
+                "";
             schedulePostTask(() => {
                 try {
                     this.channel.emit("persistent_cache_save", {
@@ -5017,8 +6458,9 @@ class BannerController {
                     continue;
                 }
                 if (segmentTexts.length === 1) {
-                    if (segmentTexts[0]) {
-                        this.registerDomOriginalTextOnce(transLeaf, segmentTexts[0]);
+                    const fullOriginal = segmentTexts[0];
+                    if (fullOriginal) {
+                        this.registerAiPageLeafOriginalBySentence(transLeaf, fullOriginal);
                     }
                     continue;
                 }
@@ -5035,9 +6477,90 @@ class BannerController {
         }
     }
 
-    releaseAiPageSectionEntry(entry) {
+    // Register the hover-original at SENTENCE granularity for a normal (single-line) leaf: wrap
+    // each translated sentence in a <span data-edge-translate-segment> and register the
+    // proportionally-aligned original sentence(s) on it, so hovering a sentence shows just that
+    // sentence's source instead of the whole paragraph. The full original is also registered on
+    // the leaf so a hover that lands between sentence spans still shows something. Falls back to
+    // whole-leaf registration when the leaf is a single sentence or can't be cleanly wrapped.
+    registerAiPageLeafOriginalBySentence(leaf, fullOriginal) {
+        if (!leaf || !fullOriginal) return;
+        // Idempotency: a leaf filled from the per-string cache is wrapped + registered during the
+        // build loop, then section registration can revisit the SAME leaf. Re-running
+        // wrapLeafSentencesInSpans on already-wrapped content would nest spans, and the second
+        // call's captured "original" would actually be the translated text. Skip if this leaf (or
+        // one of its sentence spans) already carries a registered original.
+        if (this._domOriginalTextByElement && this._domOriginalTextByElement.get(leaf)) return;
+        if (leaf.querySelector && leaf.querySelector("[data-edge-translate-segment]")) return;
+        // Keep-source ('=') leaf: its text was deliberately left unchanged, so the hover
+        // tooltip would show text identical to what is already on screen — skip it.
+        const leafText = String(leaf.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (
+            leafText ===
+            String(fullOriginal || "")
+                .replace(/\s+/g, " ")
+                .trim()
+        ) {
+            return;
+        }
+        const originalSentences = splitTextIntoSentences(fullOriginal);
+        if (originalSentences.length > 1) {
+            const spans = wrapLeafSentencesInSpans(leaf);
+            if (spans.length > 1) {
+                const aligned = alignSentencesProportional(spans.length, originalSentences);
+                for (let i = 0; i < spans.length; i += 1) {
+                    if (spans[i] && aligned[i]) {
+                        this.registerDomOriginalTextOnce(spans[i], aligned[i]);
+                    }
+                }
+                this.registerDomOriginalTextOnce(leaf, fullOriginal);
+                return;
+            }
+        }
+        this.registerDomOriginalTextOnce(leaf, fullOriginal);
+    }
+
+    // True once actual output spend has run well past the page's own committed estimate —
+    // the sign of a re-translation loop. Latches so it can't flap. ~2.5× leaves generous room
+    // for legitimate missing-leaves retries (which are cheap) and a flaky-engine session.
+    isAiPageOutputBudgetExceeded() {
+        if (this._domAiPageBudgetExceeded) return true;
+        const committed = Number(this._domAiPageEstOutCommitted || 0);
+        const spent = Number((this._domTokenUsage && this._domTokenUsage.outputTokens) || 0);
+        // Only meaningful once a real page's worth has been committed (avoid tripping on tiny
+        // pages / the first request); 2.5× the estimate is the runaway threshold.
+        if (committed >= 4000 && spent > committed * 2.5) {
+            this._domAiPageBudgetExceeded = true;
+            return true;
+        }
+        return false;
+    }
+
+    // SINGLE give-up predicate shared by BOTH release primitives: a child that has genuinely
+    // failed translation this many times is "given up" — kept marked-translated so NO release
+    // path (entry release, sweep, or mutation) can re-open it. This is the convergence
+    // guarantee for the "fails -> released -> re-collected" runaway; the worst case is the
+    // element stays in the source language, never an endless loop. (3 = the failure cap.)
+    isAiPageChildGivenUp(node) {
+        return Boolean(
+            node && ((this._domElementFailures && this._domElementFailures.get(node)) || 0) >= 3
+        );
+    }
+
+    // Un-mark an entry's children so they can be re-collected and retried. `countFailure`
+    // distinguishes a GENUINE translation failure (the model/sanitize rejected this content)
+    // from a no-fault release (circuit breaker, stale session) — only genuine failures count
+    // toward the per-element give-up cap (isAiPageChildGivenUp).
+    releaseAiPageSectionEntry(entry, { countFailure = false } = {}) {
         if (!this._aiSectionTranslatedChildren) return;
+        if (!this._domElementFailures) this._domElementFailures = new WeakMap();
         for (const child of entry?.section?.children || []) {
+            if (countFailure) {
+                this._domElementFailures.set(child, (this._domElementFailures.get(child) || 0) + 1);
+            }
+            if (this.isAiPageChildGivenUp(child)) continue; // keep marked — never re-collect
             this._aiSectionTranslatedChildren.delete(child);
         }
     }
@@ -5046,16 +6569,39 @@ class BannerController {
         if (!element || !this._aiSectionTranslatedChildren) return;
         let current = element.nodeType === Node.ELEMENT_NODE ? element : element.parentElement;
         while (current && current !== document.documentElement) {
-            this._aiSectionTranslatedChildren.delete(current);
+            // Honor the SAME give-up cap as releaseAiPageSectionEntry — a given-up element
+            // must not be reopened by a sweep or a mutation either (advance past it, do not
+            // break: an ancestor higher up may still be legitimately releasable).
+            if (!this.isAiPageChildGivenUp(current)) {
+                this._aiSectionTranslatedChildren.delete(current);
+            }
             current = current.parentElement;
         }
     }
 
     enqueueAiPageSectionTranslation(entry) {
         const queuedAt = Date.now();
+        // Session stamp — see enqueueAiPageSectionBatchTranslation: a run surviving into a
+        // re-triggered session would apply/store old-language output under the NEW
+        // session's cache keys. Stale runs release and bail at every await boundary.
+        const runSessionId = this._domTranslationSessionId;
+        const isStaleRun = () => runSessionId !== this._domTranslationSessionId;
         const run = async () => {
+            if (isStaleRun()) {
+                this.releaseAiPageSectionEntry(entry);
+                return;
+            }
             if (this._domCircuitBreakerActive) {
-                this.markDomPageTranslationEntriesCompleted();
+                // Breaker-window drain: register the children as gap candidates BEFORE
+                // releasing, so the post-breaker coverage pass (which only looks at marked
+                // or gap-candidate elements) can re-collect them — on a static page with no
+                // mutations/scroll, nothing else ever would. Count via the idempotent
+                // per-entry mark (a batch-retried entry was already counted by its batch).
+                for (const child of entry?.section?.children || []) {
+                    this.addDomGapCandidateElement(child);
+                }
+                this.releaseAiPageSectionEntry(entry);
+                this.markAiPageEntriesCompleted([entry]);
                 return;
             }
             this._domActiveTranslations += 1;
@@ -5066,40 +6612,28 @@ class BannerController {
             let willRetry = false;
             // Streaming partial apply: as the SSE buffer grows, write each completed [[n]]
             // segment onto its leaf block. The reader sees translations popcorn into place
-            // instead of waiting 3-8s for the full response. `appliedSegments` is shared
-            // with the final apply so nothing is written twice.
+            // instead of waiting 3-8s for the full response. Applies route through the BATCH
+            // machinery (unit-mapped via entry.batchUnitOf + entry._segAppliedSet), so a
+            // renumbered retry payload can never land translations on the wrong leaves.
             const streamId = `et-section-${Date.now().toString(36)}-${Math.random()
                 .toString(36)
                 .slice(2, 8)}`;
-            const appliedSegments = new Set();
-            // rAF-throttled stream apply: SSE chunks can arrive 50-100×/second from fast
-            // models, but the DOM only paints at 60fps. Coalesce intermediate events into
-            // one apply per animation frame so we don't thrash the DOM and so React-like
-            // listeners on the page aren't overwhelmed.
+            // Register into the SHARED rAF stream coalescer (the single source of truth for
+            // stream applies) rather than a private rAF: SSE chunks arrive 50-100×/s but the
+            // coalescer caps applies at <=60/s ACROSS all in-flight single+batch streams, so
+            // the main-thread guarantee holds under any mix. Same isFinished guard as the batch
+            // path — a drain after this run finishes OR after a session change writes nothing.
             let streamLatestText = "";
-            let streamRafScheduled = false;
             let streamingFinished = false;
-            const flushStreamApply = () => {
-                streamRafScheduled = false;
-                if (streamingFinished) return;
-                const accumulated = streamLatestText;
-                if (!accumulated) return;
-                try {
-                    this.applyStreamedAiPageSegments(entry, accumulated, appliedSegments);
-                } catch {
-                    /* stream-apply must never throw — final response still recovers */
-                }
-            };
             const streamHandler = (event) => {
                 if (!event || event.streamId !== streamId) return;
                 streamLatestText = event.text || "";
-                if (streamRafScheduled) return;
-                streamRafScheduled = true;
-                if (typeof requestAnimationFrame === "function") {
-                    requestAnimationFrame(flushStreamApply);
-                } else {
-                    setTimeout(flushStreamApply, 16);
-                }
+                this.scheduleAiPageBatchStreamApply(
+                    streamId,
+                    () => [entry],
+                    () => streamLatestText,
+                    () => streamingFinished || isStaleRun()
+                );
             };
             try {
                 this.channel.on("translation_stream_progress", streamHandler);
@@ -5109,47 +6643,100 @@ class BannerController {
             try {
                 const { tl } = this._domPageTranslateOptions;
                 const sl = this._domResolvedSourceLanguage || this._domPageTranslateOptions.sl;
+                // Per-ENTRY cache hit (a renumbered standalone [[1..k]] payload cached by a
+                // previous wave/session): block-indexed, so it applies through the
+                // section-translation applier — NOT the unit-mapped batch applier.
                 const cached = this._domTranslationCache.get(entry.cacheKey);
-                let translatedText = cached;
-                if (!translatedText) {
-                    const startedAt = Date.now();
-                    this.logDomPageDebug("ai-section:request", {
-                        chars: entry.sourceText.length,
-                        plainChars: entry.plainText.length,
-                        inputTokens: entry.inputTokens,
-                    });
-                    const result = await this.translateWithDomPageEngine(
-                        entry.sourceText,
-                        sl,
-                        tl,
-                        streamId
-                    );
-                    this.recordDomPageTokenUsage(result);
-                    requestDurationMs = Date.now() - startedAt;
-                    this.logDomPageDebug("ai-section:response", {
-                        durationMs: requestDurationMs,
-                        failed: Boolean(result && result.translationFailed),
-                        streamApplied: appliedSegments.size,
-                    });
-                    if (result && result.translationFailed) {
-                        throw new Error(result.errorMsg || "AI page section translation failed.");
+                if (cached) {
+                    if (!entry._segAppliedSet) entry._segAppliedSet = new Set();
+                    if (!this.applyAiPageSectionTranslation(entry, cached, entry._segAppliedSet)) {
+                        throw new Error("AI page section apply rejected.");
                     }
-                    translatedText = result.mainMeaning || result.translatedText || "";
-                    if (!translatedText || !translatedText.trim()) {
-                        throw new Error("AI page section returned empty translation.");
+                    this.recordDomPageBatchSuccess();
+                } else {
+                    // First wave: bounded head starts for the persistent caches so a revisit
+                    // resolves with zero tokens (both no-ops once settled / on later waves).
+                    await this.awaitPersistentPrefetchForFirstWave();
+                    await Promise.race([
+                        this.loadPersistentSegments(entry.segTexts || []),
+                        new Promise((resolve) => setTimeout(resolve, 120)),
+                    ]);
+                    if (isStaleRun()) return;
+                    // Build the payload AT RUN TIME on the batch machinery: per-string cache
+                    // hits — including every block a previous partial attempt landed — are
+                    // resolved here and excluded, so a retry sends ONLY the missing leaves
+                    // and duplicate strings dedupe to one unit.
+                    const payload = this.buildAiPageBatchPayload([entry]);
+                    if (!payload.text) {
+                        // Every block resolved from the per-string cache — zero tokens, no
+                        // request. Skip concurrency telemetry (mirrors the batch zero-token
+                        // path) so ~5ms cache applies don't poison the latency EMA.
+                        this.applyAiPageSectionBatchEntry(entry, new Map());
+                        this.recordDomPageBatchSuccess();
+                    } else {
+                        const startedAt = Date.now();
+                        this.logDomPageDebug("ai-section:request", {
+                            chars: payload.text.length,
+                            plainChars: entry.plainText.length,
+                            inputTokens: estimateLlmPayloadTokens(payload.text),
+                        });
+                        const result = await this.translateWithDomPageEngine(
+                            payload.text,
+                            sl,
+                            tl,
+                            streamId
+                        );
+                        this.recordDomPageTokenUsage(result);
+                        requestDurationMs = Date.now() - startedAt;
+                        this.logDomPageDebug("ai-section:response", {
+                            durationMs: requestDurationMs,
+                            failed: Boolean(result && result.translationFailed),
+                            streamApplied: entry._segAppliedSet ? entry._segAppliedSet.size : 0,
+                        });
+                        if (result && result.translationFailed) {
+                            throw new Error(
+                                result.errorMsg || "AI page section translation failed."
+                            );
+                        }
+                        // Stale session: never apply or store this reply under the new
+                        // session's keys.
+                        if (isStaleRun()) return;
+                        const translatedText = result.mainMeaning || result.translatedText || "";
+                        if (!translatedText || !translatedText.trim()) {
+                            throw new Error("AI page section returned empty translation.");
+                        }
+                        // Force-drain THIS stream's pending coalesced apply BEFORE the final
+                        // apply so entry._segAppliedSet reflects everything the stream wrote.
+                        this.drainAiPageBatchStreamApplyFor(streamId);
+                        if (
+                            !this.applyAiPageSectionBatchEntry(
+                                entry,
+                                parsePageSegmentMap(translatedText)
+                            )
+                        ) {
+                            throw new Error("AI page section apply rejected.");
+                        }
+                        // Dynamic balance signal (marker-drop quality EMA) — same as the batch path.
+                        this.recordAiPageBatchQualityTelemetry({
+                            blocks: (entry.segTexts || []).filter((t) => t && String(t).trim())
+                                .length,
+                            unresolved: this.countUnresolvedEntryBlocks(
+                                entry,
+                                entry._segAppliedSet
+                            ),
+                        });
+                        this.recordAiPageConcurrencyTelemetry({
+                            durationMs: requestDurationMs,
+                            queueWaitMs,
+                            entries: 1,
+                        });
+                        this.recordDomPageBatchSuccess();
                     }
-                }
-
-                // Flush any pending throttled stream apply BEFORE the final apply so the
-                // shared appliedSegments reflects everything the stream path wrote.
-                // Otherwise an SSE chunk that arrived between the last rAF tick and the
-                // request resolving would be re-applied redundantly.
-                if (streamRafScheduled) flushStreamApply();
-                if (!this.applyAiPageSectionTranslation(entry, translatedText, appliedSegments)) {
-                    throw new Error("AI page section apply rejected.");
                 }
                 // Model dropped some [[n]] markers for this section → re-run to fill the gaps
-                // (bounded). Keep it out of the completed count until the gaps land.
+                // (bounded). The rebuild excludes already-landed leaves via the per-string
+                // cache, so the re-send carries ONLY the gaps. This also covers the cache and
+                // zero-token branches (a disconnected/unresolved leaf still converges).
                 if (entry._needsPartialRetry) {
                     entry._partialApplyAttempts = (entry._partialApplyAttempts || 0) + 1;
                     entry._needsPartialRetry = false;
@@ -5157,14 +6744,14 @@ class BannerController {
                     if (!this._domTranslationQueue) this._domTranslationQueue = [];
                     this._domTranslationQueue.unshift(run);
                 }
-
-                this.recordAiPageConcurrencyTelemetry({
-                    durationMs: requestDurationMs,
-                    queueWaitMs,
-                    entries: 1,
-                });
-                this.recordDomPageBatchSuccess();
             } catch (error) {
+                // Stale session: the failure belongs to a torn-down session — releasing is
+                // enough; a requeue would run inside the NEW session's queue and store its
+                // output under the new language's cache keys.
+                if (isStaleRun()) {
+                    this.releaseAiPageSectionEntry(entry);
+                    return;
+                }
                 this.updateDomPageBannerStatus(
                     "error",
                     error && error.message ? error.message : String(error || "")
@@ -5184,21 +6771,26 @@ class BannerController {
                     if (!this._domTranslationQueue) this._domTranslationQueue = [];
                     this._domTranslationQueue.unshift(run);
                 } else {
-                    this.releaseAiPageSectionEntry(entry);
+                    this.releaseAiPageSectionEntry(entry, { countFailure: true });
                 }
             } finally {
-                // Mark stream as finished BEFORE detaching the listener so any rAF that
-                // was already scheduled (and fires after the request resolves) skips its
-                // apply work — entry.section.children may have moved on by then.
+                // Finish + drop this stream from the shared coalescer BEFORE detaching the
+                // listener, so a late drain can't apply this run's stale text through a
+                // retry's rebuilt mapping (same teardown as the batch path). Must run even
+                // for stale runs.
                 streamingFinished = true;
+                this.discardAiPageBatchStreamApply(streamId);
                 try {
                     this.channel.off("translation_stream_progress", streamHandler);
                 } catch {
                     /* noop */
                 }
-                if (!willRetry) this.markAiPageEntriesCompleted([entry]);
-                this._domActiveTranslations -= 1;
-                this.flushDomTranslationQueue();
+                // Accounting belongs to THIS run's session — see the batch finally.
+                if (!isStaleRun()) {
+                    if (!willRetry) this.markAiPageEntriesCompleted([entry]);
+                    this._domActiveTranslations -= 1;
+                    this.flushDomTranslationQueue();
+                }
             }
         };
 
@@ -5210,25 +6802,70 @@ class BannerController {
     enqueueAiPageSectionBatchTranslation(entries, attempt = 0, options = {}) {
         if (!entries || !entries.length) return;
         const queuedAt = Date.now();
+        // Hoist the persistent per-string read to ENQUEUE time: the SW/IDB round-trip
+        // (50-300ms on a cold service worker) overlaps the queue wait instead of holding
+        // a concurrency slot at the front of every first-wave batch.
+        const persistentSegmentsReady = Promise.resolve(
+            this.loadPersistentSegments(entries.flatMap((entry) => entry.segTexts || []))
+        ).catch(() => null);
+        // Session stamp: cache keys are derived from the CURRENT translate options at call
+        // time, so a run surviving into a re-triggered session (e.g. the user switched
+        // target language) would store its old-language output under the NEW language's
+        // keys — poisoning the per-string AND persistent caches. Every await below
+        // re-checks; a stale run releases its entries and never applies/stores/counts.
+        const runSessionId = this._domTranslationSessionId;
+        const isStaleRun = () => runSessionId !== this._domTranslationSessionId;
         const run = async () => {
-            if (this._domCircuitBreakerActive) {
+            if (isStaleRun()) {
                 entries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
+                return;
+            }
+            if (this._domCircuitBreakerActive) {
+                // Gap-candidate registration before release — see the single-path breaker
+                // branch: drained sections must stay visible to the post-breaker recovery.
+                for (const entry of entries) {
+                    for (const child of entry?.section?.children || []) {
+                        this.addDomGapCandidateElement(child);
+                    }
+                    this.releaseAiPageSectionEntry(entry);
+                }
                 this.markAiPageEntriesCompleted(entries);
                 return;
             }
             this._domActiveTranslations += 1;
             const queueWaitMs = Math.max(0, Date.now() - queuedAt);
+            // First wave: give the just-issued persistent prefetch a bounded head start so
+            // a revisit resolves from cache instead of re-paying generation (no-op later).
+            await this.awaitPersistentPrefetchForFirstWave();
+            if (isStaleRun()) return;
             let pendingEntries = entries.slice();
             let batchStartedAt = 0;
             let batchDurationMs = 0;
             let batchInputTokens = 0;
             let batchEntryCount = 0;
+            // Latest coherent stream buffer (ASSIGN, never append: engine-internal retries
+            // restart the SSE accumulation, and the latest assignment is always a coherent
+            // prefix of the LAST attempt) + this run's payload unit list — both feed the
+            // failure-salvage harvest in the catch below.
+            let lastStreamText = "";
+            let unitTexts = null;
+            let streamingFinished = false;
             const streamId = `et-section-batch-${Date.now().toString(36)}-${Math.random()
                 .toString(36)
                 .slice(2, 8)}`;
             const streamHandler = (event) => {
                 if (!event || event.streamId !== streamId) return;
-                this.applyStreamedAiPageSectionBatchSegments(pendingEntries, event.text);
+                lastStreamText = event.text || "";
+                // Global rAF coalescing: at high concurrency, per-event full-buffer applies
+                // would run parse+sanitize hundreds of times per second on the main thread.
+                this.scheduleAiPageBatchStreamApply(
+                    streamId,
+                    () => pendingEntries,
+                    () => lastStreamText,
+                    // A drain after this run finished OR after a session change must never
+                    // write old-session text into the (possibly re-translating) page.
+                    () => streamingFinished || isStaleRun()
+                );
             };
             try {
                 this.channel.on("translation_stream_progress", streamHandler);
@@ -5263,16 +6900,16 @@ class BannerController {
                 pendingEntries = uncachedEntries;
 
                 if (pendingEntries.length) {
-                    // Cross-session/page reuse: pull any of this batch's strings that were
-                    // translated before out of the persistent IDB store (one round-trip) so
-                    // they're dropped from the request below.
-                    await this.loadPersistentSegments(
-                        pendingEntries.flatMap((entry) => entry.segTexts || [])
-                    );
+                    // Cross-session/page reuse: the per-string IDB read was issued at enqueue
+                    // time (overlapping the queue wait); by here it has usually settled.
+                    await persistentSegmentsReady;
+                    if (isStaleRun()) return;
                     // One deduped [[n]] payload over every unique block text in the batch; each
                     // entry records batchUnitOf so the reply maps back onto all of its blocks.
                     // Blocks already in the per-string cache are resolved here and excluded.
-                    const batchedSourceText = this.buildAiPageBatchPayload(pendingEntries);
+                    const payload = this.buildAiPageBatchPayload(pendingEntries);
+                    const batchedSourceText = payload.text;
+                    unitTexts = payload.unitTexts;
                     if (!batchedSourceText) {
                         // Every block was already translated this session — apply straight from
                         // the per-string cache with NO request (0 tokens, instant).
@@ -5311,7 +6948,13 @@ class BannerController {
                             result.errorMsg || "AI page section batch translation failed."
                         );
                     }
+                    // Stale session: the page may already be re-translating into another
+                    // language — never apply, store, or retry this reply.
+                    if (isStaleRun()) return;
                     const translated = result.mainMeaning || result.translatedText || "";
+                    // Force-drain this stream's pending coalesced apply BEFORE the final apply
+                    // so every entry's _segAppliedSet reflects what the stream path wrote.
+                    this.drainAiPageBatchStreamApplyFor(streamId);
                     const globalMap = parsePageSegmentMap(translated);
                     // Forgiving apply: each entry resolves its blocks through batchUnitOf out of
                     // the deduped global reply. A dropped marker only leaves that one block in
@@ -5321,6 +6964,26 @@ class BannerController {
                         if (!this.applyAiPageSectionBatchEntry(entry, globalMap)) {
                             failedEntries.push(entry);
                         }
+                    }
+                    // Dynamic balance signal: how cleanly did the model handle THIS batch
+                    // size (dropped/unresolved blocks)? Feeds the marker-drop quality EMA +
+                    // AIMD marker cap.
+                    {
+                        let qualityBlocks = 0;
+                        let qualityUnresolved = 0;
+                        for (const entry of pendingEntries) {
+                            qualityBlocks += (entry.segTexts || []).filter(
+                                (t) => t && String(t).trim()
+                            ).length;
+                            qualityUnresolved += this.countUnresolvedEntryBlocks(
+                                entry,
+                                entry._segAppliedSet
+                            );
+                        }
+                        this.recordAiPageBatchQualityTelemetry({
+                            blocks: qualityBlocks,
+                            unresolved: qualityUnresolved,
+                        });
                     }
                     if (failedEntries.length) {
                         this.recordAiPageSectionBatchTelemetry({
@@ -5358,6 +7021,13 @@ class BannerController {
                     this.recordDomPageBatchSuccess();
                 }
             } catch (error) {
+                // Stale session: the failure belongs to a torn-down session. Releasing is
+                // enough; salvaging/retrying here would store old-language text under the
+                // NEW session's cache keys (the keys read the CURRENT options).
+                if (isStaleRun()) {
+                    pendingEntries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
+                    return;
+                }
                 this.updateDomPageBannerStatus(
                     "error",
                     error && error.message ? error.message : String(error || "")
@@ -5371,19 +7041,36 @@ class BannerController {
                     entries: pendingEntries.length,
                 });
                 this.recordDomPageBatchFailure();
+                // Salvage BEFORE retrying: harvest every COMPLETE, monotonically-ordered
+                // [[n]] unit already streamed into the per-string + persistent caches, so
+                // the retry rebuild excludes them and regenerates only the missing tail.
+                // The failures that reach here with a partial buffer (timeout, network
+                // drop, local-LLM ctx overflow) are not engine-retried — without salvage,
+                // up to ~80% of an already-streamed batch is decoded twice.
+                this.salvageStreamedAiPageBatchUnits(lastStreamText, unitTexts);
                 this.retryAiPageSectionBatchEntries(
                     pendingEntries.filter((entry) => !entry._segApplied),
                     attempt
                 );
             } finally {
+                // Finish + detach BEFORE the coalescer can fire again: a late drain must
+                // never apply this run's stale stream text through a retry's REBUILT
+                // batchUnitOf mapping. These teardown steps must run even for stale runs.
+                streamingFinished = true;
+                this.discardAiPageBatchStreamApply(streamId);
                 try {
                     this.channel.off("translation_stream_progress", streamHandler);
                 } catch {
                     /* noop */
                 }
-                this.markAiPageEntriesCompleted(entries);
-                this._domActiveTranslations -= 1;
-                this.flushDomTranslationQueue();
+                // Accounting belongs to THIS run's session: a stale run's increment was
+                // wiped by the session reset, so decrementing (or counting completions)
+                // here would corrupt the NEW session's counters and over-admit requests.
+                if (!isStaleRun()) {
+                    this.markAiPageEntriesCompleted(entries);
+                    this._domActiveTranslations -= 1;
+                    this.flushDomTranslationQueue();
+                }
             }
         };
 
@@ -5391,6 +7078,139 @@ class BannerController {
         if (options.front) this._domTranslationQueue.unshift(run);
         else this._domTranslationQueue.push(run);
         this.flushDomTranslationQueue();
+    }
+
+    // ------------------------------------------------------------------------------
+    // Global rAF coalescing for batch stream applies (speed redesign W3).
+    // ------------------------------------------------------------------------------
+    // At 16-32 concurrently streamed batches × 10-20 relay events/s each, per-event
+    // full-buffer parse+sanitize applies would burn the main thread exactly while the
+    // user reads. One shared rAF drains ALL pending streams (≤60 drains/s total). The
+    // guard set mirrors the single path: a finished run's stream never applies (a stale
+    // drain after a retry would resolve old text through a REBUILT batchUnitOf), and the
+    // final apply force-drains its own stream first.
+
+    scheduleAiPageBatchStreamApply(streamId, getEntries, getText, isFinished) {
+        if (!this._domBatchStreamPending) this._domBatchStreamPending = new Map();
+        this._domBatchStreamPending.set(streamId, { getEntries, getText, isFinished });
+        if (this._domBatchStreamRafScheduled) return;
+        this._domBatchStreamRafScheduled = true;
+        const drain = () => this.drainAiPageBatchStreamApplies();
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(drain);
+        else setTimeout(drain, 16);
+    }
+
+    drainAiPageBatchStreamApplies() {
+        this._domBatchStreamRafScheduled = false;
+        const pending = this._domBatchStreamPending;
+        if (!pending || !pending.size) return;
+        const streams = Array.from(pending.values());
+        pending.clear();
+        for (const stream of streams) {
+            try {
+                if (stream.isFinished()) continue;
+                const text = stream.getText();
+                if (!text) continue;
+                this.applyStreamedAiPageSectionBatchSegments(stream.getEntries(), text);
+            } catch {
+                /* stream apply must never throw — the final apply recovers */
+            }
+        }
+    }
+
+    // Synchronously drain ONE stream before its final apply so the entries' shared
+    // _segAppliedSet reflects every stream write (no redundant double-writes after).
+    drainAiPageBatchStreamApplyFor(streamId) {
+        const pending = this._domBatchStreamPending;
+        if (!pending) return;
+        const stream = pending.get(streamId);
+        if (!stream) return;
+        pending.delete(streamId);
+        try {
+            if (stream.isFinished()) return;
+            const text = stream.getText();
+            if (!text) return;
+            this.applyStreamedAiPageSectionBatchSegments(stream.getEntries(), text);
+        } catch {
+            /* stream apply must never throw */
+        }
+    }
+
+    discardAiPageBatchStreamApply(streamId) {
+        if (this._domBatchStreamPending) this._domBatchStreamPending.delete(streamId);
+    }
+
+    // ------------------------------------------------------------------------------
+    // Failure salvage (speed redesign W3): harvest complete streamed units on error.
+    // ------------------------------------------------------------------------------
+    // Walk the buffer's [[n]] markers in POSITION order and collect unit numbers only
+    // while they are strictly increasing; stop at the first out-of-order or duplicate
+    // marker (everything after it is suspect). When the walk reaches the end of the
+    // buffer, the positionally-last marker's content may be a truncated mid-generation
+    // tail — drop it. (A walk stopped by an out-of-order marker keeps its last collected
+    // unit: that unit's content is bounded by the discarded marker, hence complete.)
+    // A simple numeric cutoff is NOT safe here: an out-of-order stream could admit a
+    // half-generated tail into the durable per-string + IDB caches, where sanitize has
+    // no way to detect truncation.
+    collectSalvageableSegmentNumbers(text) {
+        const markerRe = /\[\[(\d+)(?::[a-z0-9-]+)?]]/gi;
+        const value = String(text || "");
+        const collected = [];
+        let prev = 0;
+        let reachedBufferEnd = true;
+        let match;
+        while ((match = markerRe.exec(value)) !== null) {
+            const n = Number(match[1]);
+            if (!Number.isFinite(n) || n < 1) continue;
+            if (n <= prev) {
+                reachedBufferEnd = false;
+                break;
+            }
+            collected.push(n);
+            prev = n;
+        }
+        if (reachedBufferEnd && collected.length) collected.pop();
+        return collected;
+    }
+
+    // Store every salvageable streamed unit into the per-string session cache + the
+    // persistent store (sanitized at store time, exactly like storeEntrySegmentCache).
+    // Best-effort: never throws, never delays the retry that follows.
+    salvageStreamedAiPageBatchUnits(lastStreamText, unitTexts) {
+        try {
+            if (!lastStreamText || !unitTexts || !unitTexts.length) return 0;
+            const streamedMap = parsePageSegmentMap(lastStreamText);
+            if (!streamedMap.size) return 0;
+            const saves = [];
+            for (const n of this.collectSalvageableSegmentNumbers(lastStreamText)) {
+                const sourceText = unitTexts[n - 1];
+                const content = streamedMap.get(n);
+                if (!sourceText || content == null) continue;
+                // Same fresh-reply contract as every other ingest path (resolveFreshReplySegment):
+                // a verified '=' is stored SESSION-ONLY (never IDB — a wrong '=' must not become
+                // permanent), an unverified one is dropped, a "= text" misread is prefix-stripped.
+                const resolved = this.resolveFreshReplySegment(sourceText, content);
+                if (resolved === null) continue;
+                if (resolved === "=") {
+                    this.storeCachedSegmentText(sourceText, "=");
+                    continue;
+                }
+                if (this.isKeepSourceSentinelContent(resolved)) continue;
+                this.storeCachedSegmentText(sourceText, resolved);
+                saves.push({ key: this.persistentSegmentKey(sourceText), value: resolved });
+            }
+            if (saves.length) {
+                try {
+                    this.channel.emit("persistent_segment_save", { entries: saves });
+                } catch {
+                    /* persistent cache is opportunistic */
+                }
+                this.logDomPageDebug("ai-section-batch:salvage", { units: saves.length });
+            }
+            return saves.length;
+        } catch {
+            return 0;
+        }
     }
 
     // Build the batch request payload with DEDUP: identical block texts (repeated UI
@@ -5420,10 +7240,13 @@ class BannerController {
                 return idx;
             });
         }
-        return buildSegmentedTranslationText(
-            unitTexts.map((text) => ({ text })),
+        const text = buildSegmentedTranslationText(
+            unitTexts.map((unitText) => ({ text: unitText })),
             { compactMarkers: true }
         );
+        // unitTexts lets failure paths map a partially-streamed reply's [[n]] units back to
+        // their source strings (salvage) without re-deriving the dedupe order.
+        return { text, unitTexts };
     }
 
     // Streaming partial apply for a batch: write whatever global units have fully arrived
@@ -5447,12 +7270,18 @@ class BannerController {
     retryAiPageSectionBatchEntries(entries, attempt = 0) {
         if (!entries || !entries.length) return;
         if (attempt >= 1 || this._domBatchFailureCount >= 5) {
-            entries.forEach((entry) => this.releaseAiPageSectionEntry(entry));
+            entries.forEach((entry) =>
+                this.releaseAiPageSectionEntry(entry, { countFailure: true })
+            );
             return;
         }
         // Retries re-process the SAME entries — they were already counted in the total at
         // dispatch and are marked completed (once) via entry._counted, so no re-increment.
-        if (entries.length > 1) {
+        // Only HALVE genuinely large batches: splitting is worth an extra request when the
+        // failure might be size-related, but for a small batch a half-split just doubles the
+        // request count (1 failure -> 2 retries) for what is usually a transient error, so we
+        // re-send it once as a single batch instead.
+        if (entries.length > 3) {
             const mid = Math.ceil(entries.length / 2);
             this.enqueueAiPageSectionBatchTranslation(entries.slice(mid), attempt + 1, {
                 front: true,
@@ -5460,6 +7289,10 @@ class BannerController {
             this.enqueueAiPageSectionBatchTranslation(entries.slice(0, mid), attempt + 1, {
                 front: true,
             });
+            return;
+        }
+        if (entries.length > 1) {
+            this.enqueueAiPageSectionBatchTranslation(entries, attempt + 1, { front: true });
             return;
         }
         const [entry] = entries;
@@ -5858,7 +7691,11 @@ class BannerController {
 
     cacheDomPageTranslation(cacheKey, translated) {
         if (!cacheKey || !translated) return;
-        if (this._domTranslationCache.size >= this._domTranslationCacheMax) {
+        // Insertion-order LRU: re-inserting an existing key moves it to the tail (Map.set alone
+        // does not), so a re-cached entry isn't evicted before genuinely older ones.
+        if (this._domTranslationCache.has(cacheKey)) {
+            this._domTranslationCache.delete(cacheKey);
+        } else if (this._domTranslationCache.size >= this._domTranslationCacheMax) {
             const oldest = this._domTranslationCache.keys().next().value;
             if (oldest !== undefined) this._domTranslationCache.delete(oldest);
         }
@@ -6022,17 +7859,37 @@ class BannerController {
         const key = this.segmentTextCacheKey(text);
         const value = this._domSegmentTextCache.get(key);
         if (value == null) return null;
-        // Drop or clean entries that earlier sessions may have stored — translate fresh instead
-        // of re-applying the source language, and trim bilingual source+target pollution.
+        // Refresh LRU recency on read (Map.set on an existing key does NOT move it, so re-insert).
+        this._domSegmentTextCache.delete(key);
+        this._domSegmentTextCache.set(key, value);
+        // '=' keep-source sentinel: sanitize would mangle it. Re-verify on read — sentinels
+        // are session-only by design, but loadPersistentSegments writes IDB values raw into
+        // this cache, so a stray/corrupt persistent '=' must not bypass verification.
+        if (this.isKeepSourceSentinelContent(value)) {
+            return this.isAcceptableKeepSourceSentinel(text) ? "=" : null;
+        }
+        // Clean for the caller — values loaded raw from the persistent store may be unsanitized,
+        // and we must never re-apply a source echo / bilingual pollution. CRITICAL: do NOT write
+        // the sanitized form back; re-sanitizing on every read and overwriting could progressively
+        // trim a legitimate mixed-script translation. The stored value stays exactly as written
+        // once at store time; consumers (applyCachedLeafTranslation / entryLocalSegmentMap)
+        // sanitize again before use, so returning the cleaned value here is purely defensive.
         const sanitized = this.sanitizeAiPageSegmentTranslation(text, value);
-        if (!sanitized) return null;
-        if (sanitized !== value) this._domSegmentTextCache.set(key, sanitized);
-        return sanitized;
+        return sanitized || null;
     }
 
     storeCachedSegmentText(text, translation) {
         if (!text || translation == null || translation === "") return;
-        const sanitized = this.sanitizeAiPageSegmentTranslation(text, translation);
+        // '=' keep-source sentinel: store the literal (verified) sentinel — the sanitize
+        // pipeline below would reject it. Verify again here so no unverified '=' can ever
+        // enter the cache regardless of the caller.
+        let sanitized;
+        if (this.isKeepSourceSentinelContent(translation)) {
+            if (!this.isAcceptableKeepSourceSentinel(text)) return;
+            sanitized = "=";
+        } else {
+            sanitized = this.sanitizeAiPageSegmentTranslation(text, translation);
+        }
         if (!sanitized) return;
         if (!this._domSegmentTextCache) this._domSegmentTextCache = new Map();
         const key = this.segmentTextCacheKey(text);
@@ -7472,6 +9329,40 @@ class BannerController {
                         gap: 6px;
                         flex: 0 0 auto;
                     }
+                    /* Target-language picker — reuse the shared menu but reshape the trigger to
+                       match the bar's Liquid Glass capsules (the popover renders in the page body
+                       and keeps the menu's own Material card look). */
+                    .actions .et-lang-menu {
+                        width: auto;
+                        flex: 0 0 auto;
+                    }
+                    .actions .et-lang-trigger {
+                        width: auto;
+                        min-height: 30px;
+                        max-width: 168px;
+                        gap: 6px;
+                        padding: 4px 10px;
+                        border: 0;
+                        border-radius: 11px;
+                        background: var(--et-surface-container);
+                        color: var(--et-text);
+                        font-size: 12px;
+                        font-weight: 600;
+                        backdrop-filter: blur(16px) saturate(180%);
+                        -webkit-backdrop-filter: blur(16px) saturate(180%);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.06)) inset,
+                            0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.08));
+                    }
+                    .actions .et-lang-trigger:hover {
+                        background: var(--et-glass-base-hover);
+                        color: var(--et-primary);
+                    }
+                    .actions .et-lang-menu.is-open .et-lang-trigger {
+                        color: var(--et-primary);
+                        box-shadow: 0 0 0 2px var(--et-primary-container);
+                    }
+                    .actions .et-lang-trigger-chevron { font-size: 10px; }
                     .progress-meta {
                         min-width: 36px;
                         box-sizing: border-box;
@@ -7817,6 +9708,8 @@ class BannerController {
             root.querySelector("[data-action='close']").addEventListener("click", () => {
                 this.cancelDomPageTranslate();
             });
+            // Pretty target-language picker, in the bar's actions row.
+            this.buildDomPageTargetMenu(root);
             // The bar and restore pill are plain iOS-style frosted blur surfaces;
             // their backdrop-filter, edge shadows and sheen live in the injected
             // CSS above (.bar / .restore). No engine, no pointer-tracking effects.
@@ -7834,6 +9727,150 @@ class BannerController {
         }
         this._domPageBanner = host;
         return host;
+    }
+
+    /**
+     * Mount the shared pretty language menu (target language) into the banner's actions row.
+     * The trigger is styled inside the banner's shadow DOM (so it matches the Liquid Glass bar);
+     * the searchable popover renders into the page body so it is never clipped by the bar.
+     */
+    buildDomPageTargetMenu(shadowRoot) {
+        try {
+            if (!shadowRoot || typeof createLanguageMenu !== "function") return;
+            const actions = shadowRoot.querySelector(".actions");
+            if (!actions) return;
+            const items = Object.keys(LANGUAGES).map((code) => ({
+                value: code,
+                label: (chrome.i18n && chrome.i18n.getMessage(LANGUAGES[code])) || code,
+            }));
+            if (this._domBannerLangMenu) {
+                try {
+                    this._domBannerLangMenu.destroy();
+                } catch {
+                    /* noop */
+                }
+            }
+            const i18n = (key, fallback) =>
+                (chrome.i18n && chrome.i18n.getMessage(key)) || fallback;
+            this._domBannerLangMenu = createLanguageMenu({
+                languages: items,
+                value: this._domPageTranslateOptions?.tl || "en",
+                styleRoot: shadowRoot,
+                popoverContainer: document.body,
+                ariaLabel: i18n("TargetLanguage", "Target language"),
+                searchPlaceholder: i18n("SearchLanguage", "Search language"),
+                emptyText: i18n("NoLanguageMatch", "No matches"),
+                onChange: (tl) => this.changeDomPageTargetLanguage(tl),
+            });
+            const hideButton = actions.querySelector("[data-action='hide']");
+            actions.insertBefore(this._domBannerLangMenu.element, hideButton || actions.firstChild);
+        } catch (error) {
+            // The picker is a non-critical enhancement — never break the banner. But DON'T
+            // swallow silently: a thrown error here is exactly why "the language capsule is
+            // missing" is otherwise undiagnosable. Surface it so it shows in DevTools.
+            try {
+                console.warn("[EdgeTranslate] banner language menu failed to mount:", error);
+            } catch {
+                /* console may be unavailable */
+            }
+        }
+    }
+
+    /**
+     * The reader picked a new target language from the banner. Persist it and re-translate the
+     * page in the new language. Correct in-place re-translation would need the original (untouched)
+     * HTML of every block — which we don't snapshot — so we reload and auto-translate on load,
+     * which is reliable and gives a clean, fully-original starting point.
+     */
+    changeDomPageTargetLanguage(tl) {
+        const next = String(tl || "").trim();
+        if (!next || next === this._domPageTranslateOptions?.tl) return;
+        try {
+            getOrSetDefaultSettings("languageSetting", DEFAULT_SETTINGS).then((result) => {
+                const languageSetting = result.languageSetting || {};
+                languageSetting.tl = next;
+                try {
+                    chrome.storage.sync.set({ languageSetting });
+                } catch {
+                    /* noop */
+                }
+                try {
+                    // Per-tab flag so the fresh page auto-translates once, in the new language.
+                    sessionStorage.setItem("edge-translate-auto-page-translate", "1");
+                } catch {
+                    /* sessionStorage may be unavailable (sandboxed frames) */
+                }
+                // Let the storage write flush, then reload onto a clean, untranslated DOM.
+                setTimeout(() => {
+                    try {
+                        location.reload();
+                    } catch {
+                        /* noop */
+                    }
+                }, 60);
+            });
+        } catch {
+            /* noop */
+        }
+    }
+
+    /**
+     * Read the AI page-translation settings and start a fresh page translation — the same flow the
+     * background uses for the "AI page translate" action, but initiated in-page (used by the
+     * auto-translate-on-reload path after the banner's target language changes).
+     */
+    startConfiguredAiPageTranslate() {
+        getOrSetDefaultSettings(
+            ["languageSetting", "LocalTranslatorConfig", "AiPageTranslateConfig"],
+            DEFAULT_SETTINGS
+        ).then((result) => {
+            const localConfig = result.LocalTranslatorConfig || {};
+            const engine =
+                localConfig.mode === "openai" ||
+                localConfig.mode === "openaiCompatible" ||
+                localConfig.mode === "chromeBuiltin"
+                    ? localConfig.mode
+                    : "googleAiStudio";
+            const model =
+                engine === "openai"
+                    ? localConfig.openaiModel || ""
+                    : engine === "openaiCompatible"
+                    ? localConfig.openaiCompatibleModel || ""
+                    : localConfig.model || "";
+            this.startDomPageTranslate({
+                engine,
+                model,
+                translatorId: "LocalTranslate",
+                sl: (result.languageSetting && result.languageSetting.sl) || "auto",
+                tl: (result.languageSetting && result.languageSetting.tl) || "en",
+                aiPageConfig: result.AiPageTranslateConfig,
+            });
+        });
+    }
+
+    // If the banner's language picker triggered a reload, resume translation automatically once,
+    // in the freshly selected language.
+    maybeResumeAutoPageTranslate() {
+        let flag = null;
+        try {
+            flag = sessionStorage.getItem("edge-translate-auto-page-translate");
+            if (flag) sessionStorage.removeItem("edge-translate-auto-page-translate");
+        } catch {
+            return;
+        }
+        if (!flag) return;
+        const run = () => {
+            try {
+                this.startConfiguredAiPageTranslate();
+            } catch {
+                /* noop */
+            }
+        };
+        if (document.readyState === "complete" || document.readyState === "interactive") {
+            setTimeout(run, 300);
+        } else {
+            window.addEventListener("DOMContentLoaded", () => setTimeout(run, 300), { once: true });
+        }
     }
 
     setDomPageBannerVisible(visible) {
@@ -8039,6 +10076,14 @@ class BannerController {
             this._mo.disconnect();
             this._mo = null;
         }
+        if (this._domBannerLangMenu) {
+            try {
+                this._domBannerLangMenu.destroy();
+            } catch {
+                /* noop */
+            }
+            this._domBannerLangMenu = null;
+        }
         const host = document.getElementById("edge-translate-dom-page-banner");
         if (host) host.remove();
         const shiftStyle = document.getElementById("edge-translate-page-shift-style");
@@ -8049,19 +10094,15 @@ class BannerController {
         this._domBannerLastRendered = null;
         this._domBannerEngineRendered = "";
         this._domTranslationCache.clear();
-        this._domTotalTranslationEntries = 0;
-        this._domCompletedTranslationEntries = 0;
+        // Also drop the per-string cache on a full cancel/teardown (it survives a same-page
+        // re-translate via resetDomPageRuntimeState, but a cancel is a clean stop). Keys already
+        // namespace by engine|model|sl|tl, so this is hygiene + bounded growth, not correctness.
+        if (this._domSegmentTextCache) this._domSegmentTextCache.clear();
+        // resetDomPageRuntimeState bumps the sessionId (so in-flight runs become stale and skip
+        // their finally-side decrement) and is the single owner of every per-session counter,
+        // the queue, the token-usage accumulator and the breaker latch — so cancel does not
+        // re-zero any of them itself.
         this.resetDomPageRuntimeState();
-        this._domCoverageScanCount = 0;
-        this._domCoverageStableScanCount = 0;
-        this._domOwnMutationSuppressUntil = 0;
-        this._domTokenUsage = {
-            inputTokens: 0,
-            outputTokens: 0,
-            reasoningTokens: 0,
-            cachedInputTokens: 0,
-            totalTokens: 0,
-        };
         if (this.currentTranslator === "dom") this.currentTranslator = null;
         this.movePage("top", 0, true);
     }
@@ -8717,7 +10758,19 @@ class BannerController {
             const next = this._domTranslationQueue.shift();
             next();
         }
-        if (!this._domTranslationQueue.length && this._domActiveTranslations === 0) {
+        // Top-up: the queue drained but slots are free — promote deferred backlog so the
+        // engine's parallelism stays saturated instead of waiting for the reader to scroll.
+        if (
+            !this._domTranslationQueue.length &&
+            this._domActiveTranslations < this._domMaxConcurrentTranslations
+        ) {
+            this.scheduleAiPageBacklogPromotion();
+        }
+        if (
+            !this._domTranslationQueue.length &&
+            this._domActiveTranslations === 0 &&
+            !this.hasPromotableAiPageBacklogEntries()
+        ) {
             this.scheduleDomPageCoverageScan();
         }
     }
@@ -8749,5 +10802,14 @@ BannerController._targetLangPatterns = {
 // Create the object — but never on the browser's native PDF viewer, where the page-translate
 // machinery has nothing to translate and must not touch the document.
 window.EdgeTranslateBannerController = isNativePdfDocument() ? null : new BannerController();
+// Resume page translation automatically (once) after the banner's language picker reloads the
+// page in a newly chosen target language.
+if (window.EdgeTranslateBannerController) {
+    try {
+        window.EdgeTranslateBannerController.maybeResumeAutoPageTranslate();
+    } catch {
+        /* noop */
+    }
+}
 
 export { BannerController };

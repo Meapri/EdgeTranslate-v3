@@ -175,6 +175,12 @@
         "message": "自動檢測",
         "description": "自動檢測"
     },
+    "SearchLanguage": {
+        "message": "搜尋語言"
+    },
+    "NoLanguageMatch": {
+        "message": "無相符項目"
+    },
     "SourceLanguage": {
         "message": "源語言",
         "description": "源語言"
@@ -246,6 +252,14 @@
     "EnableBuiltinPdfViewer": {
         "message": "使用內建 PDF 檢視器",
         "description": "使用 EdgeTranslate 內建的 pdf.js 檢視器開啟 PDF 檔案，而非瀏覽器預設檢視器。"
+    },
+    "AiPageLazyTranslate": {
+        "message": "AI 頁面延遲翻譯（捲動時翻譯）",
+        "description": "不一次將整頁送往 AI，而是先翻譯可視範圍附近內容，其餘在捲動時翻譯。"
+    },
+    "AiPageSkipBoilerplate": {
+        "message": "AI 翻譯頁面時略過參考文獻與導覽",
+        "description": "AI 頁面翻譯時不翻譯引用/註腳清單、導覽框、分類連結、目次與編輯連結。"
     },
     "GooglePageTranslate": {
         "message": "Google 網頁翻譯",

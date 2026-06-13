@@ -179,6 +179,12 @@
         "message": "Auto Detect",
         "description": "Auto Detect"
     },
+    "SearchLanguage": {
+        "message": "Search language"
+    },
+    "NoLanguageMatch": {
+        "message": "No matches"
+    },
     "SourceLanguage": {
         "message": "Source Language",
         "description": "Source Language"
@@ -250,6 +256,14 @@
     "EnableBuiltinPdfViewer": {
         "message": "Use the built-in PDF viewer",
         "description": "Open PDF files in EdgeTranslate's built-in pdf.js viewer instead of the browser's default viewer."
+    },
+    "AiPageLazyTranslate": {
+        "message": "Lazy AI page translation (translate on scroll)",
+        "description": "Translate content near the viewport first and the rest as you scroll, instead of sending the whole page to the AI at once."
+    },
+    "AiPageSkipBoilerplate": {
+        "message": "Skip references and navigation when AI-translating pages",
+        "description": "Do not translate citation lists, navigation boxes, category links, the table of contents and edit links during AI page translation."
     },
     "GooglePageTranslate": {
         "message": "Google Page Trans.",

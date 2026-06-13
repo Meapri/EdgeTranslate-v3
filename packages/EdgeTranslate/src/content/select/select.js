@@ -4,6 +4,7 @@ import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 import { wrapConsoleForFiltering } from "common/scripts/logger.js";
 import { inferDomPageTextRole } from "../dom_page_translate_context.js";
+import { extractSelectionContext } from "./selectionContext.js";
 
 wrapConsoleForFiltering();
 
@@ -454,6 +455,7 @@ function getSelection() {
     let position;
     let textRole = "text";
     let textSegments = [];
+    let selectionContext = null;
     if (selection.rangeCount > 0) {
         text = selection.toString().trim();
 
@@ -480,8 +482,12 @@ function getSelection() {
             let rect = selection.getRangeAt(selection.rangeCount - 1).getBoundingClientRect();
             position = [rect.left, rect.top];
         }
+        // LLM-only context: a budgeted window of the enclosing block + page title/domain so the
+        // AI translator can disambiguate senses and match tone. null whenever capture is unsafe
+        // (PDF viewer, form fields, very long selections); Google/Bing never see it.
+        selectionContext = extractSelectionContext(selection, { isPdfViewer });
     }
-    return { text, position, textRole, textSegments: textSegments || [] };
+    return { text, position, textRole, textSegments: textSegments || [], selectionContext };
 }
 
 function getRangeElement(node) {

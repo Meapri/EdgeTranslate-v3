@@ -215,6 +215,54 @@ select {
     background-size: 16px 16px;
 }
 
+// ─── Language menu (shared pretty picker) ─────────────────────────────────────
+// Harmonize the shared language-menu trigger with the popup's frosted pill controls.
+// (#setting scope beats the component's class-level defaults; the popover is body-level
+// and keeps the component's own Material card look.)
+#setting .et-lang-trigger {
+    min-height: 44px;
+    padding: 8px 16px;
+    border: 0;
+    border-radius: 999px;
+    background-color: rgba(241, 244, 248, .78);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    box-shadow: inset 0 0 0 1px rgba(221, 230, 239, .92), inset 0 1px 0 rgba(255, 255, 255, .78);
+    color: material-on-surface;
+    font-size: 14px;
+    font-weight: 600;
+    transition: transform var(--dur-quick) var(--spring-press),
+                background-color var(--dur-quick) var(--ease-decelerate),
+                box-shadow var(--dur-quick) var(--ease-decelerate);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    #setting .et-lang-trigger:hover {
+        background-color: rgba(230, 237, 244, .86);
+        box-shadow: inset 0 0 0 1px color-primary-container, 0 2px 8px rgba(0, 102, 204, .08);
+        transform: translateY(-1px);
+    }
+}
+
+#setting .et-lang-trigger:focus-visible,
+#setting .et-lang-menu.is-open .et-lang-trigger {
+    background-color: rgba(255, 255, 255, .94);
+    box-shadow: inset 0 0 0 2px color-primary, focus-ring-light;
+}
+
+#setting .et-lang-trigger:active {
+    transform: scale(0.97);
+    transition-duration: var(--dur-tap);
+}
+
+@media (prefers-color-scheme: dark) {
+    #setting .et-lang-trigger {
+        background-color: rgba(255, 255, 255, .06);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+        color: color-on-surface;
+    }
+}
+
 // ─── CTA Button ──────────────────────────────────────────────────────────────
 #translateSubmit {
     min-width: 88px;

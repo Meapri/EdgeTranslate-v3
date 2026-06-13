@@ -160,6 +160,107 @@ describe("LocalTranslator", () => {
         expect(body.contents[0].parts[0].text).toContain("hello there.");
     });
 
+    test("includes fenced selection context with a sentinel and a static anti-echo rule", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "은행" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        await translator.translate("They sat by the bank watching the river flow.", "en", "ko", {
+            selectionContext: {
+                surrounding: "The fishermen spent the afternoon by the river bank with their rods.",
+                title: "A Day at the River",
+                domain: "example.org",
+            },
+        });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const userText = body.contents[0].parts[0].text;
+        // Context is fenced, labeled reference-only, and separated by the sentinel line.
+        expect(userText).toContain("Page: A Day at the River (example.org)");
+        expect(userText).toContain("Context (surrounding page text — reference only");
+        expect(userText).toContain('"""The fishermen spent the afternoon');
+        expect(userText).toContain("Text to translate:");
+        // The payload comes AFTER the sentinel so the model cannot conflate it with context.
+        expect(userText.indexOf("Text to translate:")).toBeLessThan(
+            userText.indexOf("They sat by the bank watching the river flow.")
+        );
+        // The static system prompt carries the matching anti-echo rule (cache-stable).
+        expect(body.systemInstruction.parts[0].text).toContain("reference material for word-sense");
+        expect(body.systemInstruction.parts[0].text).toContain("Text to translate:");
+    });
+
+    test("omits context plumbing entirely when no selection context is provided", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        await translator.translate("hello there.", "en", "ko");
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const userText = body.contents[0].parts[0].text;
+        expect(userText).not.toContain("Page:");
+        expect(userText).not.toContain("Context (");
+        expect(userText).not.toContain("Text to translate:");
+    });
+
+    test("dictionary lookups use Gemini JSON mime, contextual sense ranking, and no streaming", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: '{"translation":"은행"}' }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const onProgress = jest.fn();
+        await translator.translate("bank", "en", "ko", {
+            onProgress,
+            selectionContext: {
+                surrounding: "He deposited the cheque at the bank before noon.",
+                title: "",
+                domain: "",
+            },
+        });
+
+        // Non-streaming endpoint despite onProgress (JSON must not stream into the preview).
+        expect(String(fetchMock.mock.calls[0][0])).toContain(":generateContent?");
+        expect(String(fetchMock.mock.calls[0][0])).not.toContain("streamGenerateContent");
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.responseMimeType).toBe("application/json");
+        const userText = body.contents[0].parts[0].text;
+        expect(userText).toContain("Dictionary entry.");
+        expect(userText).toContain("contextual sense first");
+        expect(userText).toContain("He deposited the cheque");
+    });
+
     test("translates with an OpenAI-compatible chat completions endpoint", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
@@ -1133,7 +1234,50 @@ describe("LocalTranslator", () => {
         expect(body.reasoning_effort).toBe("none");
     });
 
-    test("retries OpenAI page segment translations when the model omits segments", async () => {
+    test("does NOT re-roll OpenAI page translations when a completed reply omits markers", async () => {
+        // finish_reason "stop" with a missing [[n]] marker: at temperature 0 a full re-roll
+        // near-deterministically reproduces the same gap for 2x tokens. The page pipeline
+        // heals missing markers with a missing-leaves-only request — the engine must NOT
+        // pay a second full generation.
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [
+                    {
+                        finish_reason: "stop",
+                        message: {
+                            content: ["[[1:p]]", "첫 번째 문장."].join("\n"),
+                        },
+                    },
+                ],
+                usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+        const result = await translator.translate(
+            ["[[1:p]]", "First sentence.", "[[2:p]]", "Second sentence."].join("\n"),
+            "en",
+            "ko"
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(result.mainMeaning).toContain("[[1:p]]");
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 100,
+            outputTokens: 20,
+            totalTokens: 120,
+        });
+    });
+
+    test("retries OpenAI page translations with a larger budget on true truncation", async () => {
         const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
@@ -1142,9 +1286,11 @@ describe("LocalTranslator", () => {
                 json: async () => ({
                     choices: [
                         {
-                            finish_reason: "stop",
+                            finish_reason: "length",
                             message: {
-                                content: ["[[1:p]]", "첫 번째 문장."].join("\n"),
+                                content: ["[[1:p]]", "첫 번째 문장.", "[[2:p]]", "두 번"].join(
+                                    "\n"
+                                ),
                             },
                         },
                     ],
@@ -1195,6 +1341,43 @@ describe("LocalTranslator", () => {
         const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
         const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
         expect(secondBody.max_completion_tokens).toBeGreaterThan(firstBody.max_completion_tokens);
+    });
+
+    test("gates the OpenAI page first-attempt completion ceiling on the model family", async () => {
+        // A page payload big enough that the estimated output exceeds every ceiling, so the
+        // request budget IS the ceiling: modern families (gpt-5/gpt-4.1/gpt-4o/o-series) may
+        // stream up to 12288 tokens in one attempt; legacy/unknown models keep the safe 4096
+        // (a too-high cap on a legacy model is a hard 400, not a truncation).
+        const hugePage = `[[1:p]]\n${"lorem ipsum dolor sit amet ".repeat(3000)}`;
+        const reply = {
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ finish_reason: "stop", message: { content: "[[1:p]]\n번역." } }],
+            }),
+        };
+
+        let fetchMock = jest.fn().mockResolvedValue(reply);
+        global.fetch = fetchMock as any;
+        const modern = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+        await modern.translate(hugePage, "en", "ko");
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_completion_tokens).toBe(12288);
+
+        fetchMock = jest.fn().mockResolvedValue(reply);
+        global.fetch = fetchMock as any;
+        const legacy = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4-turbo",
+        });
+        await legacy.translate(hugePage, "en", "ko");
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(4096);
     });
 
     test("uses no reasoning for OpenAI GPT 5.4 mini even when xhigh is configured", async () => {
@@ -1459,5 +1642,119 @@ describe("LocalTranslator", () => {
     test("does not advertise OpenAI support when API key is missing", () => {
         const translator = new LocalTranslator({ enabled: true, mode: "openai" });
         expect(translator.supportedLanguages().size).toBe(0);
+    });
+
+    test("retries a streamed page reply that ended without finish_reason with a larger budget", async () => {
+        // An SSE stream cut mid-generation (proxy drop, server error event) ends with
+        // content but NO finish_reason — passing it off as success would hand the page
+        // pipeline a truncated reply. The engine must retry once at the larger budget.
+        const encoder = new TextEncoder();
+        const makeSseResponse = (events: string[]) => {
+            const chunks = events.map((event) => encoder.encode(`data: ${event}\n\n`));
+            let index = 0;
+            return {
+                ok: true,
+                status: 200,
+                body: {
+                    getReader: () => ({
+                        read: async () =>
+                            index < chunks.length
+                                ? { done: false, value: chunks[index++] }
+                                : { done: true, value: undefined },
+                        releaseLock: () => undefined,
+                    }),
+                },
+            };
+        };
+
+        const fetchMock = jest
+            .fn()
+            // First attempt: deltas arrive, then the stream dies without finish_reason.
+            .mockResolvedValueOnce(
+                makeSseResponse([
+                    JSON.stringify({
+                        choices: [{ delta: { content: "[[1:p]]\n첫 번째 문장.\n[[2:p]]\n두 번" } }],
+                    }),
+                ])
+            )
+            // Retry: the full reply completes with finish_reason "stop".
+            .mockResolvedValueOnce(
+                makeSseResponse([
+                    JSON.stringify({
+                        choices: [
+                            {
+                                delta: {
+                                    content: "[[1:p]]\n첫 번째 문장.\n[[2:p]]\n두 번째 문장.",
+                                },
+                            },
+                        ],
+                    }),
+                    JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+                ])
+            );
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+        const onProgress = jest.fn();
+        const result = await translator.translate(
+            ["[[1:p]]", "First sentence.", "[[2:p]]", "Second sentence."].join("\n"),
+            "en",
+            "ko",
+            { onProgress }
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(firstBody.stream).toBe(true);
+        expect(secondBody.stream).toBe(true);
+        // The retry runs at the larger token multiplier: a strictly larger budget.
+        expect(secondBody.max_completion_tokens).toBeGreaterThan(
+            firstBody.max_completion_tokens
+        );
+        expect(result.mainMeaning).toContain("두 번째 문장.");
+        expect(onProgress).toHaveBeenCalled();
+    });
+
+    test("excludes gpt-4o from the large page completion budget but includes gpt-4.1-mini", async () => {
+        // gpt-4o is deliberately excluded from supportsLargeCompletionBudget: the
+        // gpt-4o-2024-05-13 snapshot hard-caps completions at 4096 and the alias may
+        // still serve it — a too-high cap is a hard 400, not a recoverable truncation.
+        // gpt-4.1 models all take the large first-attempt ceiling.
+        const hugePage = `[[1:p]]\n${"lorem ipsum dolor sit amet ".repeat(3000)}`;
+        const reply = {
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ finish_reason: "stop", message: { content: "[[1:p]]\n번역." } }],
+            }),
+        };
+
+        let fetchMock = jest.fn().mockResolvedValue(reply);
+        global.fetch = fetchMock as any;
+        const gpt4o = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4o",
+        });
+        await gpt4o.translate(hugePage, "en", "ko");
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(4096);
+
+        fetchMock = jest.fn().mockResolvedValue(reply);
+        global.fetch = fetchMock as any;
+        const gpt41Mini = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4.1-mini",
+        });
+        await gpt41Mini.translate(hugePage, "en", "ko");
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(12288);
     });
 });

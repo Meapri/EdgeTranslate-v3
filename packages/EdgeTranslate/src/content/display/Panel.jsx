@@ -17,6 +17,8 @@ import Dropdown from "./Dropdown.jsx";
 import SettingIcon from "./icons/setting.svg";
 import PinIcon from "./icons/pin.svg";
 import CloseIcon from "./icons/close.svg";
+import { LANGUAGES } from "@edge_translate/translators";
+import createLanguageMenu from "common/scripts/language_menu.js";
 
 function getI18nMessage(name, fallback = "") {
     const message = chrome.i18n.getMessage(name);
@@ -25,6 +27,52 @@ function getI18nMessage(name, fallback = "") {
 
 // Communication channel.
 const channel = new Channel();
+
+/**
+ * Header target-language picker. Wraps the shared pretty language menu (vanilla DOM) for use inside
+ * the panel's Preact + Shadow DOM tree: the trigger is styled inside the panel's shadow root, while
+ * the searchable popover renders into the page <body> so the panel's transform / overflow can't
+ * clip it. The panel's useClickAway ignores clicks inside `.et-lang-popover` so picking a language
+ * keeps the panel open.
+ */
+function TargetLanguageMenu({ value, onChange }) {
+    const mountRef = useRef(null);
+    const menuRef = useRef(null);
+    const onChangeRef = useLatest(onChange);
+    useEffect(() => {
+        const mount = mountRef.current;
+        if (!mount || typeof createLanguageMenu !== "function") return undefined;
+        const items = Object.keys(LANGUAGES).map((code) => ({
+            value: code,
+            label: getI18nMessage(LANGUAGES[code], code),
+        }));
+        const menu = createLanguageMenu({
+            languages: items,
+            value: value || "en",
+            styleRoot: mount.getRootNode(),
+            popoverContainer: document.body,
+            ariaLabel: getI18nMessage("TargetLanguage", "Target language"),
+            searchPlaceholder: getI18nMessage("SearchLanguage", "Search language"),
+            emptyText: getI18nMessage("NoLanguageMatch", "No matches"),
+            onChange: (code) => onChangeRef.current && onChangeRef.current(code),
+        });
+        menuRef.current = menu;
+        mount.appendChild(menu.element);
+        return () => {
+            try {
+                menu.destroy();
+            } catch {
+                /* noop */
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    useEffect(() => {
+        if (menuRef.current && value) menuRef.current.setValue(value);
+    }, [value]);
+    return <LangMount ref={mountRef} data-no-panel-drag="true" />;
+}
+
 // Store the translation result and attach it to window.
 window.translateResult = {};
 // Flag of showing result.
@@ -78,6 +126,8 @@ export default function ResultPanel() {
     const [availableTranslators, setAvailableTranslators] = useState();
     // selected translator
     const [currentTranslator, setCurrentTranslator] = useState();
+    // selected target language (shown in the header picker)
+    const [currentTargetLanguage, setCurrentTargetLanguage] = useState("");
     // Control the behavior of highlight part(a placeholder to preview the "fixed" style panel).
     const [highlight, setHighlight] = useState({
         show: false, // whether to show the highlight part
@@ -610,6 +660,7 @@ export default function ResultPanel() {
                 });
                 setAvailableTranslators(availableTranslators);
                 setCurrentTranslator(result.DefaultTranslator);
+                setCurrentTargetLanguage(languageSetting.tl);
             }
         );
 
@@ -1047,7 +1098,12 @@ export default function ResultPanel() {
     // Update the drag bounds and size when the size of window has changed
     useEvent("resize", windowResizeHandler, window);
 
-    useClickAway(containerElRef, () => {
+    useClickAway(containerElRef, (event) => {
+        // The language picker's popover renders into document.body (outside the panel's shadow) so
+        // it can't be clipped — but that means clicking it would otherwise look like a click-away.
+        // Ignore clicks that land inside the popover so choosing a language doesn't close the panel.
+        const path = (event && event.composedPath && event.composedPath()) || [];
+        if (path.some((node) => node?.classList?.contains?.("et-lang-popover"))) return;
         // The panel will be closed if users click outside of the it with the panelFix option closed.
         const openedRecently = Date.now() - lastOpenedAtRef.current < 500;
         if (contentTypeRef.current === "LOADING" || openedRecently) return;
@@ -1324,6 +1380,28 @@ export default function ResultPanel() {
         chrome.storage.sync.set({ DisplaySetting: displaySettingRef.current });
     }
 
+    /**
+     * The reader picked a new target language in the panel header. Persist it, re-init the
+     * translators for the new pair, and re-translate the current selection right away — passing the
+     * new target explicitly (overrideLang) so it does not depend on the background's async
+     * storage-change listener having applied the new setting yet.
+     */
+    function changeTargetLanguage(tl) {
+        getOrSetDefaultSettings("languageSetting", DEFAULT_SETTINGS).then((result) => {
+            const languageSetting = result.languageSetting || {};
+            if (languageSetting.tl === tl) return;
+            const from = languageSetting.sl || "auto";
+            languageSetting.tl = tl;
+            chrome.storage.sync.set({ languageSetting });
+            channel.emit("language_setting_update", { from, to: tl });
+            setCurrentTargetLanguage(tl);
+            const text = window.translateResult && window.translateResult.originalText;
+            if (text) {
+                channel.request("translate", { text, overrideLang: { sl: from, tl } });
+            }
+        });
+    }
+
     return (
         <Fragment>
             {open && (
@@ -1397,6 +1475,10 @@ export default function ResultPanel() {
                                                 );
                                             })}
                                         </SourceOption>
+                                        <TargetLanguageMenu
+                                            value={currentTargetLanguage}
+                                            onChange={changeTargetLanguage}
+                                        />
                                         <HeadIcons data-no-panel-drag="true">
                                             <HeadIcon
                                                 role="button"
@@ -1715,6 +1797,37 @@ const HeadIcons = styled.div`
     flex: 0 0 auto;
     margin-left: auto;
     min-width: 0;
+`;
+
+// Reshape the shared language menu's trigger so it reads as a sibling of the translator
+// pill (SourceOption). The popover keeps the menu's own Material card look (it renders in <body>).
+const LangMount = styled.div`
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(45%, 150px);
+
+    /* The shared menu defaults to width:100% (it fills the popup column). Inside this shrink-wrap
+       flex container that collapses to 0, so size the trigger to its own content here. */
+    & .et-lang-menu {
+        width: auto;
+    }
+    & .et-lang-trigger {
+        width: auto;
+        min-height: 36px;
+        max-width: 150px;
+        padding: 4px 11px;
+        gap: 6px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: normal;
+        background: rgba(118, 118, 128, 0.12);
+        border-color: transparent;
+    }
+    & .et-lang-trigger-chevron {
+        font-size: 10px;
+    }
 `;
 
 const HeadIcon = styled.div`

@@ -175,6 +175,12 @@
         "message": "自動検出",
         "description": "自動検出"
     },
+    "SearchLanguage": {
+        "message": "言語を検索"
+    },
+    "NoLanguageMatch": {
+        "message": "一致なし"
+    },
     "SourceLanguage": {
         "message": "原文の言語",
         "description": "原文の言語"
@@ -246,6 +252,14 @@
     "EnableBuiltinPdfViewer": {
         "message": "内蔵PDFビューアを使用",
         "description": "PDFファイルをブラウザの既定のビューアではなく、EdgeTranslate内蔵のpdf.jsビューアで開きます。"
+    },
+    "AiPageLazyTranslate": {
+        "message": "AIページの遅延翻訳（スクロール時に翻訳）",
+        "description": "ページ全体を一度にAIへ送らず、表示領域付近を先に翻訳し、残りはスクロール時に翻訳します。"
+    },
+    "AiPageSkipBoilerplate": {
+        "message": "AIページ翻訳時に参考文献・ナビゲーションを除外",
+        "description": "AIページ翻訳で出典・脚注リスト、ナビゲーションボックス、カテゴリリンク、目次、編集リンクを翻訳しません。"
     },
     "GooglePageTranslate": {
         "message": "Google ページ翻訳",

@@ -2,19 +2,49 @@ import { LANGUAGES } from "@edge_translate/translators";
 import Channel from "common/scripts/channel.js";
 import { i18nHTML } from "common/scripts/common.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import createLanguageMenu from "common/scripts/language_menu.js";
 
 /**
  * Communication channel.
  */
 const channel = new Channel();
 
-// 获取下拉列表元素
-let sourceLanguage = document.getElementById("sl");
-let targetLanguage = document.getElementById("tl");
-// 获取交换按钮
-let exchangeButton = document.getElementById("exchange");
-// 获取互译模式开关
-let mutualTranslate = document.getElementById("mutual-translate");
+// 交换按钮 / 互译模式开关
+const exchangeButton = document.getElementById("exchange");
+const mutualTranslate = document.getElementById("mutual-translate");
+
+// Pretty custom language menus (replace the old native <select> elements).
+let sourceMenu = null;
+let targetMenu = null;
+// Source language can be auto-detected; the target language is always a concrete language.
+let sourceItems = [];
+let targetItems = [];
+const labelByCode = new Map();
+
+function buildLanguageItems() {
+    targetItems = Object.keys(LANGUAGES).map((code) => ({
+        value: code,
+        label: chrome.i18n.getMessage(LANGUAGES[code]) || code,
+    }));
+    sourceItems = [
+        { value: "auto", label: chrome.i18n.getMessage("AutoDetect") || "Auto" },
+        ...targetItems,
+    ];
+    labelByCode.clear();
+    for (const item of sourceItems) labelByCode.set(item.value, item.label);
+}
+
+function getSourceValue() {
+    return sourceMenu ? sourceMenu.getValue() : "auto";
+}
+
+function getTargetValue() {
+    return targetMenu ? targetMenu.getValue() : "en";
+}
+
+function labelOf(code) {
+    return labelByCode.get(code) || code;
+}
 
 /**
  * 初始化设置列表
@@ -32,24 +62,6 @@ window.onload = function () {
     arrowDown.setAttribute("title", chrome.i18n.getMessage("Unfold"));
     arrowUp.setAttribute("title", chrome.i18n.getMessage("Fold"));
 
-    sourceLanguage.onchange = function () {
-        // 如果源语言是自动判断语言类型(值是auto),则按钮显示灰色，避免用户点击,如果不是，则显示蓝色，可以点击
-        judgeValue(exchangeButton, sourceLanguage);
-        updateLanguageSetting(
-            sourceLanguage.options[sourceLanguage.selectedIndex].value,
-            targetLanguage.options[targetLanguage.selectedIndex].value
-        );
-        showSourceTarget(); // update source language and target language in input placeholder
-    };
-
-    targetLanguage.onchange = function () {
-        updateLanguageSetting(
-            sourceLanguage.options[sourceLanguage.selectedIndex].value,
-            targetLanguage.options[targetLanguage.selectedIndex].value
-        );
-        showSourceTarget(); // update source language and target language in input placeholder
-    };
-
     // 添加交换按钮对点击事件的监听
     exchangeButton.onclick = exchangeLanguage;
 
@@ -63,14 +75,18 @@ window.onload = function () {
         showSourceTarget();
     };
 
+    buildLanguageItems();
+
     // 获得用户之前选择的语言翻译选项和互译设置
     getOrSetDefaultSettings(["languageSetting", "OtherSettings"], DEFAULT_SETTINGS).then(
         (result) => {
             let OtherSettings = result.OtherSettings;
-            let languageSetting = result.languageSetting;
+            let languageSetting = result.languageSetting || {};
+            const sl = languageSetting.sl || "auto";
+            const tl = languageSetting.tl || "en";
 
             // 根据源语言设定更新
-            if (languageSetting.sl === "auto") {
+            if (sl === "auto") {
                 mutualTranslate.disabled = true;
                 mutualTranslate.parentElement.title = chrome.i18n.getMessage(
                     "MutualTranslationWarning"
@@ -84,25 +100,30 @@ window.onload = function () {
                 mutualTranslate.parentElement.title = "";
             }
 
-            // languages是可选的源语言和目标语言的列表
-            for (let language in LANGUAGES) {
-                let value = language;
-                let name = chrome.i18n.getMessage(LANGUAGES[language]);
+            const searchPlaceholder = chrome.i18n.getMessage("SearchLanguage") || "Search language";
+            const emptyText = chrome.i18n.getMessage("NoLanguageMatch") || "No matches";
 
-                if (languageSetting && value == languageSetting.sl) {
-                    sourceLanguage.options.add(new Option(name, value, true, true));
-                } else {
-                    sourceLanguage.options.add(new Option(name, value));
-                }
+            sourceMenu = createLanguageMenu({
+                languages: sourceItems,
+                value: sl,
+                ariaLabel: chrome.i18n.getMessage("SourceLanguage") || "Source language",
+                searchPlaceholder,
+                emptyText,
+                onChange: onSourceChange,
+            });
+            targetMenu = createLanguageMenu({
+                languages: targetItems,
+                value: tl,
+                ariaLabel: chrome.i18n.getMessage("TargetLanguage") || "Target language",
+                searchPlaceholder,
+                emptyText,
+                onChange: onTargetChange,
+            });
+            document.getElementById("sl-mount").appendChild(sourceMenu.element);
+            document.getElementById("tl-mount").appendChild(targetMenu.element);
 
-                if (languageSetting && value == languageSetting.tl) {
-                    targetLanguage.options.add(new Option(name, value, true, true));
-                } else {
-                    targetLanguage.options.add(new Option(name, value));
-                }
-            }
-
-            showSourceTarget(); // show source language and target language in input placeholder
+            judgeValue();
+            showSourceTarget();
         }
     );
     // 统一添加事件监听
@@ -128,21 +149,32 @@ chrome.commands.onCommand.addListener((command) => {
     }
 });
 
+function onSourceChange(value) {
+    judgeValue();
+    updateLanguageSetting(value, getTargetValue());
+    showSourceTarget();
+}
+
+function onTargetChange(value) {
+    updateLanguageSetting(getSourceValue(), value);
+    showSourceTarget();
+}
+
 /**
  * 保存翻译语言设定
  *
- * @param {*} sourceLanguage 源语言
- * @param {*} targetLanguage 目标语言
+ * @param {string} sl 源语言
+ * @param {string} tl 目标语言
  */
-function updateLanguageSetting(sourceLanguage, targetLanguage) {
+function updateLanguageSetting(sl, tl) {
     // Update translator config.
     channel.emit("language_setting_update", {
-        from: sourceLanguage,
-        to: targetLanguage,
+        from: sl,
+        to: tl,
     });
 
-    saveOption("languageSetting", { sl: sourceLanguage, tl: targetLanguage });
-    if (sourceLanguage === "auto") {
+    saveOption("languageSetting", { sl, tl });
+    if (sl === "auto") {
         mutualTranslate.checked = false;
         mutualTranslate.disabled = true;
         mutualTranslate.parentElement.title = chrome.i18n.getMessage("MutualTranslationWarning");
@@ -172,13 +204,7 @@ function addEventListener() {
     document.getElementById("translateSubmit").addEventListener("click", translateSubmit);
     document.addEventListener("keypress", translatePreSubmit); // 对用户按下回车按键后的事件进行监听
     document.getElementById("setting-switch").addEventListener("click", settingSwitch);
-    // 페이지 번역 버튼 제거로 이벤트 바인딩 없음
 }
-
-/**
- * block start
- * 事件监听的回调函数定义请在此区域中进
- */
 
 /**
  * 负责在option页面中输入内容后进行翻译
@@ -186,28 +212,24 @@ function addEventListener() {
 function translateSubmit() {
     let content = document.getElementById("translate_input").value;
     if (content.replace(/\s*/, "") !== "") {
-        // 判断值是否为
         document.getElementById("hint_message").style.display = "none";
 
         // send message to background to translate content
         channel.request("translate", { text: content }).then(() => {
             setTimeout(() => {
-                window.close(); // 展示结束后关闭option页面
+                window.close();
             }, 0);
         });
-    } // 提示输入的内容是
-    else document.getElementById("hint_message").style.display = "inline";
+    } else {
+        document.getElementById("hint_message").style.display = "inline";
+    }
 }
 
 /**
- *
- * 如果源语言是自动判断语言类型(值是auto),则按钮显示灰色，避免用户点击
- *
- * @param {*HTMLElement} exchangeButton 特定的一个element,是一个交换按钮图
- * @param {*HTMLElement} sourceLanguage 特定的一个element,源语言的选项
+ * 如果源语言是自动判断语言类型(值是auto),则交换按钮显示灰色，避免用户点击。
  */
-function judgeValue(exchangeButton, sourceLanguage) {
-    if (sourceLanguage.value === "auto") exchangeButton.style.color = "gray";
+function judgeValue() {
+    if (getSourceValue() === "auto") exchangeButton.style.color = "gray";
     else exchangeButton.style.color = "#4a8cf7";
 }
 
@@ -215,13 +237,15 @@ function judgeValue(exchangeButton, sourceLanguage) {
  * 交换源语言和目标语言
  */
 function exchangeLanguage() {
-    if (sourceLanguage.value !== "auto") {
-        let tempValue = targetLanguage.value;
-        targetLanguage.value = sourceLanguage.value;
-        sourceLanguage.value = tempValue;
-        updateLanguageSetting(sourceLanguage.value, targetLanguage.value);
-        showSourceTarget(); // update source language and target language in input placeholder
-    }
+    const sl = getSourceValue();
+    if (sl === "auto" || !sourceMenu || !targetMenu) return;
+    const tl = getTargetValue();
+    // setValue does not fire onChange, so persist once explicitly below.
+    sourceMenu.setValue(tl);
+    targetMenu.setValue(sl);
+    judgeValue();
+    updateLanguageSetting(tl, sl);
+    showSourceTarget();
 }
 
 /**
@@ -237,12 +261,14 @@ function settingSwitch() {
     if (isOpen) {
         arrowDown.style.display = "none";
         arrowUp.style.display = "inline";
-        document.getElementById("tl").focus(); // after show settings block, the language element <select> will be auto focused
-        judgeValue(exchangeButton, sourceLanguage);
+        // Focus the target-language menu trigger after the settings block opens.
+        const tlTrigger = targetMenu && targetMenu.element.querySelector(".et-lang-trigger");
+        if (tlTrigger) tlTrigger.focus();
+        judgeValue();
     } else {
         arrowDown.style.display = "inline";
         arrowUp.style.display = "none";
-        document.getElementById("translate_input").focus(); // after settings block disappear, the translation element <input> will be auto focused
+        document.getElementById("translate_input").focus();
     }
 }
 
@@ -261,18 +287,11 @@ function translatePreSubmit(event) {
  */
 function showSourceTarget() {
     let inputElement = document.getElementById("translate_input");
-    let sourceLanguageString = sourceLanguage.options[sourceLanguage.selectedIndex].text;
-    let targetLanguageString = targetLanguage.options[targetLanguage.selectedIndex].text;
-    if (
-        sourceLanguage.options[sourceLanguage.selectedIndex].value === "auto" ||
-        !mutualTranslate.checked
-    ) {
+    const sourceLanguageString = labelOf(getSourceValue());
+    const targetLanguageString = labelOf(getTargetValue());
+    if (getSourceValue() === "auto" || !mutualTranslate.checked) {
         inputElement.placeholder = `${sourceLanguageString} ==> ${targetLanguageString}`;
     } else {
         inputElement.placeholder = `${sourceLanguageString} <=> ${targetLanguageString}`;
     }
 }
-
-/**
- * end block
- */

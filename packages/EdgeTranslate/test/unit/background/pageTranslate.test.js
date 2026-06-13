@@ -1,4 +1,7 @@
-import { translatePage, executeGoogleScript } from "../../../src/background/library/pageTranslate.js";
+import {
+    translatePage,
+    executeGoogleScript,
+} from "../../../src/background/library/pageTranslate.js";
 import { getOrSetDefaultSettings } from "common/scripts/settings.js";
 
 jest.mock("common/scripts/settings.js", () => ({
@@ -64,6 +67,7 @@ describe("pageTranslate module", () => {
             translatorId: "LocalTranslate",
             sl: "en",
             tl: "ko",
+            aiPageConfig: {},
         });
     });
 
@@ -91,6 +95,7 @@ describe("pageTranslate module", () => {
             translatorId: "LocalTranslate",
             sl: "en",
             tl: "ko",
+            aiPageConfig: {},
         });
     });
 
@@ -117,6 +122,7 @@ describe("pageTranslate module", () => {
             translatorId: "LocalTranslate",
             sl: "en",
             tl: "ko",
+            aiPageConfig: {},
         });
     });
 });

@@ -226,7 +226,14 @@ describe("TranslatorManager selection role wrapping", () => {
 
         await manager.translate("source", [10, 20], { tab: { id: 42 } }, "text", [], "precise");
 
-        expect(preciseTranslator.translate).toHaveBeenCalledWith("source", "en", "ko");
+        // AI translators now receive the LLM-only options bag (streaming callback; selection
+        // context when provided) as a 4th argument.
+        expect(preciseTranslator.translate).toHaveBeenCalledWith(
+            "source",
+            "en",
+            "ko",
+            expect.objectContaining({ onProgress: expect.any(Function) })
+        );
         expect(normalTranslator.translate).not.toHaveBeenCalled();
         expect(manager.channel.emitToTabs.mock.calls[0]).toMatchObject([
             42,
@@ -1087,5 +1094,133 @@ describe("Cross-mode cache isolation and clearCaches", () => {
             enabled: true,
             mode: "googleAiStudio",
         });
+    });
+});
+
+describe("LLM-native selection context + script-language fallbacks", () => {
+    const {
+        detectDominantScriptLanguage,
+    } = require("../../../src/background/library/translate.js");
+
+    function makeFlowManager({ defaultTranslator, mutual = false, languageSetting }) {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.config_loader = Promise.resolve();
+        manager.cacheOptions = { maxKeyTextLength: 500, translateTtlMs: 1000 };
+        manager.LANGUAGE_SETTING = languageSetting || { sl: "en", tl: "ko" };
+        manager.IN_MUTUAL_MODE = mutual;
+        manager.DEFAULT_TRANSLATOR = defaultTranslator;
+        manager.HYBRID_TRANSLATOR_CONFIG = { selections: { mainMeaning: "LocalTranslate" } };
+        manager.translationCache = { get: () => undefined, set: jest.fn() };
+        manager.inflightTranslate = new Map();
+        manager.resolveTargetTabId = async () => 7;
+        manager.channel = { emitToTabs: jest.fn() };
+        manager.detect = jest.fn(async () => "auto");
+        manager.TRANSLATORS = {
+            [defaultTranslator]: {
+                translate: jest.fn(async () => ({
+                    originalText: "x",
+                    mainMeaning: "번역",
+                    sourceLanguage: "auto",
+                })),
+            },
+        };
+        return manager;
+    }
+
+    test("detectDominantScriptLanguage identifies unambiguous scripts and stays empty for Latin", () => {
+        expect(detectDominantScriptLanguage("안녕하세요 좋은 아침입니다")).toBe("ko");
+        expect(detectDominantScriptLanguage("これはテストです")).toBe("ja");
+        expect(detectDominantScriptLanguage("这是一个测试句子")).toBe("zh-CN");
+        expect(detectDominantScriptLanguage("Это тестовое предложение")).toBe("ru");
+        expect(detectDominantScriptLanguage("Hello plain English text")).toBe("");
+    });
+
+    test("sanitizeSelectionContext caps fields, strips control chars, and drops context for long text", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        const sanitized = manager.sanitizeSelectionContext(
+            {
+                surrounding: "bad\u0000chars\u0007 " + "s".repeat(400),
+                title: "t".repeat(120),
+                domain: "example.org",
+            },
+            "short selection"
+        );
+        expect(sanitized.surrounding.length).toBeLessThanOrEqual(300);
+        expect(sanitized.surrounding).toContain("bad chars");
+        expect(sanitized.title.length).toBeLessThanOrEqual(80);
+        expect(sanitized.domain).toBe("example.org");
+
+        // Long selections carry their own context — surrounding is dropped server-side too.
+        const longSanitized = manager.sanitizeSelectionContext(
+            { surrounding: "context", title: "", domain: "" },
+            "x".repeat(600)
+        );
+        expect(longSanitized).toBeNull();
+
+        expect(manager.sanitizeSelectionContext(null, "abc")).toBeNull();
+        expect(manager.sanitizeSelectionContext("not-an-object", "abc")).toBeNull();
+    });
+
+    test("AI translator receives sanitized context + streaming options; cache key gains a context profile", async () => {
+        const manager = makeFlowManager({ defaultTranslator: "LocalTranslate" });
+        await manager.translate("bank", [0, 0], { tab: { id: 7 } }, "text", [], "normal", null, {
+            surrounding: "He deposited money at the bank.",
+            title: "Money",
+            domain: "ex.org",
+        });
+
+        const call = manager.TRANSLATORS.LocalTranslate.translate.mock.calls[0];
+        expect(call.length).toBe(4);
+        expect(call[3].selectionContext).toMatchObject({
+            surrounding: "He deposited money at the bank.",
+            title: "Money",
+            domain: "ex.org",
+        });
+        expect(typeof call[3].onProgress).toBe("function");
+        // Sense-aware caching: the stored key carries the context profile component.
+        const storedKey = manager.translationCache.set.mock.calls[0][0];
+        expect(storedKey).toContain("profile:selctx:");
+    });
+
+    test("Google translator keeps its exact 3-arg call even when context is provided", async () => {
+        const manager = makeFlowManager({ defaultTranslator: "GoogleTranslate" });
+        manager.HYBRID_TRANSLATOR_CONFIG = { selections: { mainMeaning: "GoogleTranslate" } };
+        await manager.translate("bank", [0, 0], { tab: { id: 7 } }, "text", [], "normal", null, {
+            surrounding: "He deposited money at the bank.",
+            title: "Money",
+            domain: "ex.org",
+        });
+
+        const call = manager.TRANSLATORS.GoogleTranslate.translate.mock.calls[0];
+        expect(call.length).toBe(3);
+        const storedKey = manager.translationCache.set.mock.calls[0][0];
+        expect(storedKey).not.toContain("profile:selctx:");
+    });
+
+    test("mutual mode swaps languages for AI via the script heuristic when detect() returns auto", async () => {
+        const manager = makeFlowManager({
+            defaultTranslator: "LocalTranslate",
+            mutual: true,
+            languageSetting: { sl: "ko", tl: "ja" },
+        });
+        await manager.translate("これはテストです", [0, 0], { tab: { id: 7 } });
+
+        // Script detection says ja (=== tl) → swapped: translate ja → ko.
+        const call = manager.TRANSLATORS.LocalTranslate.translate.mock.calls[0];
+        expect(call[1]).toBe("ja");
+        expect(call[2]).toBe("ko");
+    });
+
+    test("TTS source language falls back to the dominant script instead of English", async () => {
+        const manager = makeFlowManager({
+            defaultTranslator: "LocalTranslate",
+            languageSetting: { sl: "auto", tl: "en" },
+        });
+        await manager.translate("안녕하세요 반갑습니다", [0, 0], { tab: { id: 7 } });
+
+        const finished = manager.channel.emitToTabs.mock.calls.find(
+            (c) => c[1] === "translating_finished"
+        );
+        expect(finished[2].sourceLanguage).toBe("ko");
     });
 });
