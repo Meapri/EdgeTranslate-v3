@@ -10763,10 +10763,12 @@ class BannerController {
                         opacity: 1;
                         animation: progress-sheen 1.9s var(--ios-glide) infinite;
                     }
-                    /* iOS-18 indeterminate: a short rounded pill glides across the
-                       track on a soft ease while the run spins up. */
+                    /* iOS-18 indeterminate: a SLIM rounded pill glides across the track
+                       while the run spins up. Deliberately narrow (≈12%) so it reads as a
+                       moving loader, never as a partial fill level — a wide pill made the bar
+                       look like it "started from the middle". */
                     .bar[data-state="starting"] .progress-fill {
-                        width: 42% !important;
+                        width: 12% !important;
                         background: linear-gradient(90deg,
                             transparent,
                             color-mix(in oklab, var(--et-primary) 80%, white) 35%,
@@ -10774,7 +10776,7 @@ class BannerController {
                             color-mix(in oklab, var(--et-primary) 80%, white) 65%,
                             transparent);
                         box-shadow: 0 0 10px color-mix(in oklab, var(--et-primary) 42%, transparent);
-                        animation: progress-indeterminate 1.5s var(--ios-glide) infinite;
+                        animation: progress-indeterminate 1.4s var(--ios-glide) infinite;
                     }
                     .bar[data-state="error"] .status-dot {
                         background: var(--et-error);
@@ -10868,8 +10870,10 @@ class BannerController {
                     }
                     /* Indeterminate pill travelling across the track. */
                     @keyframes progress-indeterminate {
-                        0%   { transform: translateX(-120%); }
-                        100% { transform: translateX(280%); }
+                        /* Sweep the slim (12%-wide) loader pill across the whole track:
+                           from just off the left edge to just off the right edge. */
+                        0%   { transform: translateX(-150%); }
+                        100% { transform: translateX(760%); }
                     }
                     /* Gloss highlight sweeping across the determinate fill, with a
                        brief pause at the far edge between passes. */
@@ -11307,22 +11311,23 @@ class BannerController {
         const failed = Number(this._domFailedTranslationEntries || 0);
         const requestsIncomplete = requestsComplete && failed > 0;
         const nextState = requestsIncomplete ? "error" : requestsComplete ? "complete" : "running";
+        const leavingStarting = last.state === "starting" && nextState !== "starting";
         if (last.state !== nextState) {
-            // Leaving the indeterminate "starting" placeholder (a 42%-wide glide) for a
-            // determinate state: snap the fill to empty with the transition OFF, then let the
-            // real width animate up from 0. Without this the CSS width transition would visibly
-            // retract the bar from ~42% down to the first real (usually low) percent — the
-            // "starts from the middle" effect.
-            if (refs.progressFill && last.state === "starting") {
-                const prevTransition = refs.progressFill.style.transition;
-                refs.progressFill.style.transition = "none";
-                refs.progressFill.style.width = "0%";
-                void refs.progressFill.offsetWidth; // commit the reset before re-enabling motion
-                refs.progressFill.style.transition = prevTransition;
-                last.fillWidth = "0%";
-            }
             refs.bar.dataset.state = nextState;
             last.state = nextState;
+        }
+        // Leaving the indeterminate "starting" placeholder for a determinate state: snap the fill
+        // to empty with the transition OFF, then let the real width animate up from 0. The
+        // data-state change above must happen FIRST so the `width: … !important` starting rule is
+        // gone and the inline 0% actually takes effect — otherwise the CSS width would win and the
+        // bar would visibly animate down to the first real (often low) percent, i.e. "start from
+        // the middle".
+        if (refs.progressFill && leavingStarting) {
+            refs.progressFill.style.transition = "none";
+            refs.progressFill.style.width = "0%";
+            void refs.progressFill.offsetWidth; // commit the reset before re-enabling motion
+            refs.progressFill.style.transition = "";
+            last.fillWidth = "0%";
         }
         const pipelineUnit = pipelineSnapshot?.progressUnit || "targets";
         const failureUnit = pipelineSnapshot?.failureUnit || pipelineUnit;
