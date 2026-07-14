@@ -50,16 +50,22 @@ const INTERACTIVE_ROLES = new Set([
     "switch",
 ]);
 
-// Opaque embeds serialized as void placeholders (spec §1.1: <img>, <code> treated opaque, <wbr>,
-// MathML, skipped widgets). Their subtrees never contribute wire text.
+// Opaque embeds serialized as void placeholders (spec §1.1: <img>, <wbr>, MathML, skipped
+// widgets). Their subtrees never contribute wire text.
+//
+// <code>/<kbd>/<samp> are intentionally NOT listed here: the collector registers their Text nodes
+// when they hold non-ASCII prose (isTranslatableCodeContent), and block_ir stays consistent with
+// that decision purely through REGISTERED CONTENT — no code-detection heuristic is duplicated. A
+// code/kbd/samp that wraps a registered Text node lands in `wrapperSet` and serializes as a paired
+// `<gN>…</gN>` (its content is sent and translated, the code styling preserved on apply); one with
+// no registered Text node is not in `wrapperSet` and falls through to the "non-empty content the
+// collector skipped → opaque void `<vN/>`" branch in visitElement. (`pre` is a LEAF_BLOCK_TAG, not
+// an opaque void; it is likewise unaffected here.)
 const OPAQUE_VOID_TAGS = new Set([
     "img",
     "br",
     "wbr",
     "hr",
-    "code",
-    "kbd",
-    "samp",
     "svg",
     "math",
     "iframe",

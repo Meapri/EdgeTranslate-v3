@@ -353,6 +353,54 @@ describe("block serialization", () => {
         expect(serialized.placeholderInventory.tags).toEqual([]);
     });
 
+    it("serializes non-ASCII prose inside <code> as a PAIRED tag and round-trips the <code>", () => {
+        // The collector registers the <code> Text node because its content is natural-language
+        // script (isTranslatableCodeContent), so block_ir wraps it as a paired placeholder — its
+        // content is sent for translation and the <code> styling is preserved on apply.
+        document.body.innerHTML = String.raw`<p id="k">前 <code>パスワード</code> 後</p>`;
+        const root = document.getElementById("k");
+        const codeText = root.querySelector("code").firstChild;
+        const nodes = [root.firstChild, codeText, root.lastChild];
+        const blockTarget = {
+            id: "code1",
+            kind: "block",
+            revision: 0,
+            element: root,
+            textNodes: nodes.map((node) => ({
+                node,
+                nodeRef: { deref: () => node },
+                source: node.data,
+            })),
+        };
+        const serialized = serializeBlock(blockTarget);
+        expect(serialized.source).toBe("前 <g1>パスワード</g1> 後");
+        expect(serialized.placeholderInventory.tags).toEqual([
+            { name: "g1", kind: "paired", interactive: false },
+        ]);
+
+        const textBefore = root.textContent;
+        const codeEl = root.querySelector("code");
+        const parsed = parseTranslatedBlock(serialized.source, serialized.placeholderInventory);
+        expect(parsed.ok).toBe(true);
+        applyBlockTranslation(blockTarget, parsed.segments, blockCommitter);
+        expect(root.textContent).toBe(textBefore);
+        // The <code> element itself (its styling) survives the round trip.
+        expect(root.querySelector("code")).toBe(codeEl);
+        expect(codeEl.textContent).toBe("パスワード");
+    });
+
+    it("serializes ASCII code inside <code> as an opaque VOID, never sending its content", () => {
+        document.body.innerHTML = String.raw`<p id="k">text <code>console.log()</code> more</p>`;
+        const root = document.getElementById("k");
+        // makeBlockTarget mirrors the production collector, which excludes ASCII <code> text.
+        const blockTarget = makeBlockTarget(root, "code2");
+        expect(blockTarget.textNodes.map((entry) => entry.source)).toEqual(["text ", " more"]);
+        const serialized = serializeBlock(blockTarget);
+        expect(serialized.source).toBe("text <v1/> more");
+        expect(serialized.placeholderInventory.tags).toEqual([{ name: "v1", kind: "void" }]);
+        expect(serialized.source).not.toContain("console.log");
+    });
+
     it("preserves comment-split Text-node boundaries with one synthetic void placeholder", () => {
         document.body.innerHTML = String.raw`<p id="k">앞<!-- framework marker -->중간<a href="#x">링크</a>뒤</p>`;
         const root = document.getElementById("k");

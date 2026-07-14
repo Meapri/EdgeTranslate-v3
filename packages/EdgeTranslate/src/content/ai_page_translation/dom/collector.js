@@ -24,18 +24,14 @@
 
 import { serializeBlock } from "./block_ir.js";
 
-const SKIPPED_SUBTREE_TAGS = new Set([
-    "script",
-    "style",
-    "noscript",
-    "template",
-    "svg",
-    "math",
-    "code",
-    "pre",
-    "kbd",
-    "samp",
-]);
+const SKIPPED_SUBTREE_TAGS = new Set(["script", "style", "noscript", "template", "svg", "math"]);
+
+// code / kbd / samp / pre are opaque ONLY when their content is real ASCII code
+// (see isTranslatableCodeContent). They are kept OUT of SKIPPED_SUBTREE_TAGS and handled with a
+// content check so a tag that is being misused to STYLE non-Latin natural-language text — e.g.
+// `<code>パスワード</code>` — is still collected and translated like any other inline run. This is
+// a character-composition rule, not a hardcoded word / tag / language list.
+const CODE_ISH_TAGS = new Set(["code", "kbd", "samp", "pre"]);
 
 const TEXT_EXCLUDED_ANCESTOR_TAGS = new Set(["textarea", "select"]);
 
@@ -140,6 +136,24 @@ function hasTranslatableText(value) {
     return !isNonLinguisticToken(text);
 }
 
+// One general Unicode signal used to tell code-styled PROSE apart from real code inside
+// <code>/<kbd>/<samp>/<pre>. hasTranslatableText alone is insufficient here: multi-token ASCII
+// code such as `function foo() { return 1; }` or `git commit -m` contains whitespace, so the
+// identifier filters treat it as prose and would wrongly translate it. Source code, shell
+// commands and keyboard keys are written in ASCII; when one of these elements instead contains a
+// letter from a non-Latin script (CJK, kana, hangul, Cyrillic, Greek, …) the site is misusing the
+// tag to style natural-language text, which should be translated. The extra requirement is
+// therefore purely "does the content contain at least one non-ASCII character" — a
+// character-composition rule with no word list or language special-casing. `[\u0080-\uFFFF]` is
+// the positive form of "outside the ASCII range" (it also covers astral scripts through their
+// surrogate code units) and, unlike a printable-ASCII range, never fires on the tabs/newlines of a
+// multi-line ASCII code block.
+const NON_ASCII_CHAR = /[\u0080-\uFFFF]/;
+
+function isTranslatableCodeContent(value) {
+    return hasTranslatableText(value) && NON_ASCII_CHAR.test(String(value || ""));
+}
+
 // ---------------------------------------------------------------------------
 // Eligibility / exclusion rules (ported from the v2 collector)
 // ---------------------------------------------------------------------------
@@ -199,6 +213,10 @@ function getSkipReason(element, options = {}) {
     if (!element || element.nodeType !== 1) return null;
     const tag = element.tagName.toLowerCase();
     if (SKIPPED_SUBTREE_TAGS.has(tag)) return "excluded-tag";
+    // Opaque code tags are skipped ONLY when their content is real ASCII code. A code/kbd/samp/pre
+    // holding non-Latin natural-language script falls through (returns null below) so the walk
+    // registers its text nodes like any inline text.
+    if (CODE_ISH_TAGS.has(tag) && !isTranslatableCodeContent(element.textContent)) return "code";
     if (tag === "input" && String(element.getAttribute("type") || "").toLowerCase() === "hidden") {
         return "hidden-form-control";
     }
@@ -218,6 +236,9 @@ function getSkipReason(element, options = {}) {
 function isLocallyExcluded(element) {
     const tag = String(element.tagName || "").toLowerCase();
     if (SKIPPED_SUBTREE_TAGS.has(tag) || TEXT_EXCLUDED_ANCESTOR_TAGS.has(tag)) return true;
+    // A text node inside `<code>パスワード</code>` is gathered; one inside `<code>console.log()</code>`
+    // is excluded — same character-composition rule as getSkipReason.
+    if (CODE_ISH_TAGS.has(tag) && !isTranslatableCodeContent(element.textContent)) return true;
     if (String(element.getAttribute?.("translate") || "").toLowerCase() === "no") return true;
     const editable = element.getAttribute?.("contenteditable");
     if (editable !== null && editable !== undefined && String(editable).toLowerCase() !== "false") {
@@ -624,6 +645,7 @@ function collectSubtreeTargets(roots, registry, options = {}) {
 export {
     ARIA_REFERENCE_ATTRIBUTES,
     ARIA_TRANSLATABLE_ATTRIBUTES,
+    CODE_ISH_TAGS,
     DIRECT_TRANSLATABLE_ATTRIBUTES,
     LEAF_BLOCK_TAGS,
     SKIPPED_SUBTREE_TAGS,
@@ -637,5 +659,6 @@ export {
     inferAttributeRole,
     inferBlockRole,
     isNonLinguisticToken,
+    isTranslatableCodeContent,
     translatableAttributeNames,
 };

@@ -2,6 +2,7 @@ import {
     collectPage,
     collectSubtreeTargets,
     hasTranslatableText,
+    isTranslatableCodeContent,
 } from "../../../src/content/ai_page_translation/dom/collector.js";
 import { isTranslationOrderRepresentable } from "../../../src/content/ai_page_translation/dom/block_ir.js";
 import { TargetRegistry } from "../../../src/content/ai_page_translation/dom/target_registry.js";
@@ -401,5 +402,102 @@ describe("ai page translation vNext collector", () => {
 
         expect(sourcesOf(all)).toEqual(["실제 페이지 본문"]);
         expect(stats.skippedByReason["extension-owned"]).toBe(2);
+    });
+
+    // A <code>/<kbd>/<samp>/<pre> is opaque ONLY when its content is real ASCII code. When a site
+    // misuses one of those tags to STYLE non-Latin natural-language text, the collector must gather
+    // and translate it. This is a character-composition rule (isTranslatableCodeContent), never a
+    // hardcoded word / tag / language list.
+    describe("code-styled prose vs. real code inside code/kbd/samp/pre", () => {
+        // Property matrix for the exported predicate — no dependency on any specific word.
+        const TRANSLATABLE = [
+            ["kana", "パスワード"],
+            ["hangul", "비밀번호"],
+            ["Cyrillic", "Пароль"],
+            ["Greek", "Κωδικός"],
+            ["Thai", "รหัสผ่าน"],
+            ["prose with an ASCII token", "パスワードは admin です"],
+        ];
+        const OPAQUE_CODE = [
+            ["single-token call", "console.log()"],
+            ["multi-token statement", "function foo() { return 1; }"],
+            ["shell command", "git commit -m"],
+            ["keyboard key", "Ctrl"],
+            ["file name", "README.md"],
+            ["snake identifier", "foo_bar_baz"],
+            ["scoped identifier", "std::vector"],
+            ["pure symbols / digits", "{ a: 1 }"],
+            ["empty", ""],
+        ];
+
+        test.each(TRANSLATABLE)("isTranslatableCodeContent is true for %s", (_name, text) =>
+            expect(isTranslatableCodeContent(text)).toBe(true)
+        );
+        test.each(OPAQUE_CODE)("isTranslatableCodeContent is false for %s", (_name, text) =>
+            expect(isTranslatableCodeContent(text)).toBe(false)
+        );
+
+        test("gathers non-Latin script wrapped in <code> as inline block content", async () => {
+            document.body.innerHTML = "<li>前文 <code>パスワード</code> 後文</li>";
+            const registry = makeRegistry();
+            const { all } = await collectAll(document.body, registry);
+
+            expect(all).toHaveLength(1);
+            const [entry] = all;
+            expect(entry.target.textNodes.map((node) => node.source)).toEqual([
+                "前文 ",
+                "パスワード",
+                " 後文",
+            ]);
+            // Sent for translation as a PAIRED placeholder, preserving the <code> styling on apply.
+            expect(entry.ir.source).toBe("前文 <g1>パスワード</g1> 後文");
+            expect(entry.ir.placeholderInventory.tags).toEqual([
+                { name: "g1", kind: "paired", interactive: false },
+            ]);
+        });
+
+        test.each([
+            ["hangul", "비밀번호"],
+            ["Cyrillic", "Пароль"],
+        ])("collects a standalone <code>%s</code>", async (_name, text) => {
+            document.body.innerHTML = `<code>${text}</code>`;
+            const registry = makeRegistry();
+            const { all } = await collectAll(document.body, registry);
+            expect(sourcesOf(all)).toEqual([text]);
+        });
+
+        test("keeps ASCII code opaque: inline call is a void, block statement is skipped", async () => {
+            document.body.innerHTML = [
+                "<p>text <code>console.log()</code> more</p>",
+                "<code>function foo() { return 1; }</code>",
+                "<kbd>Ctrl</kbd>+<kbd>Enter</kbd>",
+                "<pre>const excluded = true;</pre>",
+            ].join("");
+            const registry = makeRegistry();
+            const { all } = await collectAll(document.body, registry);
+
+            // The paragraph collects only its own prose; the <code> becomes an opaque void.
+            const paragraph = all.find((entry) => entry.element?.tagName === "P");
+            expect(paragraph.target.textNodes.map((node) => node.source)).toEqual([
+                "text ",
+                " more",
+            ]);
+            expect(paragraph.ir.source).toBe("text <v1/> more");
+
+            // Nothing ASCII-code-shaped was ever registered for translation.
+            const everySource = all.flatMap((entry) =>
+                (entry.target.textNodes || []).map((node) => node.source)
+            );
+            for (const forbidden of ["console.log()", "function foo", "Ctrl", "Enter", "const"]) {
+                expect(everySource.some((source) => source.includes(forbidden))).toBe(false);
+            }
+        });
+
+        test("a <code> under a translate='no' ancestor stays excluded even with kana content", async () => {
+            document.body.innerHTML = "<div translate='no'><code>パスワード</code></div>";
+            const registry = makeRegistry();
+            const { all } = await collectAll(document.body, registry);
+            expect(all).toEqual([]);
+        });
     });
 });
