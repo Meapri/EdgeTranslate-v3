@@ -141,6 +141,13 @@
             "capMs": 15000
         }
     },
+    "hedging": {
+        "$comment": "Straggler tail-latency hedging. Mirrors AI_PAGE_HEDGE in common/scripts/ai_page_translation_limits.js. wall-clock == slowest packet; when an in-flight packet exceeds thresholdMs AND a slot is free AND no fresh work is queued, dispatch a SECOND concurrent request under a DISTINCT wire packetId (the background joins same-packetId in-flight calls, so a distinct id is required to force a genuinely new provider generation) and take whichever returns first. Basis: 福島県 (2154 strings, 147 packets, gpt-5.6-luna reasoning:none) is bimodal ~14s/~55s with identical request count/tokens/0-failed; 12s threshold (well above per-packet p90 ~8s) + idle-slot hedge collapses the ~40s slow mode. maxPerPacket 1 bounds cost/growth to at most one extra generation per packet. The loser's generation is still billed by the provider but its receipt is discarded by our ledger, so the banner may under-report by the loser's tokens.",
+        "enabled": true,
+        "thresholdMs": 12000,
+        "maxPerPacket": 1,
+        "checkIntervalMs": 1000
+    },
     "estimator": {
         "$comment": "Spec §4.1 — the ONE formula. All legacy formulas deleted.",
         "cjkTokensPerChar": 0.8,

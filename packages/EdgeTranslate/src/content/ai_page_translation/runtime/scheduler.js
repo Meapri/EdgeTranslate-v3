@@ -23,7 +23,7 @@
  * validation classes from spec §7.
  */
 
-import { AI_PAGE_PROVIDER_AIMD } from "common/scripts/ai_page_translation_limits.js";
+import { AI_PAGE_HEDGE, AI_PAGE_PROVIDER_AIMD } from "common/scripts/ai_page_translation_limits.js";
 
 const DEFAULT_BACKOFF = Object.freeze({ baseMs: 500, factor: 2, jitter: 0.2, capMs: 15000 });
 
@@ -108,8 +108,10 @@ function createScheduler(options = {}) {
         dispatch,
         onSettled = () => undefined,
         onCircuitOpen = () => undefined,
+        onTelemetry = () => undefined,
         recover = null,
         queue,
+        hedge,
         maxTotalAttempts = Number.POSITIVE_INFINITY,
         now = () => Date.now(),
         setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
@@ -145,6 +147,13 @@ function createScheduler(options = {}) {
         Math.floor(Number(resilienceBounds.consecutiveNoOutputCircuit) || 4)
     );
 
+    // Straggler tail-latency hedging (spec §2.3): defaults pinned in ai_page_translation_limits.js
+    // / gates config `hedging`, overridable per session for tests.
+    const hedgeConfig = { ...AI_PAGE_HEDGE, ...(hedge || {}) };
+    const hedgeEnabled = hedgeConfig.enabled !== false;
+    const hedgeThresholdMs = Math.max(0, Number(hedgeConfig.thresholdMs) || 0);
+    const hedgeCheckIntervalMs = Math.max(1, Number(hedgeConfig.checkIntervalMs) || 1000);
+
     const keyStates = new Map(); // limiterKey -> { limit, inFlight, cleanCompletions, cooldownUntil, congestionEpoch, held }
     const metas = new WeakMap(); // packet -> attempt bookkeeping
     const inFlightEntries = new Set(); // { packet, key, controller }
@@ -153,6 +162,7 @@ function createScheduler(options = {}) {
     let totalAttempts = 0;
     let consecutiveNoOutput = 0;
     let stopped = false;
+    let hedgeTimerArmed = false;
     let circuit = { open: false, reason: null, failure: null };
 
     function keyState(key) {
@@ -180,6 +190,8 @@ function createScheduler(options = {}) {
                 transportRetries: 0,
                 replayPending: false,
                 isolateBound: null,
+                // At most one hedge per packet ever (spec §2.3 / gates `hedging.maxPerPacket`).
+                hedged: false,
             };
             metas.set(packet, meta);
         }
@@ -301,6 +313,34 @@ function createScheduler(options = {}) {
         return state.limit < providerAimd.cap ? aOut - bOut : bOut - aOut;
     }
 
+    // A dispatch that resolves to a non-object, or rejects, is treated as a delivery-unknown:
+    // the request may have executed, so it is not silently dropped.
+    function normalizeOutcome(outcome) {
+        return outcome && typeof outcome === "object"
+            ? outcome
+            : {
+                  ok: false,
+                  failure: {
+                      kind: "delivery-unknown",
+                      message: "dispatch returned no outcome",
+                      retryDirective: "never",
+                      requestMayHaveExecuted: true,
+                  },
+              };
+    }
+
+    function dispatchError(error) {
+        return {
+            ok: false,
+            failure: {
+                kind: "delivery-unknown",
+                message: error?.message || String(error),
+                retryDirective: "never",
+                requestMayHaveExecuted: true,
+            },
+        };
+    }
+
     function dispatchPacket(packet, key) {
         const state = keyState(key);
         if (totalAttempts >= attemptCeiling()) {
@@ -320,45 +360,135 @@ function createScheduler(options = {}) {
         // A later 429/5xx advances this key's congestion epoch. Successes from requests that
         // started before that signal are stale ACKs and must not immediately undo the
         // multiplicative decrease while their siblings are still settling.
-        const entry = { packet, key, controller, congestionEpoch: state.congestionEpoch };
-        inFlightEntries.add(entry);
-        state.inFlight += 1;
-        const replay = meta.replayPending === true;
-        meta.replayPending = false;
         const attemptMeta = {
             attempt: meta.attempts,
             totalAttempts,
             counts: { ...meta.counts },
-            replay,
+            replay: meta.replayPending === true,
             limiterKey: key,
             signal: controller ? controller.signal : null,
         };
+        // startedAt drives the hedge gate; meta/attemptMeta are held so a winning hedge sibling
+        // can reap this entry (release its slot, suppress its billing) without waiting on it.
+        const entry = {
+            packet,
+            key,
+            controller,
+            congestionEpoch: state.congestionEpoch,
+            startedAt: now(),
+            meta,
+            attemptMeta,
+        };
+        inFlightEntries.add(entry);
+        state.inFlight += 1;
+        meta.replayPending = false;
         Promise.resolve()
             .then(() => dispatch(packet, attemptMeta))
-            .then(
-                (outcome) =>
-                    outcome && typeof outcome === "object"
-                        ? outcome
-                        : {
-                              ok: false,
-                              failure: {
-                                  kind: "delivery-unknown",
-                                  message: "dispatch returned no outcome",
-                                  retryDirective: "never",
-                                  requestMayHaveExecuted: true,
-                              },
-                          },
-                (error) => ({
-                    ok: false,
-                    failure: {
-                        kind: "delivery-unknown",
-                        message: error?.message || String(error),
-                        retryDirective: "never",
-                        requestMayHaveExecuted: true,
-                    },
-                })
-            )
+            .then(normalizeOutcome, dispatchError)
             .then((outcome) => settle(entry, outcome));
+    }
+
+    // Fires a SECOND concurrent provider request for an in-flight straggler (spec §2.3 tail
+    // control). The two entries share a `pair` guard so the packet is settled EXACTLY once; the
+    // hedge carries attemptMeta.hedge=true so the transport routes it under a distinct wire
+    // packetId and the session suppresses the loser's usage. A hedge is a real HTTP attempt, so
+    // it is counted against the global attempt ceiling; maxPerPacket 1 (meta.hedged) bounds it.
+    function fireHedge(originalEntry) {
+        const { packet, key } = originalEntry;
+        const state = keyState(key);
+        const meta = originalEntry.meta;
+        meta.hedged = true;
+        totalAttempts += 1;
+        const controller = typeof AbortController === "function" ? new AbortController() : null;
+        const pair = { resolved: false };
+        originalEntry.hedgePair = pair;
+        const attemptMeta = {
+            attempt: meta.attempts,
+            totalAttempts,
+            counts: { ...meta.counts },
+            replay: false,
+            limiterKey: key,
+            signal: controller ? controller.signal : null,
+            hedge: true,
+        };
+        const hedgeEntry = {
+            packet,
+            key,
+            controller,
+            congestionEpoch: state.congestionEpoch,
+            startedAt: now(),
+            meta,
+            attemptMeta,
+            hedgePair: pair,
+            isHedge: true,
+            sibling: originalEntry,
+        };
+        originalEntry.sibling = hedgeEntry;
+        inFlightEntries.add(hedgeEntry);
+        state.inFlight += 1;
+        onTelemetry("hedge_fired");
+        Promise.resolve()
+            .then(() => dispatch(packet, attemptMeta))
+            .then(normalizeOutcome, dispatchError)
+            .then((outcome) => settle(hedgeEntry, outcome));
+    }
+
+    // The winner of a hedge pair reaps its sibling immediately: release its slot, mark it so its
+    // late settle is a no-op, tell the session (through the shared attemptMeta) to DISCARD its
+    // usage receipt, and abort its local controller. The provider still bills the loser's
+    // generation, so the banner may under-report by the loser's tokens — accepted (never summed).
+    function reapHedgeSibling(sibling) {
+        if (!sibling || sibling.reaped) return;
+        sibling.reaped = true;
+        if (inFlightEntries.delete(sibling)) {
+            const siblingState = keyState(sibling.key);
+            siblingState.inFlight = Math.max(0, siblingState.inFlight - 1);
+        }
+        if (sibling.attemptMeta) sibling.attemptMeta.hedgeLost = true;
+        sibling.controller?.abort();
+    }
+
+    function queuedWorkCount() {
+        if (!queue || typeof queue.sizeByTier !== "function") return 0;
+        const sizes = queue.sizeByTier();
+        return Array.isArray(sizes)
+            ? sizes.reduce((total, count) => total + (Number(count) || 0), 0)
+            : 0;
+    }
+
+    function hasUnhedgedInFlight() {
+        for (const entry of inFlightEntries) {
+            if (!entry.meta || entry.meta.hedged !== true) return true;
+        }
+        return false;
+    }
+
+    // Runs on each pump tick and on the ~1s re-armed timer. Hedges an in-flight straggler ONLY
+    // when a slot is free AND no fresh work is queued (never steal a slot from unstarted work).
+    function evaluateHedges() {
+        if (!hedgeEnabled || stopped || circuit.open) return;
+        if (queuedWorkCount() > 0) return;
+        const nowTs = now();
+        for (const entry of Array.from(inFlightEntries)) {
+            if (entry.isHedge || !entry.meta || entry.meta.hedged === true) continue;
+            if (nowTs - entry.startedAt < hedgeThresholdMs) continue;
+            if (totalAttempts >= attemptCeiling()) continue;
+            const state = keyState(entry.key);
+            if (!dispatchAllowed(state)) continue;
+            fireHedge(entry);
+        }
+    }
+
+    function armHedgeTimer() {
+        if (!hedgeEnabled || stopped || circuit.open || hedgeTimerArmed) return;
+        if (!hasUnhedgedInFlight()) return;
+        hedgeTimerArmed = true;
+        scheduleTimer(hedgeCheckIntervalMs, () => {
+            hedgeTimerArmed = false;
+            if (stopped || circuit.open) return;
+            evaluateHedges();
+            armHedgeTimer();
+        });
     }
 
     function settleExhaustedTransport(packet, failure, resolvedCount) {
@@ -381,9 +511,22 @@ function createScheduler(options = {}) {
 
     async function settle(entry, outcome) {
         const { packet, key } = entry;
+        // A hedge loser reaped by its winning sibling already had its slot released, its usage
+        // suppressed and its outcome discarded at reap time. Its late settle is a pure no-op —
+        // never double-decrement the limiter, never re-process, never retry, never bill.
+        if (entry.reaped) return;
         inFlightEntries.delete(entry);
         const state = keyState(key);
         state.inFlight = Math.max(0, state.inFlight - 1);
+        // Hedge pair resolution: the FIRST entry of a pair to reach settle drives the packet's
+        // state machine exactly once. It reaps the sibling straggler immediately so full-page
+        // completion never waits on the loser's slow generation, and marks the pair resolved so
+        // the loser's eventual settle short-circuits above.
+        if (entry.hedgePair && !entry.hedgePair.resolved) {
+            entry.hedgePair.resolved = true;
+            reapHedgeSibling(entry.sibling);
+            onTelemetry(entry.isHedge ? "hedge_won" : "hedge_original_won");
+        }
         // A session stop or an open circuit is a terminal dispatch boundary: a transport call
         // that settles after it must not mutate scheduling state or spawn retries.
         if (stopped) return;
@@ -578,12 +721,17 @@ function createScheduler(options = {}) {
                 compare: compareQueuedPackets,
                 accept: queuedPacketIsDispatchable,
             });
-            if (!packet) return;
+            if (!packet) break;
             const key = limiterKeyOf(packet);
             const state = keyState(key);
             if (dispatchAllowed(state)) dispatchPacket(packet, key);
             else state.held.push(packet);
         }
+        if (stopped || circuit.open) return;
+        // The queue is drained (or every remaining packet is gated): now that fresh work has had
+        // first claim on the slots, consider hedging any in-flight straggler with an idle slot.
+        evaluateHedges();
+        armHedgeTimer();
     }
 
     function notifyEnqueued() {

@@ -20,6 +20,16 @@ const SERVICE_COUNT_TOKENS = "count_page_translation_tokens";
 const SERVICE_TRANSLATE = "translate_page_packet";
 const SERVICE_CANCEL = "cancel_page_translation";
 
+// Suffix appended to derive a hedge attempt's WIRE packetId from the logical packetId (spec
+// §2.3 tail control). The background transport keys its in-flight/completed idempotency map on
+// (tab, session, packetId); a hedge MUST carry a distinct packetId or it would join the
+// in-flight straggler and issue no new provider request. maxPerPacket is 1, so `#h1` suffices.
+const HEDGE_PACKET_ID_SUFFIX = "#h1";
+
+function hedgePacketId(packetId) {
+    return `${packetId}${HEDGE_PACKET_ID_SUFFIX}`;
+}
+
 /**
  * AIMD limiter identity (spec §2.3): per (provider, apiKeyHash). The background reports the
  * key hash (never the key) through capabilities; the profile revision is the documented
@@ -75,10 +85,16 @@ function createTransportClient({
     }
     const state = { profileRevision: "", capabilities: null };
 
-    const buildEnvelope = ({ packetId, items, maxOutputTokens, ctx, hint, attempt = 0 }) => {
+    const buildEnvelope = ({ packetId, items, maxOutputTokens, ctx, hint, attempt = 0, hedge }) => {
         if (typeof packetId !== "string" || !packetId.trim()) {
             throw new TypeError("packet envelope requires a packetId");
         }
+        // A hedge attempt re-sends the SAME payload under a DISTINCT wire packetId so the
+        // background issues a genuinely new provider generation instead of joining the
+        // in-flight straggler (spec §2.3). payloadHash is derived below WITHOUT the packetId,
+        // so it stays byte-identical to the original — the idempotency CONTENT is unchanged, only
+        // the routing key differs. The original packetId's own replay/idempotency is untouched.
+        const wirePacketId = hedge === true ? hedgePacketId(packetId) : packetId;
         const units = (Array.isArray(items) ? items : []).map((item) => ({
             id: item.id,
             text: item.text,
@@ -86,7 +102,8 @@ function createTransportClient({
         }));
         const output = Math.max(1, Math.floor(Number(maxOutputTokens) || 0) || 1024);
         // payloadHash covers everything the provider request depends on but NOT the attempt
-        // ordinal, so a replay of the same packet keeps the same idempotency identity.
+        // ordinal or the wire packetId, so a replay (or a hedge) of the same packet keeps the
+        // same idempotency identity.
         const payloadHash = fnv1a32(
             JSON.stringify({
                 profileRevision: state.profileRevision,
@@ -100,9 +117,9 @@ function createTransportClient({
         );
         return {
             schemaVersion: AI_PAGE_SCHEMA_VERSION,
-            requestId: `${packetId}:a${Math.max(0, Math.floor(Number(attempt) || 0))}`,
+            requestId: `${wirePacketId}:a${Math.max(0, Math.floor(Number(attempt) || 0))}`,
             sessionId,
-            packetId,
+            packetId: wirePacketId,
             payloadHash,
             providerProfileId,
             profileRevision: state.profileRevision,
@@ -170,10 +187,12 @@ function createTransportClient({
 
 export {
     AI_PAGE_SCHEMA_VERSION,
+    HEDGE_PACKET_ID_SUFFIX,
     SERVICE_CANCEL,
     SERVICE_CAPABILITIES,
     SERVICE_COUNT_TOKENS,
     SERVICE_TRANSLATE,
     createTransportClient,
+    hedgePacketId,
     resolveLimiterKey,
 };

@@ -106,6 +106,39 @@ describe("vNext transport client (page-v3-1 envelope)", () => {
         expect(changed.payloadHash).not.toBe(first.payloadHash);
     });
 
+    it("routes a hedge attempt under a distinct wire packetId while preserving payloadHash", async () => {
+        const channel = makeChannel((service) =>
+            service === SERVICE_CAPABILITIES
+                ? { profileRevision: "r2" }
+                : { ok: true, units: [], usageReceipts: [] }
+        );
+        const client = makeClient(channel);
+        await client.getCapabilities();
+        const params = {
+            packetId: "pkt7",
+            items: [{ id: "b1", text: "こんにちは", role: "h" }],
+            maxOutputTokens: 512,
+            ctx: { title: "T", domain: "d", gloss: [] },
+            attempt: 0,
+        };
+        const original = await client.translatePacket(params);
+        const hedged = await client.translatePacket({ ...params, hedge: true });
+
+        const [originalEnvelope, hedgeEnvelope] = channel.calls
+            .slice(1)
+            .map((call) => call.payload);
+        // The background keys idempotency on (tab, session, packetId); the hedge MUST carry a
+        // distinct packetId so it is not joined to the in-flight original.
+        expect(originalEnvelope.packetId).toBe("pkt7");
+        expect(hedgeEnvelope.packetId).toBe("pkt7#h1");
+        expect(hedgeEnvelope.requestId).toBe("pkt7#h1:a0");
+        // Same payload content -> identical idempotency hash; only the routing key differs.
+        expect(hedgeEnvelope.payloadHash).toBe(originalEnvelope.payloadHash);
+        expect(hedgeEnvelope.units).toEqual(originalEnvelope.units);
+        expect(original.packetId).toBe("pkt7");
+        expect(hedged.packetId).toBe("pkt7#h1");
+    });
+
     it("normalizes malformed replies instead of throwing", async () => {
         const channel = makeChannel(() => null);
         const client = makeClient(channel);

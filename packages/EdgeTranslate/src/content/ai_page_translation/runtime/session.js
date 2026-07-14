@@ -227,6 +227,7 @@ class AiPageTranslationSession {
                 dispatch: (packet, attemptMeta) => this.dispatchPacket(packet, attemptMeta),
                 onSettled: (packet, outcome) => handleSettledOutcome(this, packet, outcome),
                 onCircuitOpen: (failure) => this.handleCircuitOpen(failure),
+                onTelemetry: (name, count) => this.bumpTelemetry(name, count),
                 queue: this.queue,
                 // Global attempt ceiling (spec §7): 3× the initial work-unit budget, with a small floor
                 // so a one-packet page can still spend its per-class §7 bounds (≤3
@@ -511,6 +512,10 @@ class AiPageTranslationSession {
         });
         if (this.finalized || this.stopped) return cancelled();
         this.dispatchCount += 1;
+        // A hedge attempt (spec §2.3 tail control) re-sends the same payload under a distinct
+        // wire packetId so the background issues a genuinely new provider generation instead of
+        // joining the in-flight straggler.
+        const hedge = attemptMeta.hedge === true;
         let reply;
         try {
             reply = await this.transport.translatePacket({
@@ -520,21 +525,26 @@ class AiPageTranslationSession {
                 ctx: this.ctx,
                 hint: packet.hint,
                 attempt: attemptMeta.attempt || 0,
+                hedge,
             });
         } catch (error) {
             // The provider may have completed and the background may even hold a replayable
             // success while only the content-channel response was lost. Record one conservative
             // estimated execution now; a subsequent cached replay reports attemptCount=0 and
-            // cannot erase or double-charge this unknown owner request.
-            this.settleUsage(
-                packet,
-                {
-                    actualAttemptCount: 1,
-                    usageReceipts: [],
-                    costAttribution: "delivery-unknown",
-                },
-                attemptMeta
-            );
+            // cannot erase or double-charge this unknown owner request. A hedge that LOST the
+            // race (its sibling already settled the winner's usage) never books this charge —
+            // billing both attempts would double-count one logical packet.
+            if (attemptMeta.hedgeLost !== true) {
+                this.settleUsage(
+                    packet,
+                    {
+                        actualAttemptCount: 1,
+                        usageReceipts: [],
+                        costAttribution: "delivery-unknown",
+                    },
+                    attemptMeta
+                );
+            }
             return {
                 ok: false,
                 status: "failed",
@@ -547,7 +557,13 @@ class AiPageTranslationSession {
                 resolvedCount: 0,
             };
         }
-        this.settleUsage(packet, reply, attemptMeta);
+        // The hedge LOSER's receipt is DISCARDED: the winning sibling already settled this
+        // logical packet's usage, so settling the loser too would double-count one packet. The
+        // ledger therefore reflects the winner only; the banner may under-report by the loser's
+        // tokens (the provider still bills that generation) — accepted and honest, never summed.
+        if (attemptMeta.hedgeLost !== true) {
+            this.settleUsage(packet, reply, attemptMeta);
+        }
         if (this.finalized || this.stopped) return cancelled();
         return {
             ok: reply.ok === true,

@@ -63,12 +63,15 @@ function createHarness(overrides = {}) {
     const settled = [];
     const onSettled = jest.fn((packet, outcome) => settled.push({ packet, outcome }));
     const onCircuitOpen = jest.fn();
+    const telemetry = [];
+    const onTelemetry = jest.fn((name, count = 1) => telemetry.push({ name, count }));
     const scheduler = createScheduler({
         limiterKey: "openai:key1",
         provider: "openai",
         dispatch,
         onSettled,
         onCircuitOpen,
+        onTelemetry,
         queue,
         now: clock.now,
         setTimeoutFn: clock.setTimeoutFn,
@@ -93,6 +96,8 @@ function createHarness(overrides = {}) {
         await flush();
         return entry;
     };
+    const telemetryCount = (name) =>
+        telemetry.filter((event) => event.name === name).reduce((total, e) => total + e.count, 0);
     return {
         clock,
         queue,
@@ -101,6 +106,9 @@ function createHarness(overrides = {}) {
         settled,
         onSettled,
         onCircuitOpen,
+        onTelemetry,
+        telemetry,
+        telemetryCount,
         scheduler,
         push,
         resolveNext,
@@ -800,6 +808,187 @@ describe("vNext AI page translation scheduler (spec §2.3 + §7)", () => {
 
             const nextDispatched = h.dispatch.mock.calls[3][0];
             expect(nextDispatched.id).toBe("p0-child");
+        });
+    });
+
+    // Straggler tail-latency hedging (spec §2.3): when an in-flight packet exceeds the hedge
+    // threshold AND a slot is free AND no fresh work is queued, dispatch a SECOND concurrent
+    // request for the SAME packet under a distinct wire key and take whichever returns first.
+    describe("straggler hedging (spec §2.3 tail control)", () => {
+        it("hedges an idle-slot straggler once the threshold passes, under a distinct hedge key", async () => {
+            // openai production default (start == cap == 40) -> a lone packet always has a free slot.
+            const h = createHarness();
+            const packet = makePacket("p1");
+            h.push([packet]);
+            await flush();
+            expect(h.dispatch).toHaveBeenCalledTimes(1);
+            expect(h.dispatch.mock.calls[0][1].hedge).toBeFalsy();
+
+            // Before 12s: never hedged.
+            await h.clock.advance(11000);
+            expect(h.dispatch).toHaveBeenCalledTimes(1);
+            expect(h.telemetryCount("hedge_fired")).toBe(0);
+
+            // Crossing 12s fires exactly one hedge for the SAME logical packet; the hedge flag
+            // tells the transport to route it under `${id}#h1` so the background does not join it.
+            await h.clock.advance(1500);
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+            expect(h.telemetryCount("hedge_fired")).toBe(1);
+            const hedgeCall = h.dispatch.mock.calls[1];
+            expect(hedgeCall[0]).toBe(packet); // same logical packet object
+            expect(hedgeCall[1].hedge).toBe(true);
+            expect(h.scheduler.inFlightCount()).toBe(2); // original + hedge both in flight
+        });
+
+        it("does not hedge while fresh work is still queued (the slot is reserved for it)", async () => {
+            // key1 straggler keeps a free slot (start 2, only 1 in flight); the "cool" key holds a
+            // still-queued packet, so the global queue is non-empty and hedging must stand down.
+            const h = createHarness({ aimd: { start: 2, floor: 1, cap: 2, additivePerClean: 99 } });
+            h.push([
+                makePacket("s1", { limiterKey: "openai:key1" }),
+                makePacket("c1", { limiterKey: "cool" }),
+                makePacket("c2", { limiterKey: "cool" }),
+                makePacket("c3", { limiterKey: "cool" }),
+            ]);
+            await flush();
+            // s1 + c1 + c2 in flight (2 per key), c3 queued behind the "cool" cap.
+            expect(h.dispatch).toHaveBeenCalledTimes(3);
+            expect(h.queue.sizeByTier().reduce((a, b) => a + b, 0)).toBe(1);
+
+            await h.clock.advance(15000);
+            expect(h.dispatch).toHaveBeenCalledTimes(3); // s1 has a free slot but the queue reserves it
+            expect(h.telemetryCount("hedge_fired")).toBe(0);
+        });
+
+        it("does not hedge while every slot is busy", async () => {
+            const h = createHarness({ aimd: { start: 2, floor: 1, cap: 2, additivePerClean: 99 } });
+            h.push([makePacket("p1"), makePacket("p2")]); // both in flight, queue empty
+            await flush();
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+            expect(h.queue.sizeByTier().reduce((a, b) => a + b, 0)).toBe(0);
+
+            await h.clock.advance(15000);
+            expect(h.dispatch).toHaveBeenCalledTimes(2); // no free slot -> no hedge
+            expect(h.telemetryCount("hedge_fired")).toBe(0);
+        });
+
+        it("does not hedge while the limiter key is cooling, even with a free slot", async () => {
+            const h = createHarness({ aimd: { start: 4, floor: 1, cap: 4, additivePerClean: 99 } });
+            h.push(Array.from({ length: 4 }, (_, i) => makePacket(`p${i}`)));
+            await flush();
+            expect(h.dispatch).toHaveBeenCalledTimes(4);
+
+            // A 429 sets a long cooldown and halves the limit to 2; freeing two more slots leaves
+            // the last straggler with a free slot (1 in flight < limit 2) but a cooling key.
+            await h.resolveWhere((e) => e.packet.id === "p0", rateLimit({ retryAfterMs: 60000 }));
+            await h.resolveWhere((e) => e.packet.id === "p1", { ok: true, resolvedCount: 1 });
+            await h.resolveWhere((e) => e.packet.id === "p2", { ok: true, resolvedCount: 1 });
+            expect(h.scheduler.inFlightCount("openai:key1")).toBe(1); // only p3 remains in flight
+            expect(h.scheduler.cooldownUntil("openai:key1")).toBe(60000);
+
+            await h.clock.advance(15000); // past 12s threshold, still well inside the cooldown
+            expect(h.dispatch).toHaveBeenCalledTimes(4); // cooling key -> no hedge
+            expect(h.telemetryCount("hedge_fired")).toBe(0);
+        });
+
+        it("settles on the winner exactly once and drops the loser (no double-settle/count/retry/bill)", async () => {
+            const h = createHarness();
+            const packet = makePacket("p1");
+            h.push([packet]);
+            await flush();
+            await h.clock.advance(12500); // hedge fires
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+            expect(h.scheduler.inFlightCount()).toBe(2);
+
+            // The hedge returns first -> it wins; the original is reaped immediately.
+            const loser = h.pending.find((e) => e.meta.hedge !== true);
+            await h.resolveWhere((e) => e.meta.hedge === true, { ok: true, resolvedCount: 3 });
+            expect(h.settled).toHaveLength(1);
+            expect(h.settled[0].outcome).toMatchObject({ ok: true, disposition: "success" });
+            expect(h.telemetryCount("hedge_won")).toBe(1);
+            expect(h.telemetryCount("hedge_original_won")).toBe(0);
+            expect(h.scheduler.inFlightCount()).toBe(0); // loser reaped, not waited on
+            // The loser's attemptMeta is flagged so the session discards its usage receipt.
+            expect(loser.meta.hedgeLost).toBe(true);
+            expect(loser.meta.signal.aborted).toBe(true);
+
+            // The losing original returns much later -> dropped: no second settle, no re-dispatch.
+            await h.resolveWhere((e) => e.meta.hedge !== true, { ok: true, resolvedCount: 3 });
+            expect(h.settled).toHaveLength(1);
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+            expect(h.scheduler.inFlightCount()).toBe(0);
+        });
+
+        it("emits hedge_original_won and drops the hedge when the original wins the race", async () => {
+            const h = createHarness();
+            h.push([makePacket("p1")]);
+            await flush();
+            await h.clock.advance(12500);
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+
+            const loser = h.pending.find((e) => e.meta.hedge === true);
+            await h.resolveWhere((e) => e.meta.hedge !== true, { ok: true, resolvedCount: 2 });
+            expect(h.settled).toHaveLength(1);
+            expect(h.telemetryCount("hedge_original_won")).toBe(1);
+            expect(h.telemetryCount("hedge_won")).toBe(0);
+            expect(h.scheduler.inFlightCount()).toBe(0);
+            expect(loser.meta.hedgeLost).toBe(true);
+
+            await h.resolveWhere((e) => e.meta.hedge === true, { ok: true, resolvedCount: 2 });
+            expect(h.settled).toHaveLength(1);
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+        });
+
+        it("hedges a packet at most once", async () => {
+            const h = createHarness();
+            h.push([makePacket("p1")]);
+            await flush();
+            await h.clock.advance(12500);
+            expect(h.telemetryCount("hedge_fired")).toBe(1);
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+
+            // Both entries stay in flight far past a second threshold window: still one hedge.
+            await h.clock.advance(30000);
+            expect(h.telemetryCount("hedge_fired")).toBe(1);
+            expect(h.dispatch).toHaveBeenCalledTimes(2);
+        });
+
+        it("a session stop aborts BOTH entries of a hedged packet", async () => {
+            const h = createHarness();
+            h.push([makePacket("p1")]);
+            await flush();
+            await h.clock.advance(12500);
+            expect(h.pending).toHaveLength(2);
+            const signals = h.pending.map((e) => e.meta.signal);
+
+            h.scheduler.stop();
+
+            expect(signals).toHaveLength(2);
+            for (const signal of signals) expect(signal.aborted).toBe(true);
+        });
+
+        it("never hedges a packet that returns before the threshold (fast path)", async () => {
+            const h = createHarness();
+            h.push([makePacket("p1")]);
+            await flush();
+            await h.clock.advance(8000); // still under the 12s threshold
+            await h.resolveNext({ ok: true, resolvedCount: 1 });
+            expect(h.dispatch).toHaveBeenCalledTimes(1);
+
+            // Long after the settled packet is gone, nothing is ever hedged.
+            await h.clock.advance(30000);
+            expect(h.dispatch).toHaveBeenCalledTimes(1);
+            expect(h.telemetryCount("hedge_fired")).toBe(0);
+            expect(h.settled).toHaveLength(1);
+        });
+
+        it("respects hedgeEnabled=false — a long straggler is never hedged", async () => {
+            const h = createHarness({ hedge: { enabled: false } });
+            h.push([makePacket("p1")]);
+            await flush();
+            await h.clock.advance(30000);
+            expect(h.dispatch).toHaveBeenCalledTimes(1);
+            expect(h.telemetryCount("hedge_fired")).toBe(0);
         });
     });
 });
