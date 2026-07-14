@@ -4740,6 +4740,8 @@ class BannerController {
         this._domCompletedTranslationEntries = 0;
         this._domFailedTranslationEntries = 0;
         this._domBatchFailureCount = 0;
+        // Progress-bar high-water mark: a new session's bar starts empty and only grows.
+        this._domBannerMaxPercent = 0;
         // Completion-sweep state (final safety net for still-untranslated leaves).
         this._domSweepCount = 0;
         this._domSweptElements = null;
@@ -10942,7 +10944,6 @@ class BannerController {
                         </div>
                     </div>
                     <div class="actions">
-                        <span class="token-meta" data-role="token-meta"></span>
                         <span class="progress-meta" data-role="progress-meta"></span>
                         <button type="button" class="hide" data-action="hide" aria-label="Hide translation bar">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -11233,7 +11234,6 @@ class BannerController {
                 refs.model.hidden = !meta.model;
             }
         }
-        const tokenText = this.getDomPageTokenUsageText();
         const last = this._domBannerLastRendered;
         const pipelineSnapshot = this._activePagePipeline?.getSnapshot?.() || null;
         const pipelineFailed = pipelineSnapshot?.phase === "failed";
@@ -11259,16 +11259,17 @@ class BannerController {
                 refs.progressMeta.textContent = "Error";
                 last.percentText = "Error";
             }
-            this.applyTokenMetaText(refs.tokenMeta, tokenText, last);
             return;
         }
-        this.applyTokenMetaText(refs.tokenMeta, tokenText, last);
         const total = this._domTotalTranslationEntries;
         if (!total) {
             if (last.state !== "starting") {
                 refs.bar.dataset.state = "starting";
                 last.state = "starting";
             }
+            // New session: progress restarts from empty (the monotonic clamp below is reset so a
+            // fresh page never inherits the previous session's high-water mark).
+            this._domBannerMaxPercent = 0;
             const startingText = "Preparing page text";
             if (last.statusText !== startingText) {
                 refs.status.textContent = startingText;
@@ -11285,7 +11286,14 @@ class BannerController {
             return;
         }
         const completed = Math.min(this._domCompletedTranslationEntries, total);
-        const percent = Math.round((completed / total) * 100);
+        // Progress only moves forward within a session. The raw ratio can jump backward:
+        // exact-source dedupe credits many aliases the instant their representative resolves,
+        // cache-hit fan-out lands a chunk at once, and late SPA content grows the total — any of
+        // which would otherwise make the bar retreat. Clamp to the running high-water mark
+        // (reset above when a new session re-enters "starting").
+        const rawPercent = Math.round((completed / total) * 100);
+        const percent = Math.max(rawPercent, this._domBannerMaxPercent || 0);
+        this._domBannerMaxPercent = percent;
         // A recursive size split can enqueue child work after its parent has already received
         // the one logical completion credit. Queue/activity must therefore be idle too; the
         // counter alone can transiently read 100% while real provider calls are still pending.
@@ -11300,6 +11308,19 @@ class BannerController {
         const requestsIncomplete = requestsComplete && failed > 0;
         const nextState = requestsIncomplete ? "error" : requestsComplete ? "complete" : "running";
         if (last.state !== nextState) {
+            // Leaving the indeterminate "starting" placeholder (a 42%-wide glide) for a
+            // determinate state: snap the fill to empty with the transition OFF, then let the
+            // real width animate up from 0. Without this the CSS width transition would visibly
+            // retract the bar from ~42% down to the first real (usually low) percent — the
+            // "starts from the middle" effect.
+            if (refs.progressFill && last.state === "starting") {
+                const prevTransition = refs.progressFill.style.transition;
+                refs.progressFill.style.transition = "none";
+                refs.progressFill.style.width = "0%";
+                void refs.progressFill.offsetWidth; // commit the reset before re-enabling motion
+                refs.progressFill.style.transition = prevTransition;
+                last.fillWidth = "0%";
+            }
             refs.bar.dataset.state = nextState;
             last.state = nextState;
         }

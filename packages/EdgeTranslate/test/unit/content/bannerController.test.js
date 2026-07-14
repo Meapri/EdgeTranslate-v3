@@ -83,9 +83,8 @@ describe("DOM page translation banner", () => {
         });
         controller.markDomPageTranslationEntriesCompleted(2);
         expect(banner.shadowRoot.textContent).toContain("2 of 3 sections translated");
-        expect(banner.shadowRoot.querySelector("[data-role='token-meta']").textContent).toBe(
-            "1,550 tokens (in 1,200 / out 300 / think 50) · 3 requests"
-        );
+        // Token/request telemetry was removed from the header (decluttered) — no token-meta node.
+        expect(banner.shadowRoot.querySelector("[data-role='token-meta']")).toBeNull();
         expect(banner.shadowRoot.querySelector("[data-role='progress-meta']").textContent).toBe(
             "67%"
         );

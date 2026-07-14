@@ -1418,7 +1418,6 @@ async function run() {
                 }
                 await wait(1200);
             }
-            assert(state?.tokens, "Live stable run did not report token usage");
             assert(
                 state.status === "Translation complete" ||
                     state.status.startsWith("Translation incomplete"),
@@ -1442,6 +1441,12 @@ async function run() {
             const selectedProbe = extensionIsolatedContext.selected?.probe || null;
             const pipelineMappedSnapshot = selectedProbe?.pipelineSnapshot || null;
             const pipelineStatusSnapshot = selectedProbe?.pipelineStatusSnapshot || null;
+            // Token usage is accounted in the pipeline status snapshot, not the banner header
+            // (token/request telemetry was removed from the header for a cleaner UI).
+            assert(
+                Number(pipelineStatusSnapshot?.tokens?.settled) > 0,
+                "Live run did not report token usage in the pipeline snapshot"
+            );
             assert(
                 workerExceptions.length === 0,
                 `Extension worker exceptions: ${JSON.stringify(workerExceptions)}`

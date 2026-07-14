@@ -219,11 +219,11 @@ describe("DOM page translation vNext banner wiring", () => {
         expect(root.querySelector("[data-role='status']").textContent).toBe(
             "4 of 10 strings translated"
         );
-        expect(root.querySelector("[data-role='token-meta']").textContent).toContain(
-            "~1,500 tokens"
-        );
+        // Token/request telemetry is tracked internally (for accounting) but no longer shown in
+        // the decluttered header — there is no token-meta node to render it into.
+        expect(root.querySelector("[data-role='token-meta']")).toBeNull();
 
-        // Fully settled usage drops the estimated marker.
+        // Fully settled usage still drops the estimated marker on the tracked state.
         options.onStatus({
             phase: "translating",
             totalStrings: 10,
@@ -233,10 +233,48 @@ describe("DOM page translation vNext banner wiring", () => {
             tokens: { settled: 2000, estimated: 0 },
         });
         expect(controller._domTokenUsage).toMatchObject({ totalTokens: 2000, estimated: false });
-        expect(root.querySelector("[data-role='token-meta']").textContent).toContain(
-            "2,000 tokens"
-        );
-        expect(root.querySelector("[data-role='token-meta']").textContent).not.toContain("~");
+        controller.cancelDomPageTranslate();
+    });
+
+    it("keeps the progress bar monotonic and resets it for a new session", async () => {
+        const controller = new BannerController();
+        controller.startDomPageTranslate({
+            engine: "openai",
+            model: "gpt-5.6-luna",
+            sl: "ja",
+            tl: "ko",
+            pipelineVersion: "vnext",
+        });
+        await Promise.resolve();
+        const options = createAiPageTranslationSession.mock.calls[0][0];
+        const root = document.getElementById("edge-translate-dom-page-banner").shadowRoot;
+        const fill = () => root.querySelector("[data-role='progress-fill']").style.width;
+
+        // Exact-source dedupe fan-out lands a big chunk at once → 60%.
+        options.onStatus({ phase: "translating", totalStrings: 100, translatedStrings: 60 });
+        expect(fill()).toBe("60%");
+
+        // Late SPA content grows the total so the raw ratio would drop to 62/200=31% — the bar
+        // must NOT retreat.
+        options.onStatus({ phase: "translating", totalStrings: 200, translatedStrings: 62 });
+        expect(fill()).toBe("60%");
+
+        // Forward progress still advances.
+        options.onStatus({ phase: "translating", totalStrings: 200, translatedStrings: 150 });
+        expect(fill()).toBe("75%");
+
+        // A brand-new session starts empty again (high-water mark reset).
+        controller.startDomPageTranslate({
+            engine: "openai",
+            model: "gpt-5.6-luna",
+            sl: "ja",
+            tl: "ko",
+            pipelineVersion: "vnext",
+        });
+        await Promise.resolve();
+        const options2 = createAiPageTranslationSession.mock.calls[1][0];
+        options2.onStatus({ phase: "translating", totalStrings: 100, translatedStrings: 5 });
+        expect(fill()).toBe("5%");
         controller.cancelDomPageTranslate();
     });
 
