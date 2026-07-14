@@ -1546,11 +1546,14 @@ async function run() {
         pageState = await waitFor(
             async () => {
                 const state = await readPageState();
-                return state.tokens.includes(`${fixture.providerRequests.length} request`)
+                // Token/request telemetry was removed from the banner header; wait on the
+                // terminal status text instead of the (now absent) usage repaint.
+                return state.status === "Translation complete" ||
+                    state.status.startsWith("Translation incomplete")
                     ? state
                     : null;
             },
-            { timeoutMs: 3000, label: "final banner usage repaint" }
+            { timeoutMs: 3000, label: "final banner terminal status" }
         );
         const clicks = await pageClient.evaluate(`(() => {
             document.querySelector("#action").click();
@@ -1631,9 +1634,12 @@ async function run() {
                 "Fixture did not record the late-attributes phase boundary"
             );
         }
+        // ~182-item fixture at the measured small-packet drain sizing (≤16 blocks/packet) plans
+        // ~12 initial requests; ≤16 still catches real amplification (splits/retries) while
+        // allowing the deliberately smaller packets. (Old ceiling 8 assumed 96-block packets.)
         assert(
-            providerRequestPhases.phases.initial.requests <= 8,
-            `Initial document request amplification: ${providerRequestPhases.phases.initial.requests} > 8`
+            providerRequestPhases.phases.initial.requests <= 16,
+            `Initial document request amplification: ${providerRequestPhases.phases.initial.requests} > 16`
         );
         assert(
             providerRequestPhases.phases["late-content"].requests <= 1,
@@ -1661,10 +1667,8 @@ async function run() {
             translatedItems / fixture.providerRequests.length >= 10,
             "Packets were not compacted enough to prevent request amplification"
         );
-        assert(
-            pageState.tokens.includes(`${fixture.providerRequests.length} request`),
-            `Banner request count is wrong: ${pageState.tokens}`
-        );
+        // (Request count is no longer shown in the banner header; its correctness is covered by
+        // the fixture.providerRequests.length amplification assertions above.)
         if (expectedPipeline) {
             assert(
                 observedPipeline === expectedPipeline,
