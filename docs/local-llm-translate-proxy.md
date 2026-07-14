@@ -1,5 +1,14 @@
 # Local LLM translation proxy
 
+> **Legacy integration note:** the current extension UI no longer exposes the old
+> `LocalTranslate` `endpoint` mode described by this document. `options.js` migrates that value
+> to `chromeBuiltin`, while the supported custom-server path is now
+> `LocalTranslatorConfig.mode = openaiCompatible`, which calls an OpenAI-compatible
+> `/v1/chat/completions` endpoint directly. The proxy below still runs and exposes its own
+> `/translate` contract, but it is not wired to the current options UI without additional
+> adapter work. For current development, point the OpenAI-compatible base URL at the backend
+> server itself.
+
 `tools/local-llm-translate-proxy.mjs` adapts EdgeTranslate's `LocalTranslate` endpoint contract to any OpenAI-compatible `/v1/chat/completions` server, including `llama-server`.
 
 ## Recommended Gemma 4 E2B llama-server
@@ -49,18 +58,18 @@ curl -s http://127.0.0.1:8091/translate \
 
 ## EdgeTranslate settings
 
-- Local translator: enabled
-- Local mode: endpoint
-- Endpoint: `http://127.0.0.1:8091/translate`
-- Timeout: `120000`
-- Default page translator: `Local Translator Page Translate`
+-   Local translator: enabled
+-   Local mode: endpoint
+-   Endpoint: `http://127.0.0.1:8091/translate`
+-   Timeout: `120000`
+-   Default page translator: `Local Translator Page Translate`
 
 ## Tuning notes
 
 For a 4-core CPU llama-server, keep the proxy and extension concurrency low:
 
-- `MAX_CONCURRENCY=1`
-- `CHUNK_CHARS=1000~1600`
-- llama-server `--parallel 1`
+-   `MAX_CONCURRENCY=1`
+-   `CHUNK_CHARS=1000~1600`
+-   llama-server `--parallel 1`
 
 This favors perceived responsiveness: the extension replaces completed page blocks progressively instead of waiting for a whole page translation to finish.

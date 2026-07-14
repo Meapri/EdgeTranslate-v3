@@ -136,12 +136,11 @@ function createContextGroup(block, entries) {
 }
 
 // ---------------------------------------------------------------------------
-// HTML-native page translation (LLM-optimized path)
+// HTML-native page translation (legacy compatibility path)
 // ---------------------------------------------------------------------------
-// For AI engines we send the leaf block's innerHTML as the payload and ask the
-// model to return translated innerHTML preserving every tag and attribute. The
-// apply path validates the response before swapping innerHTML so a malformed
-// or empty translation can never erase the original block.
+// Older callers can still send a leaf block's innerHTML and validate the returned
+// structure before applying it. The default AI page pipeline uses compact text IR
+// and semantic row/list packing below; it never asks the model to regenerate page HTML.
 // ---------------------------------------------------------------------------
 
 const HTML_BLOCK_LEAF_TAGS = new Set([
@@ -337,7 +336,7 @@ function elementHasOwnLeafText(element) {
  * granularity we want for per-paragraph hover/original-text mapping.
  *
  * A block that has BOTH its own direct text AND nested leaf-blocks (e.g. a list
- * item with a lead line plus a sub-list — pervasive in Wikipedia history/station
+ * item with a lead line plus a sub-list — common in history, documentation, and catalog
  * lists) is ALSO returned: keeping only the innermost descendants would silently
  * drop the parent's own line. Such a parent is serialized/applied over its OWN
  * content only (nested leaf-blocks are skipped there), so its line and the sub-list
@@ -838,13 +837,18 @@ function countScript(text, regex) {
     return matches ? matches.length : 0;
 }
 
-function isAlreadyInTargetLanguage(text, targetLanguage) {
+function isAlreadyInTargetLanguage(text, targetLanguage, sourceLanguage = "") {
     const sample = String(text || "").slice(0, 600);
     if (sample.length < 8) return false;
     const target = String(targetLanguage || "")
         .toLowerCase()
         .split("-")[0];
+    const source = String(sourceLanguage || "")
+        .toLowerCase()
+        .split("-")[0];
     if (!target) return false;
+    const sameLanguage =
+        source === target || (["he", "iw"].includes(source) && ["he", "iw"].includes(target));
 
     const hangul = countScript(sample, SCRIPT_RANGES.hangul);
     const kana = countScript(sample, SCRIPT_RANGES.kana);
@@ -862,13 +866,26 @@ function isAlreadyInTargetLanguage(text, targetLanguage) {
 
     if (target === "ko") return ratio(hangul) >= 0.6;
     if (target === "ja") return ratio(kana) >= 0.15 || (kana >= 4 && ratio(han + kana) >= 0.6);
-    if (target === "zh") return ratio(han) >= 0.55 && ratio(kana) < 0.05 && ratio(hangul) < 0.05;
-    if (["ru", "uk", "bg", "be", "sr", "mk"].includes(target)) return ratio(cyrillic) >= 0.6;
-    if (target === "ar") return ratio(arabic) >= 0.5;
-    if (target === "hi") return ratio(devanagari) >= 0.5;
-    if (target === "th") return ratio(thai) >= 0.5;
-    if (target === "iw" || target === "he") return ratio(hebrew) >= 0.5;
-    if (target === "el") return ratio(greek) >= 0.5;
+    if (target === "zh") {
+        // Kanji-only Japanese headings can be 100% Han and are not therefore
+        // Chinese. A resolved Japanese source must go through translation.
+        if (source === "ja") return false;
+        return ratio(han) >= 0.55 && ratio(kana) < 0.05 && ratio(hangul) < 0.05;
+    }
+    // A script is not a language detector. Russian/Ukrainian, the Latin-script
+    // languages, and several other language families share a writing system, so
+    // script-only skipping would silently classify real source prose as translated.
+    // For shared-script families the fast path is safe only when source detection
+    // already says source === target. Korean/Japanese/Chinese keep their distinctive
+    // script heuristics above.
+    if (["ru", "uk", "bg", "be", "sr", "mk"].includes(target)) {
+        return sameLanguage && ratio(cyrillic) >= 0.6;
+    }
+    if (target === "ar") return sameLanguage && ratio(arabic) >= 0.5;
+    if (target === "hi") return sameLanguage && ratio(devanagari) >= 0.5;
+    if (target === "th") return sameLanguage && ratio(thai) >= 0.5;
+    if (target === "iw" || target === "he") return sameLanguage && ratio(hebrew) >= 0.5;
+    if (target === "el") return sameLanguage && ratio(greek) >= 0.5;
     const latinTargets = new Set([
         "en",
         "es",
@@ -899,7 +916,11 @@ function isAlreadyInTargetLanguage(text, targetLanguage) {
         "gl",
     ]);
     if (latinTargets.has(target)) {
-        return ratio(latin) >= 0.7 && ratio(hangul + kana + han + cyrillic + arabic) < 0.1;
+        return (
+            sameLanguage &&
+            ratio(latin) >= 0.7 &&
+            ratio(hangul + kana + han + cyrillic + arabic) < 0.1
+        );
     }
     return false;
 }
@@ -1113,11 +1134,9 @@ function preserveTextNodeBoundaryWhitespace(node, translated) {
 // Boundary whitespace for a translated text node that borders inline siblings (links,
 // <b>, …). The MODEL'S reply is the authority on TARGET-language spacing, so honor the
 // space the model put around the run — NOT the original (source-language) node's spacing.
-// The old original-only rule was the "hyperlink eats the space" bug: a space-less source
-// (Japanese) stripped the spaces a spaced target (Korean) needs —
-// `京阪本線は<a>淀屋橋駅</a>` rendered `게이한 본선은요도야바시역` instead of
-// `게이한 본선은 요도야바시역`. Following the model also keeps the inverse correct
-// (en→ja drops the English spaces Japanese does not want around the link).
+// The old original-only rule caused the "hyperlink eats the space" bug: a space-less source
+// stripped spaces required by a spaced target language. Following the model also keeps the
+// inverse direction correct when the target convention does not want spaces around the link.
 function applyTranslatedBoundaryWhitespace(translatedNode, collapsedValue) {
     const transRaw = String((translatedNode && translatedNode.nodeValue) || "");
     const lead = /^\s/.test(transRaw) ? " " : "";
@@ -1403,17 +1422,11 @@ const BOILERPLATE_ROLE_VALUES = new Set([
 ]);
 
 // Generic id/class signatures of non-article "boilerplate" regions that bloat token usage on long
-// reference/encyclopedia pages: citation & footnote lists, navigation boxes, category links, the
-// table of contents, and inline edit links. Matched against a normalized id+class signature so it
-// generalizes across sites (MediaWiki/Wikipedia, doc frameworks, blogs) with no host hardcoding.
+// reference/documentation pages: citation & footnote lists, navigation boxes, category links, the
+// table of contents, and inline edit links. These are semantic words rather than framework prefixes,
+// host names, or product-specific selectors.
 const BOILERPLATE_SIGNATURE_RE =
-    /(^|-)(references?|citations?|footnotes?|endnotes?|bibliography|reflist|navbox|nav-box|navigation-box|navbar|navfoot|catlinks?|category-links|categories|toc|table-of-contents|editsection|edit-section|sister-projects?|see-also-nav)($|-)/;
-
-// Framework-specific signatures that are unambiguously non-article apparatus and never appear on
-// prose (e.g. <span class="mw-editsection">, <table class="navbox">). These may match on ANY tag,
-// unlike the generic tokens above which are container-gated to avoid prose false positives.
-const BOILERPLATE_STRONG_SIGNATURE_RE =
-    /(^|-)(mw-editsection|mw-references|mw-cite-backlink|reflist|navbox|catlinks|category-links)($|-)/;
+    /(^|-)(references?|citations?|cite-backlink|footnotes?|endnotes?|bibliography|nav-box|navigation-box|navbar|navigation-footer|category-links|categories|toc|table-of-contents|editsection|edit-section|related-links|see-also-nav)($|-)/;
 
 // Only CONTAINER elements may be flagged by a class/id signature — never a prose leaf. This keeps
 // an article paragraph like <p id="citations-in-ancient-rome"> or <h2 class="references-heading">
@@ -1451,10 +1464,13 @@ function elementMatchesBoilerplateSignature(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
     const role = element.getAttribute && element.getAttribute("role");
     if (role && BOILERPLATE_ROLE_VALUES.has(String(role).toLowerCase())) return true;
+    // Detect an edit control by URL semantics, independent of the site's class naming scheme.
+    if (element.tagName === "A") {
+        const href = String(element.getAttribute("href") || "").toLowerCase();
+        if (/(?:[?&](?:action|mode)=edit(?:[&#]|$)|\/edit(?:[/?#]|$))/.test(href)) return true;
+    }
     const signature = regionSignature(element);
     if (!signature) return false;
-    // Framework-specific classes are safe to match on any element.
-    if (BOILERPLATE_STRONG_SIGNATURE_RE.test(signature)) return true;
     // Generic tokens (references/citations/toc/…) only count on a CONTAINER — a prose leaf that
     // merely mentions a keyword in its id/class (e.g. <p id="citations-in-ancient-rome">) must NOT
     // be treated as boilerplate.
@@ -1463,7 +1479,7 @@ function elementMatchesBoilerplateSignature(element) {
 }
 
 // A leaf whose visible text is mostly hyperlink anchors AND that sits inside a table or navigation
-// region is almost always a navigation / related-links cell, not prose — common in navboxes and
+// region is almost always a navigation / related-links cell, not prose — common in link matrices and
 // "see also" link tables. We require SEVERAL links (≥3) so a short prose cell that happens to wrap
 // one or two long links is not mistaken for a navigation cell.
 function isDenseLinkNavLeaf(element) {
@@ -1524,8 +1540,140 @@ function serializeTranslationLeaf(element, options = {}) {
     };
 }
 
+// Semantic packing is deliberately site-agnostic. It relies only on standard table/list
+// elements and their ARIA equivalents, so the same transport works for docs, articles,
+// storefronts, dashboards and client-rendered apps without URL/class-name special cases.
+const SEMANTIC_TABLE_ROW_SELECTOR = "tr,[role='row']";
+const SEMANTIC_TABLE_CELL_SELECTOR =
+    "th,td,[role='cell'],[role='gridcell'],[role='columnheader'],[role='rowheader']";
+
+function getSemanticTableRowKey(segment) {
+    const element = segment?.element;
+    if (!element?.closest) return null;
+    const cell = element.closest(SEMANTIC_TABLE_CELL_SELECTOR);
+    const row = cell?.closest && cell.closest(SEMANTIC_TABLE_ROW_SELECTOR);
+    if (!cell || !row || !row.contains(cell)) return null;
+    return { row, cell };
+}
+
+function getSemanticListRunKey(segment) {
+    const element = segment?.element;
+    if (!element?.matches || !element.matches("li,[role='listitem']")) return null;
+    const parent = element.parentElement;
+    if (!parent?.matches || !parent.matches("ul,ol,[role='list']")) return null;
+    return parent;
+}
+
+function createPackedSemanticUnit(kind, container, targets, role) {
+    const parts = targets.map((target) => String(target.text || "").trim());
+    return {
+        kind,
+        element: container,
+        role,
+        targets,
+        text: JSON.stringify(parts),
+        sourceText: JSON.stringify(parts),
+        plainText: targets.map((target) => target.plainText || target.text || "").join(" "),
+    };
+}
+
+/**
+ * Pack only semantic runs whose destinations remain provable without the model regenerating
+ * layout HTML. A packed unit is one outer [[n:row|list]] marker containing a compact JSON string
+ * array. Every array slot retains its original leaf target locally; malformed arrays are rejected
+ * and callers can expand the failed unit back to ordinary one-leaf markers.
+ */
+function buildSemanticTranslationUnits(leaves, options = {}) {
+    const source = (leaves || []).filter((leaf) => leaf?.element && leaf?.text);
+    const units = [];
+    const packTables = options.packTables !== false;
+    const packLists = options.packLists !== false;
+    const maxTableParts = Math.max(2, Number(options.maxTableParts) || 20);
+    const maxListParts = Math.max(2, Number(options.maxListParts) || 12);
+    const maxPackedChars = Math.max(200, Number(options.maxPackedChars) || 2400);
+
+    for (let i = 0; i < source.length; ) {
+        const first = source[i];
+        const tableKey = packTables ? getSemanticTableRowKey(first) : null;
+        if (tableKey) {
+            const run = [];
+            let chars = 0;
+            let j = i;
+            while (j < source.length && run.length < maxTableParts) {
+                const candidate = source[j];
+                const key = getSemanticTableRowKey(candidate);
+                const textChars = String(candidate?.text || "").length;
+                if (!key || key.row !== tableKey.row) break;
+                if (run.length && chars + textChars > maxPackedChars) break;
+                run.push(candidate);
+                chars += textChars;
+                j += 1;
+            }
+            if (run.length >= 2) {
+                units.push(createPackedSemanticUnit("table-row", tableKey.row, run, "table-row"));
+                i = j;
+                continue;
+            }
+        }
+
+        const listKey = packLists ? getSemanticListRunKey(first) : null;
+        if (listKey) {
+            const run = [];
+            let chars = 0;
+            let j = i;
+            while (j < source.length && run.length < maxListParts) {
+                const candidate = source[j];
+                const candidateKey = getSemanticListRunKey(candidate);
+                const textChars = String(candidate?.text || "").length;
+                if (!candidateKey || candidateKey !== listKey) break;
+                if (run.length && chars + textChars > maxPackedChars) break;
+                run.push(candidate);
+                chars += textChars;
+                j += 1;
+            }
+            if (run.length >= 2) {
+                units.push(createPackedSemanticUnit("list-run", listKey, run, "list-run"));
+                i = j;
+                continue;
+            }
+        }
+
+        units.push({ kind: "leaf", targets: [first], ...first });
+        i += 1;
+    }
+    return units;
+}
+
+function isPackedSemanticUnit(unit) {
+    return Boolean(
+        unit &&
+            (unit.kind === "table-row" || unit.kind === "list-run") &&
+            Array.isArray(unit.targets) &&
+            unit.targets.length >= 2
+    );
+}
+
+function expandSemanticTranslationUnits(units, options = {}) {
+    const onlyFailed = options.onlyFailed === true;
+    const out = [];
+    for (const unit of units || []) {
+        if (isPackedSemanticUnit(unit) && (!onlyFailed || unit._formatFailed)) {
+            for (const target of unit.targets)
+                out.push({ kind: "leaf", targets: [target], ...target });
+        } else if (unit) {
+            out.push(unit);
+        }
+    }
+    return out;
+}
+
 function getIrSegmentMarker(id, role, options = {}) {
-    if (options.compactMarkers !== false) return `[[${id}]]`;
+    if (options.compactMarkers !== false) {
+        return getSegmentMarker(id - 1, role, {
+            ...options,
+            compactMarkers: true,
+        });
+    }
     return getSegmentMarker(id - 1, role);
 }
 
@@ -1550,6 +1698,92 @@ function buildTranslationIrBatch(leaves, options = {}) {
         )
         .join("\n");
     return { segments, text, sourceText: text };
+}
+
+function parsePackedSemanticTranslation(unit, translatedSegment) {
+    if (!isPackedSemanticUnit(unit)) return null;
+    let parsed;
+    try {
+        parsed = JSON.parse(String(translatedSegment || "").trim());
+    } catch {
+        return null;
+    }
+    if (!Array.isArray(parsed) || parsed.length !== unit.targets.length) return null;
+    if (parsed.some((part) => typeof part !== "string" || !part.trim())) return null;
+    return parsed.map((part) => part.trim());
+}
+
+function buildTranslatedSegmentContainer(block, translatedSegment) {
+    if (!block || !block.isConnected || !translatedSegment) return null;
+    const ownerDocument = block.ownerDocument;
+    if (!ownerDocument) return null;
+    const container = ownerDocument.createElement("div");
+    try {
+        container.innerHTML = String(translatedSegment);
+    } catch {
+        return null;
+    }
+    if (!sanitizeTranslatedHtmlContainer(container) && !normalizeBlockText(container.textContent)) {
+        return null;
+    }
+    return container;
+}
+
+function applyPackedSemanticUnit(unit, translatedSegment) {
+    const parts = parsePackedSemanticTranslation(unit, translatedSegment);
+    if (!parts) {
+        unit._formatFailed = true;
+        return false;
+    }
+    const prepared = [];
+    for (let i = 0; i < unit.targets.length; i += 1) {
+        const target = unit.targets[i];
+        const part = parts[i];
+        if (part === "=") {
+            prepared.push(null);
+            continue;
+        }
+        const container = buildTranslatedSegmentContainer(target.element, part);
+        if (!container) {
+            unit._formatFailed = true;
+            return false;
+        }
+        prepared.push(container);
+    }
+    for (let i = 0; i < unit.targets.length; i += 1) {
+        if (prepared[i] && !applyTranslatedTextNodes(unit.targets[i].element, prepared[i])) {
+            unit._formatFailed = true;
+            return false;
+        }
+    }
+    unit._formatFailed = false;
+    return true;
+}
+
+// Apply ordinary and semantic-packed units through one index space. The return value remains the
+// number of OUTER [[n]] units resolved, so existing stream/retry accounting does not change.
+function applySemanticPageSegments(units, segmentMap, baseIndex = 0, appliedSet = null) {
+    if (!units || !units.length || !segmentMap || !segmentMap.size) return 0;
+    let applied = 0;
+    for (let i = 0; i < units.length; i += 1) {
+        const globalIndex = baseIndex + i + 1;
+        if (appliedSet && appliedSet.has(globalIndex)) continue;
+        const translated = segmentMap.get(globalIndex);
+        if (translated == null) continue;
+        const unit = units[i];
+        let ok = false;
+        if (String(translated).trim() === "=" && !isPackedSemanticUnit(unit)) {
+            ok = true;
+        } else if (isPackedSemanticUnit(unit)) {
+            ok = applyPackedSemanticUnit(unit, translated);
+        } else {
+            ok = applyPageSegmentToBlock(unit?.element || unit, translated);
+        }
+        if (!ok) continue;
+        if (appliedSet) appliedSet.add(globalIndex);
+        applied += 1;
+    }
+    return applied;
 }
 
 /**
@@ -1750,9 +1984,30 @@ const SEGMENT_ROLE_CODES = {
     title: "t",
 };
 
+// Compact page batches omit the default paragraph/text role. Ambiguous UI-like
+// segments keep a short, human-readable suffix so the model can distinguish a
+// title from a date, label, list item, navigation item, table header, or caption
+// without paying a role token on every prose paragraph.
+const SEGMENT_COMPACT_ROLE_HINTS = {
+    caption: "caption",
+    date: "date",
+    label: "label",
+    "list-run": "list",
+    "list-item": "list",
+    navigation: "nav",
+    "table-row": "row",
+    "table-header": "header",
+    title: "title",
+};
+
 function getSegmentMarker(index, role, options = {}) {
-    if (options.compactMarkers) return `[[${index + 1}]]`;
     const normalizedRole = sanitizeSegmentRole(role);
+    if (options.compactMarkers) {
+        const roleHint = options.includeRoleHints
+            ? SEGMENT_COMPACT_ROLE_HINTS[normalizedRole] || ""
+            : "";
+        return roleHint ? `[[${index + 1}:${roleHint}]]` : `[[${index + 1}]]`;
+    }
     const roleCode = SEGMENT_ROLE_CODES[normalizedRole] || normalizedRole.slice(0, 3) || "x";
     return `[[${index + 1}:${roleCode}]]`;
 }
@@ -1799,11 +2054,13 @@ function splitSegmentedTranslationText(translatedText, expectedCount) {
 export {
     applyHtmlPageSection,
     applyPageSegments,
+    applySemanticPageSegments,
     applyPageSegmentToBlock,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
     buildStrippedSectionHtml,
+    buildSemanticTranslationUnits,
     buildTranslationIrBatch,
     captureLeafSegmentTexts,
     captureLeafTextsFromElement,
@@ -1817,6 +2074,7 @@ export {
     alignSentencesProportional,
     serializeBlockSegment,
     serializeTranslationLeaf,
+    expandSemanticTranslationUnits,
     splitLeafByLineBreaks,
     splitTextIntoSentences,
     splitSegmentedTranslationText,

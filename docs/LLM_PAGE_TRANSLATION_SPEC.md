@@ -1,4 +1,55 @@
+> **HISTORICAL** — superseded by AI_PAGE_TRANSLATION_VNEXT.md; kept for archaeology.
+
 # LLM Page Translation Specification
+
+> **역사 연구 문서 — production source of truth가 아님.** 현재 cloud
+> `pipelineVersion=auto`/default의 구현 계약은
+> [AI 페이지 번역 vNext](./AI_PAGE_TRANSLATION_VNEXT.md)이고,
+> [stable](./AI_PAGE_TRANSLATION_STABLE.md)은 명시적 rollback이다. Chrome built-in은 기존
+> V1 bridge, `GooglePageTranslate`는 별도 Google injection 경로다.
+>
+> 아래의 viewport 우선순위, focus/scroll admission, 여러 번의 coverage pass,
+> `countTokens` preflight, V1 marker streaming, “모든 engine이 같은 DOM path”라는 목표는
+> 현재 vNext 동작이 아니다. vNext는 layout-free whole-document walk 1회와 semantic leaf
+> block/placeholder `pt3` pipeline을 사용한다. 이 문서는 문제 정의와 설계 이력에만 쓴다.
+>
+> **Implementation status:** this is an architectural specification and design record, not a
+> line-by-line description of the current runtime. The extension already implements the compact
+> marker IR, streaming apply, cache, retry, and DOM coverage concepts described here, with newer
+> scheduling and safety logic in `banner_controller.js` and `dom_page_translate_context.js`.
+> Use the [Developer Guide](./DEVELOPMENT_GUIDE.md) for the current execution path and known
+> integration gaps.
+>
+> **Current protocol (2026-07-12):** `seg-v6-semantic` sends plain prose as `[[n]]`, adds readable
+> role suffixes to context-sensitive segments, and packs a standard table row or consecutive
+> sibling list run as a fixed-length JSON string array under `[[n:row]]` or `[[n:list]]`.
+> The model receives text IR, never the full page HTML. The extension applies array items to the
+> original DOM targets. Page cache keys include this protocol version and the normalized role.
+>
+> **Current retry/accounting contract:** every page request makes one provider call. On a
+> retryable transport failure, the content controller first salvages complete streamed markers,
+> then makes at most one jittered retry containing only unresolved leaves. Missing
+> usage is estimated per request attempt from the exact prompt and raw output, tagged as estimated,
+> and never persisted with a cached translation. Context-size failures recursively split to an
+> atomic leaf, abnormal provider finish reasons are blocked and rolled back, and completion also
+> requires an idle request queue. Terminally untranslated logical sections remain visible as
+> `Translation incomplete` rather than being overwritten by a request-count 100% state. A
+> terminal leaf is not silently retried by coverage in the same session; its source fingerprint
+> changing or the node leaving the DOM removes that current-DOM failure record.
+> A markerless reply is accepted only when the rebuilt payload has one unique source unit and the
+> normal echo/script/bilingual sanitizer approves it; two or more units remain ambiguous. Small
+> marker-format failures are isolated once rather than repeating the identical failed batch.
+>
+> **Current long-page contract:** automatic eager work is capped at 8K estimated input tokens per
+> session (`tokenBudget=-1` is the explicit unlimited escape hatch). Deferred sections are promoted
+> shortly before scrolling reaches them. Pages estimated above 12K input tokens automatically skip
+> references, citation lists, navboxes, category/TOC/edit apparatus while preserving article prose,
+> headings, lists, infobox facts, and data tables.
+> Known `gpt-5*` and `gpt-4.1*` models share the provider layer's 12,288-token first-attempt
+> capability: planning targets 9K output (hard growth clamp 11,059) rather than the legacy 3,686
+> ceiling. Unknown OpenAI model names keep the conservative ceiling. The banner token badge shows
+> actual content-controller request calls separately from logical section progress, including the
+> dedicated lead stream and controller retries.
 
 ## Purpose
 
@@ -19,45 +70,48 @@ applies returned text back onto the original DOM.
 
 ## Non-Goals
 
-- Do not send whole page HTML to the model.
-- Do not ask the model to preserve real `href`, `class`, `style`, `id`, or
-  `data-*` attributes.
-- Do not trust request completion count as page completion.
-- Do not hardcode site-specific selectors for one broken page.
-- Do not mutate layout structure when text-node updates are sufficient.
-- Do not rely on one provider-specific structured output mode as the only path.
+-   Do not send whole page HTML to the model.
+-   Do not ask the model to preserve real `href`, `class`, `style`, `id`, or
+    `data-*` attributes.
+-   Do not trust request completion count as page completion.
+-   Do not hardcode site-specific selectors for one broken page.
+-   Do not mutate layout structure when text-node updates are sufficient.
+-   Do not rely on one provider-specific structured output mode as the only path.
 
 ## Target Outcomes
 
-- First visible translated block appears quickly.
-- Page reaches actual coverage, not just `100%` request progress.
-- Token cost stays proportional to visible language, not markup size.
-- Links, styling, page scripts, event listeners, and layout identity survive.
-- Late-loaded or hydrated content is translated after it appears.
-- Repeated content is translated once per engine/model/language configuration.
-- Local, cloud, and Chrome built-in translation engines share the same DOM path.
+-   First visible translated block appears quickly.
+-   Page reaches actual coverage, not just `100%` request progress.
+-   Token cost stays proportional to visible language, not markup size.
+-   Links, styling, page scripts, event listeners, and layout identity survive.
+-   Late-loaded or hydrated content is translated after it appears.
+-   Repeated content reuses a role-aware session/persistent cache; duplicates inside one outgoing
+    batch collapse to one model unit. Cross-batch in-flight fan-out is still an open optimization.
+-   Local, cloud, and Chrome built-in translation engines share the same DOM path.
 
 ## Current Failure Mode
 
-Observed live symptom:
+Historical live symptom that this architecture must prevent:
 
-- The page banner reports `Translation complete` and `100%`.
-- Some article blocks remain in the source language.
-- The remaining source-language blocks have no `data-edge-*` translated markers.
-- This implies they were not counted as successfully translated DOM leaves.
+-   The page banner reports `Translation complete` and `100%`.
+-   Some article blocks remain in the source language.
+-   The remaining source-language blocks have no `data-edge-*` translated markers.
+-   This implies they were not counted as successfully translated DOM leaves.
 
 Root cause class:
 
-- Initial collection or later re-collection does not represent all final content
-  in the page.
-- Completion is derived from dispatched translation entries rather than verified
-  DOM coverage.
+-   Initial collection or later re-collection does not represent all final content
+    in the page.
+-   Completion is derived from dispatched translation entries rather than verified
+    DOM coverage.
 
 The fix is architectural:
 
-- Keep the LLM payload lightweight.
-- Add a DOM coverage verifier before declaring completion.
-- Re-collect only the untranslated leaves that remain.
+-   Keep the LLM payload lightweight.
+-   Add a DOM coverage verifier before declaring completion.
+-   Re-collect only the untranslated leaves that remain.
+-   Keep recursive retry work in the completion gate and retain a durable incomplete count when a
+    terminal provider/leaf failure remains.
 
 ## Architecture Overview
 
@@ -82,17 +136,35 @@ It should be compact, stable, parseable, and provider-portable.
 
 ### IR Principles
 
-- Use a stable static instruction prefix.
-- Put variable page content after static instructions to improve prompt cache
-  reuse on providers that support prefix caching.
-- Use numeric segment IDs.
-- Include role hints such as `title`, `paragraph`, `list-item`, `caption`,
-  `table-cell`, or `nav` only when helpful.
-- Preserve only minimal inline semantic markers.
-- Keep real DOM attributes out of the prompt.
-- Make output parseable even when the model ignores formal JSON mode.
+-   Use a stable static instruction prefix.
+-   Put variable page content after static instructions to improve prompt cache
+    reuse on providers that support prefix caching.
+-   Use numeric segment IDs.
+-   Include role hints such as `title`, `paragraph`, `list-item`, `caption`,
+    `table-cell`, or `nav` only when helpful.
+-   Preserve only minimal inline semantic markers.
+-   Keep real DOM attributes out of the prompt.
+-   Make output parseable even when the model ignores formal JSON mode.
 
 ### Preferred Text Protocol
+
+The deployed compact shape is intentionally smaller than the illustrative protocol below:
+
+```text
+English>Korean
+[[1:title]]
+Release notes
+[[2]]
+The first paragraph keeps <a>inline boundaries</a> but no real attributes.
+[[3:date]]
+2026-07-12
+```
+
+`paragraph` and generic `text` omit the role suffix. Context-sensitive roles keep a sparse suffix
+and participate in role-aware dedupe/cache. The model must echo every marker unchanged and may
+return `=` only for a segment that is already entirely in the target language.
+
+The following longer example remains a design illustration, not the exact current wire format.
 
 Input:
 
@@ -138,10 +210,13 @@ it and the schema overhead is justified.
 
 ```json
 {
-  "segments": [
-    { "id": 1, "text": "KDE Plasma 6.7은 여러 버그 수정이 반영되며 출시를 앞두고 있습니다" },
-    { "id": 2, "text": "리눅스 커널, 배포판, 데스크톱 환경의 개발 상황을 지켜보는 일은 언제나 흥미롭습니다." }
-  ]
+    "segments": [
+        { "id": 1, "text": "KDE Plasma 6.7은 여러 버그 수정이 반영되며 출시를 앞두고 있습니다" },
+        {
+            "id": 2,
+            "text": "리눅스 커널, 배포판, 데스크톱 환경의 개발 상황을 지켜보는 일은 언제나 흥미롭습니다."
+        }
+    ]
 }
 ```
 
@@ -167,40 +242,40 @@ article title.
 
 Collect leaf blocks, not arbitrary text nodes. Candidate tags:
 
-- `h1` to `h6`
-- `p`
-- `li`
-- `blockquote`
-- `figcaption`
-- `caption`
-- `summary`
-- `dd`, `dt`
-- `th`, `td`
-- `label` only when it is content-like, not a form control label
+-   `h1` to `h6`
+-   `p`
+-   `li`
+-   `blockquote`
+-   `figcaption`
+-   `caption`
+-   `summary`
+-   `dd`, `dt`
+-   `th`, `td`
+-   `label` only when it is content-like, not a form control label
 
 Skip:
 
-- `script`, `style`, `noscript`, `template`
-- `svg`, `math`
-- `code`, `pre`, `kbd`, `samp`
-- `input`, `textarea`, `select`, `option`
-- global `header`, `footer`, `nav`, `[role="banner"]`,
-  `[role="contentinfo"]`, `[role="search"]`
-- login, newsletter, follow, modal, popup, ad, sponsor, promo surfaces
-- extension-owned UI
-- hidden or aria-hidden subtrees
+-   `script`, `style`, `noscript`, `template`
+-   `svg`, `math`
+-   `code`, `pre`, `kbd`, `samp`
+-   `input`, `textarea`, `select`, `option`
+-   global `header`, `footer`, `nav`, `[role="banner"]`,
+    `[role="contentinfo"]`, `[role="search"]`
+-   login, newsletter, follow, modal, popup, ad, sponsor, promo surfaces
+-   extension-owned UI
+-   hidden or aria-hidden subtrees
 
 ### Eligibility
 
 A leaf is eligible when:
 
-- It is connected.
-- It has meaningful language text.
-- It is inside a translation root.
-- It is not already translated in the current session.
-- It is not pending.
-- It is not known failed beyond retry budget.
-- It is not already mostly in the target script.
+-   It is connected.
+-   It has meaningful language text.
+-   It is inside a translation root.
+-   It is not already translated in the current session.
+-   It is not pending.
+-   It is not known failed beyond retry budget.
+-   It is not already mostly in the target script.
 
 For Korean target, Hangul-script ratio should be used as a cheap skip signal,
 but Latin terms inside a Korean sentence must not block completion.
@@ -228,11 +303,11 @@ never sees or controls the real URL.
 
 Allowed inline markers:
 
-- `aN`
-- `strongN`
-- `emN`
-- `codeN` only when code text should be preserved, not translated
-- `br` as a line-break marker when the block has meaningful visual lines
+-   `aN`
+-   `strongN`
+-   `emN`
+-   `codeN` only when code text should be preserved, not translated
+-   `br` as a line-break marker when the block has meaningful visual lines
 
 Unknown inline tags should be flattened to text unless the product explicitly
 needs them.
@@ -241,15 +316,15 @@ needs them.
 
 Never send these to the LLM:
 
-- `href`
-- `src`
-- `srcset`
-- `id`
-- `class`
-- `style`
-- `data-*`
-- `aria-*`
-- event handlers
+-   `href`
+-   `src`
+-   `srcset`
+-   `id`
+-   `class`
+-   `style`
+-   `data-*`
+-   `aria-*`
+-   event handlers
 
 The applier keeps original DOM nodes and attributes, so there is nothing for the
 model to restore.
@@ -258,20 +333,20 @@ model to restore.
 
 ### Goals
 
-- Preserve enough context for natural translation.
-- Avoid large output payloads.
-- Prioritize the visible viewport.
-- Minimize the number of round trips.
-- Keep provider-specific limits respected.
+-   Preserve enough context for natural translation.
+-   Avoid large output payloads.
+-   Prioritize the visible viewport.
+-   Minimize the number of round trips.
+-   Keep provider-specific limits respected.
 
 ### Batch Shape
 
 A batch is a list of leaf segments plus optional local context:
 
-- Page title.
-- Section heading.
-- Nearby preceding heading.
-- Short content category hint.
+-   Page title.
+-   Section heading.
+-   Nearby preceding heading.
+-   Short content category hint.
 
 Do not include unrelated page text merely to provide context.
 
@@ -279,51 +354,51 @@ Do not include unrelated page text merely to provide context.
 
 Cloud LLM:
 
-- Lead batch: 1 to 4 visible leaf blocks, up to about 2,000 source chars.
-- Normal batch: 8 to 32 leaf blocks, capped by estimated input/output tokens.
-- Concurrency: provider-adaptive, with backoff on rate limit or slow queue.
+-   Lead batch: 1 to 4 visible leaf blocks, up to about 2,000 source chars.
+-   Normal batch: 8 to 32 leaf blocks, capped by estimated input/output tokens.
+-   Concurrency: provider-adaptive, with backoff on rate limit or slow queue.
 
 OpenAI-compatible local LLM:
 
-- Lead batch: 1 to 2 visible leaf blocks, up to about 800 source chars.
-- Normal batch: 2 to 8 leaf blocks, capped by local context.
-- Concurrency: no higher than local server parallel slots.
+-   Lead batch: 1 to 2 visible leaf blocks, up to about 800 source chars.
+-   Normal batch: 2 to 8 leaf blocks, capped by local context.
+-   Concurrency: no higher than local server parallel slots.
 
 Chrome built-in:
 
-- Prefer small batches.
-- Treat as low-cost but latency-sensitive.
-- Do not assume it benefits from large context.
+-   Prefer small batches.
+-   Treat as low-cost but latency-sensitive.
+-   Do not assume it benefits from large context.
 
 ## Provider Adapters
 
 ### OpenAI
 
-- Keep static system prompt and schema at the start.
-- Put variable segments at the end.
-- Use `prompt_cache_key` when available and stable by domain/profile.
-- Use structured output only if the model supports it and latency is acceptable.
-- Marker protocol remains valid for all supported models.
+-   Keep static system prompt and schema at the start.
+-   Put variable segments at the end.
+-   Use `prompt_cache_key` when available and stable by domain/profile.
+-   Use structured output only if the model supports it and latency is acceptable.
+-   Marker protocol remains valid for all supported models.
 
 ### Gemini API
 
-- Use structured output when the selected model supports it and schema remains
-  small.
-- Consider explicit caching only for large stable prompt/context prefixes.
-- Prefer marker protocol when schema overhead reduces throughput.
+-   Use structured output when the selected model supports it and schema remains
+    small.
+-   Consider explicit caching only for large stable prompt/context prefixes.
+-   Prefer marker protocol when schema overhead reduces throughput.
 
 ### OpenAI-Compatible / Local
 
-- Prefer marker protocol.
-- Avoid strict JSON unless the server/model has proven reliable.
-- Keep prompts short.
-- Use smaller batches and retries for dropped markers.
+-   Prefer marker protocol.
+-   Avoid strict JSON unless the server/model has proven reliable.
+-   Keep prompts short.
+-   Use smaller batches and retries for dropped markers.
 
 ### Chrome Built-In
 
-- Use the built-in Translator API for direct text translation when available.
-- Use Prompt API only for model behavior that needs instruction following.
-- Expect smaller local context and session lifecycle constraints.
+-   Use the built-in Translator API for direct text translation when available.
+-   Use Prompt API only for model behavior that needs instruction following.
+-   Expect smaller local context and session lifecycle constraints.
 
 ## Current Code Inventory
 
@@ -333,46 +408,46 @@ ambiguous parts.
 
 Primary files:
 
-- `packages/EdgeTranslate/src/content/dom_page_translate_context.js`
-  - currently owns role inference, context groups, HTML section collection,
-    segmented marker helpers, same-language detection, HTML sanitization, and
-    section apply helpers.
-  - this is the right home for provider-neutral IR collection, serialization,
-    parsing, and DOM apply primitives.
-- `packages/EdgeTranslate/src/content/banner_controller.js`
-  - currently owns page translation lifecycle, root selection, batching,
-    provider dispatch, progress, mutation scans, coverage scans, cache, and
-    banner state.
-  - this file should orchestrate IR modules but should not contain most IR
-    parsing or DOM tree surgery.
-- `packages/EdgeTranslate/src/background/library/pageTranslate.js`
-  - currently dispatches page translation commands into the content side.
-  - this should remain mostly unchanged unless the public command payload needs
-    new feature flags or debug options.
-- `packages/EdgeTranslate/test/unit/content/domPageTranslateContext.test.js`
-  - best target for collector, serializer, parser, and applier unit tests.
-- `packages/EdgeTranslate/test/unit/content/bannerController.test.js`
-  - best target for lifecycle, coverage, batching, retry, cache, and progress
-    tests.
+-   `packages/EdgeTranslate/src/content/dom_page_translate_context.js`
+    -   currently owns role inference, context groups, HTML section collection,
+        segmented marker helpers, same-language detection, HTML sanitization, and
+        section apply helpers.
+    -   this is the right home for provider-neutral IR collection, serialization,
+        parsing, and DOM apply primitives.
+-   `packages/EdgeTranslate/src/content/banner_controller.js`
+    -   currently owns page translation lifecycle, root selection, batching,
+        provider dispatch, progress, mutation scans, coverage scans, cache, and
+        banner state.
+    -   this file should orchestrate IR modules but should not contain most IR
+        parsing or DOM tree surgery.
+-   `packages/EdgeTranslate/src/background/library/pageTranslate.js`
+    -   currently dispatches page translation commands into the content side.
+    -   this should remain mostly unchanged unless the public command payload needs
+        new feature flags or debug options.
+-   `packages/EdgeTranslate/test/unit/content/domPageTranslateContext.test.js`
+    -   best target for collector, serializer, parser, and applier unit tests.
+-   `packages/EdgeTranslate/test/unit/content/bannerController.test.js`
+    -   best target for lifecycle, coverage, batching, retry, cache, and progress
+        tests.
 
 Existing behavior to migrate away from:
 
-- The AI path can send translated leaf or section `innerHTML` and ask the model
-  to preserve tags and attributes.
-- Completion can still be reasoned about through translated-entry counts before
-  a stable DOM coverage pass proves that no meaningful source leaves remain.
-- Coverage sweep exists as a safety net, but it is bolted onto a section/HTML
-  ownership model rather than being the primary completion contract.
+-   The AI path can send translated leaf or section `innerHTML` and ask the model
+    to preserve tags and attributes.
+-   Completion can still be reasoned about through translated-entry counts before
+    a stable DOM coverage pass proves that no meaningful source leaves remain.
+-   Coverage sweep exists as a safety net, but it is bolted onto a section/HTML
+    ownership model rather than being the primary completion contract.
 
 Existing behavior to keep:
 
-- Root narrowing to dominant `main` plus outside article headings.
-- Mutation and incremental scan scheduling.
-- Same-language skip heuristics.
-- Original-text hover registration.
-- Session translation cache.
-- Bounded retry and circuit-breaker style convergence.
-- Debug event buffering behind explicit debug mode.
+-   Root narrowing to dominant `main` plus outside article headings.
+-   Mutation and incremental scan scheduling.
+-   Same-language skip heuristics.
+-   Original-text hover registration.
+-   Session translation cache.
+-   Bounded retry and circuit-breaker style convergence.
+-   Debug event buffering behind explicit debug mode.
 
 ## Migration Contract
 
@@ -383,12 +458,12 @@ stack in one patch.
 
 Add provider-neutral functions to `dom_page_translate_context.js`:
 
-- `collectTranslationLeaves(roots, options)`
-- `serializeTranslationLeaf(leaf, options)`
-- `buildTranslationIrBatch(leaves, options)`
-- `parseTranslationIrReply(text, expectedIds, options)`
-- `applyTranslationIrSegment(segment, translatedText, options)`
-- `findRemainingSourceLeaves(roots, options)`
+-   `collectTranslationLeaves(roots, options)`
+-   `serializeTranslationLeaf(leaf, options)`
+-   `buildTranslationIrBatch(leaves, options)`
+-   `parseTranslationIrReply(text, expectedIds, options)`
+-   `applyTranslationIrSegment(segment, translatedText, options)`
+-   `findRemainingSourceLeaves(roots, options)`
 
 The first version can internally reuse existing helpers such as
 `inferDomPageTextRole`, `isAlreadyInTargetLanguage`,
@@ -398,12 +473,12 @@ The first version can internally reuse existing helpers such as
 
 Before switching runtime dispatch, add tests proving:
 
-- current roots plus IR leaf collection include article paragraphs, headings,
-  lists, and captions from real-world structures.
-- global nav, footer, ad, newsletter, and code/pre blocks stay out.
-- already-target Korean blocks are skipped without blocking completion.
-- an untranslated leaf inside a section marked translated is still returned by
-  `findRemainingSourceLeaves`.
+-   current roots plus IR leaf collection include article paragraphs, headings,
+    lists, and captions from real-world structures.
+-   global nav, footer, ad, newsletter, and code/pre blocks stay out.
+-   already-target Korean blocks are skipped without blocking completion.
+-   an untranslated leaf inside a section marked translated is still returned by
+    `findRemainingSourceLeaves`.
 
 ### Step C: Route One AI Engine Through IR
 
@@ -414,8 +489,7 @@ Runtime guard:
 
 ```js
 const useIrPageTranslation =
-  this._domPageTranslateOptions?.irMode === true ||
-  this.isOpenAiCompatibleDomPageEngine(engine);
+    this._domPageTranslateOptions?.irMode === true || this.isOpenAiCompatibleDomPageEngine(engine);
 ```
 
 The exact guard can change, but the first runtime switch should be narrow and
@@ -443,52 +517,58 @@ for coverage completion.
 
 Once IR is stable across local and cloud providers:
 
-- stop sending real `innerHTML` to LLMs by default.
-- keep HTML apply helpers only as legacy fallback or remove them if tests prove
-  IR fully covers the supported cases.
-- update tests that expect `htmlMode` to expect inline marker preservation
-  instead.
+-   stop sending real `innerHTML` to LLMs by default.
+-   keep HTML apply helpers only as legacy fallback or remove them if tests prove
+    IR fully covers the supported cases.
+-   update tests that expect `htmlMode` to expect inline marker preservation
+    instead.
 
 ## Parsing And Applying
 
 ### Parser Requirements
 
-- Parse all valid returned segment IDs.
-- Ignore unknown IDs.
-- Drop duplicate IDs after the first valid content.
-- Treat missing IDs as partial success, not total failure.
-- Strip prompt echo before validation.
-- Detect source echo and avoid caching it.
+-   Parse all valid returned segment IDs.
+-   Ignore unknown IDs.
+-   Drop duplicate IDs after the first valid content.
+-   Treat missing IDs as partial success, not total failure.
+-   Strip prompt echo before validation.
+-   Detect source echo and avoid caching it.
 
 ### DOM Apply Rules
 
-- Mutate text nodes only when possible.
-- Preserve original element identity.
-- Preserve original attributes and event listeners.
-- Never swap a live page subtree with model-generated HTML.
-- For inline marker mismatch, flatten translated text into the leaf as a safe
-  fallback rather than leaving the whole block untranslated.
-- Register original text for hover/original tooltip before mutation.
+-   Mutate text nodes only when possible.
+-   Preserve original element identity.
+-   Preserve original attributes and event listeners.
+-   Never swap a live page subtree with model-generated HTML.
+-   For inline marker mismatch, flatten translated text into the leaf as a safe
+    fallback rather than leaving the whole block untranslated.
+-   Register original text for hover/original tooltip before mutation.
 
 ### Cache Rules
 
 Segment cache key:
 
 ```text
-engine|model|sourceLang|targetLang|hash(serializedLeaf)
+seg-v6-semantic|engine|model|sourceLang|targetLang|normalizedRole|length-hashA-hashB
 ```
+
+`paragraph` and `text` normalize to the same empty role; title/date/label/list/navigation/
+table-header/caption remain distinct. The composite fingerprint replaced a single 32-bit FNV
+value after a deterministic collision was demonstrated. A prompt/IR contract change must bump
+the protocol version as well as the LocalTranslator prompt version.
 
 Cache only successful translations.
 
 Do not cache:
 
-- Empty translations.
-- Source echoes.
-- Prompt echoes.
-- Suspiciously long hallucinated output.
-- Output with unresolved dangerous markup.
+-   Empty translations.
+-   Source echoes.
+-   Prompt echoes.
+-   Suspiciously long hallucinated output.
+-   Output with unresolved dangerous markup.
 
-Persistent cache should be opportunistic. It must never block live translation.
+Persistent cache should be opportunistic. The first wave may share one bounded prefetch gate
+(currently at most 150 ms), but a cache failure must never block live translation indefinitely.
 
 ## Completion And Coverage
 
@@ -498,11 +578,11 @@ Completion must be based on DOM state, not only request state.
 
 Only show `Translation complete` when all are true:
 
-- Queue is empty.
-- Active translation count is zero.
-- No pending apply work remains.
-- Coverage verifier finds no meaningful source-language leaf in roots.
-- Coverage verifier has run at least one stable pass after the last mutation.
+-   Queue is empty.
+-   Active translation count is zero.
+-   No pending apply work remains.
+-   Coverage verifier finds no meaningful source-language leaf in roots.
+-   Coverage verifier has run at least one stable pass after the last mutation.
 
 ### Coverage Verifier
 
@@ -512,17 +592,17 @@ Pseudo-code:
 
 ```js
 function findRemainingSourceLeaves(roots, targetLang) {
-  const leaves = collectTranslatableLeaves(roots, {
-    includeAlreadyMarked: true,
-    ignorePending: true,
-  });
+    const leaves = collectTranslatableLeaves(roots, {
+        includeAlreadyMarked: true,
+        ignorePending: true,
+    });
 
-  return leaves.filter((leaf) => {
-    if (!hasMeaningfulText(leaf)) return false;
-    if (isAlreadyInTargetLanguage(leaf.textContent, targetLang)) return false;
-    if (isLowValueText(leaf.textContent)) return false;
-    return true;
-  });
+    return leaves.filter((leaf) => {
+        if (!hasMeaningfulText(leaf)) return false;
+        if (isAlreadyInTargetLanguage(leaf.textContent, targetLang)) return false;
+        if (isLowValueText(leaf.textContent)) return false;
+        return true;
+    });
 }
 ```
 
@@ -537,9 +617,9 @@ If remaining leaves exist:
 
 Use separate budgets:
 
-- Per segment: 2 partial marker retries.
-- Per leaf: 2 coverage retries.
-- Per page: 5 coverage scans before giving up.
+-   Per segment: 2 partial marker retries.
+-   Per leaf: 2 coverage retries.
+-   Per page: 5 coverage scans before giving up.
 
 If a leaf still cannot be translated, mark it as exhausted and log a diagnostic
 event so completion can converge.
@@ -548,30 +628,30 @@ event so completion can converge.
 
 Debug events should answer:
 
-- What roots were selected?
-- How many leaves were collected?
-- How many leaves were skipped, and why?
-- How many segments were sent?
-- Which provider handled the batch?
-- Which segments applied?
-- Which segments were missing?
-- Which leaves remained at coverage pass?
-- Why did the page finally complete or give up?
+-   What roots were selected?
+-   How many leaves were collected?
+-   How many leaves were skipped, and why?
+-   How many segments were sent?
+-   Which provider handled the batch?
+-   Which segments applied?
+-   Which segments were missing?
+-   Which leaves remained at coverage pass?
+-   Why did the page finally complete or give up?
 
 Recommended debug events:
 
-- `llm-ir:roots`
-- `llm-ir:collect`
-- `llm-ir:serialize`
-- `llm-ir:batch`
-- `llm-ir:request`
-- `llm-ir:response`
-- `llm-ir:parse`
-- `llm-ir:apply`
-- `coverage:scan`
-- `coverage:requeue`
-- `coverage:complete`
-- `coverage:exhausted`
+-   `llm-ir:roots`
+-   `llm-ir:collect`
+-   `llm-ir:serialize`
+-   `llm-ir:batch`
+-   `llm-ir:request`
+-   `llm-ir:response`
+-   `llm-ir:parse`
+-   `llm-ir:apply`
+-   `coverage:scan`
+-   `coverage:requeue`
+-   `coverage:complete`
+-   `coverage:exhausted`
 
 Mirror recent debug events into a JSON script node only when debug mode is on.
 
@@ -579,118 +659,118 @@ Mirror recent debug events into a JSON script node only when debug mode is on.
 
 ### Phase 1: Spec And Test Harness
 
-- Add this specification.
-- Add fixtures for real-world page structures:
-  - article with hero title outside `main`
-  - hydrated/lazy article body
-  - inline links and emphasis
-  - list-heavy summary section
-  - ad/sidebar/footer noise
-  - mixed Korean plus English proper nouns
-- Add unit tests for collector, serializer, parser, apply, and coverage.
+-   Add this specification.
+-   Add fixtures for real-world page structures:
+    -   article with hero title outside `main`
+    -   hydrated/lazy article body
+    -   inline links and emphasis
+    -   list-heavy summary section
+    -   ad/sidebar/footer noise
+    -   mixed Korean plus English proper nouns
+-   Add unit tests for collector, serializer, parser, apply, and coverage.
 
 Exit criteria:
 
-- Tests prove the collector includes the XDA-style body paragraphs that were
-  previously left untranslated.
-- Tests prove completion is blocked when source-language leaves remain.
+-   Tests prove the collector includes the XDA-style body paragraphs that were
+    previously left untranslated.
+-   Tests prove completion is blocked when source-language leaves remain.
 
 Suggested test additions:
 
-- `domPageTranslateContext.test.js`
-  - `collectTranslationLeaves collects article leaves under dominant main`
-  - `collectTranslationLeaves includes h1 outside main when provided as root`
-  - `serializeTranslationLeaf replaces anchors with stable inline markers`
-  - `parseTranslationIrReply accepts partial valid ids and reports missing ids`
-  - `applyTranslationIrSegment preserves original href and attributes`
-  - `findRemainingSourceLeaves returns untranslated leaves inside marked sections`
-- `bannerController.test.js`
-  - `does not report complete until coverage pass is stable`
-  - `requeues only remaining untranslated leaves after coverage scan`
-  - `does not cache source echo from IR response`
-  - `keeps exhausted leaves bounded and logs coverage:exhausted`
+-   `domPageTranslateContext.test.js`
+    -   `collectTranslationLeaves collects article leaves under dominant main`
+    -   `collectTranslationLeaves includes h1 outside main when provided as root`
+    -   `serializeTranslationLeaf replaces anchors with stable inline markers`
+    -   `parseTranslationIrReply accepts partial valid ids and reports missing ids`
+    -   `applyTranslationIrSegment preserves original href and attributes`
+    -   `findRemainingSourceLeaves returns untranslated leaves inside marked sections`
+-   `bannerController.test.js`
+    -   `does not report complete until coverage pass is stable`
+    -   `requeues only remaining untranslated leaves after coverage scan`
+    -   `does not cache source echo from IR response`
+    -   `keeps exhausted leaves bounded and logs coverage:exhausted`
 
 ### Phase 2: Translation IR Module
 
 Create a dedicated module near `dom_page_translate_context.js` or split the
 current file:
 
-- `collectTranslationLeaves`
-- `serializeTranslationLeaf`
-- `buildTranslationIrBatch`
-- `parseTranslationIrReply`
-- `applyTranslationIrSegment`
-- `findRemainingSourceLeaves`
+-   `collectTranslationLeaves`
+-   `serializeTranslationLeaf`
+-   `buildTranslationIrBatch`
+-   `parseTranslationIrReply`
+-   `applyTranslationIrSegment`
+-   `findRemainingSourceLeaves`
 
 Exit criteria:
 
-- Existing page translation tests still pass.
-- New IR tests pass.
-- No provider-specific code leaks into collection/apply logic.
+-   Existing page translation tests still pass.
+-   New IR tests pass.
+-   No provider-specific code leaks into collection/apply logic.
 
 Implementation notes:
 
-- Keep exported function names small and explicit.
-- Keep DOM mutation inside apply functions, not provider adapters.
-- Return structured diagnostics from parser and coverage functions instead of
-  forcing callers to infer from booleans.
-- Use existing same-language heuristics first, then refine only when tests show
-  false positives or false negatives.
+-   Keep exported function names small and explicit.
+-   Keep DOM mutation inside apply functions, not provider adapters.
+-   Return structured diagnostics from parser and coverage functions instead of
+    forcing callers to infer from booleans.
+-   Use existing same-language heuristics first, then refine only when tests show
+    false positives or false negatives.
 
 ### Phase 3: BannerController Integration
 
-- Replace scattered section/segment preparation with IR batch creation.
-- Keep current per-string cache behavior.
-- Update progress calculation to distinguish:
-  - dispatched entries
-  - applied segments
-  - remaining coverage leaves
-  - exhausted leaves
-- Prevent `Translation complete` until coverage verifier passes.
+-   Replace scattered section/segment preparation with IR batch creation.
+-   Keep current per-string cache behavior.
+-   Update progress calculation to distinguish:
+    -   dispatched entries
+    -   applied segments
+    -   remaining coverage leaves
+    -   exhausted leaves
+-   Prevent `Translation complete` until coverage verifier passes.
 
 Exit criteria:
 
-- Banner no longer reports complete while source leaves remain.
-- Coverage pass requeues only remaining untranslated leaves.
+-   Banner no longer reports complete while source leaves remain.
+-   Coverage pass requeues only remaining untranslated leaves.
 
 Runtime state to track:
 
-- `queuedBatches`
-- `activeBatches`
-- `appliedSegments`
-- `missingSegments`
-- `remainingCoverageLeaves`
-- `exhaustedCoverageLeaves`
-- `stableCoveragePasses`
+-   `queuedBatches`
+-   `activeBatches`
+-   `appliedSegments`
+-   `missingSegments`
+-   `remainingCoverageLeaves`
+-   `exhaustedCoverageLeaves`
+-   `stableCoveragePasses`
 
 Banner wording:
 
-- Running: show translated/applied progress.
-- Verifying: show coverage verification after request queue drains.
-- Complete: only after stable coverage pass.
-- Complete with exceptions: optional, only when exhausted leaves remain and the
-  user needs an honest terminal state.
+-   Running: show translated/applied progress.
+-   Verifying: show coverage verification after request queue drains.
+-   Complete: only after stable coverage pass.
+-   Complete with exceptions: optional, only when exhausted leaves remain and the
+    user needs an honest terminal state.
 
 ### Phase 4: Provider-Specific Optimization
 
-- OpenAI:
-  - stable static prefix
-  - optional structured output
-  - prompt cache key when supported
-- Gemini:
-  - structured output only for supported models and simple schema
-  - marker fallback
-- OpenAI-compatible:
-  - marker protocol only by default
-  - smaller adaptive batches
-- Chrome built-in:
-  - small segment batches
-  - no large context assumptions
+-   OpenAI:
+    -   stable static prefix
+    -   optional structured output
+    -   prompt cache key when supported
+-   Gemini:
+    -   structured output only for supported models and simple schema
+    -   marker fallback
+-   OpenAI-compatible:
+    -   marker protocol only by default
+    -   smaller adaptive batches
+-   Chrome built-in:
+    -   small segment batches
+    -   no large context assumptions
 
 Exit criteria:
 
-- Provider adapters share one IR contract.
-- Failures fall back without breaking DOM coverage.
+-   Provider adapters share one IR contract.
+-   Failures fall back without breaking DOM coverage.
 
 ### Phase 5: Live Browser Verification
 
@@ -698,134 +778,148 @@ Use the actual loaded Chrome extension build and live pages.
 
 Required checks:
 
-- XDA article that previously showed 100% with English body blocks.
-- A long article with lazy-loaded content.
-- A page with many inline links.
-- A page with code blocks that must not translate code.
-- A PDF viewer page, if page translation is enabled there.
+-   XDA article that previously showed 100% with English body blocks.
+-   A long article with lazy-loaded content.
+-   A page with many inline links.
+-   A page with code blocks that must not translate code.
+-   A PDF viewer page, if page translation is enabled there.
 
 Metrics:
 
-- Time to first translated visible block.
-- Time to actual complete.
-- Input tokens.
-- Output tokens.
-- Cache hit count.
-- Coverage requeue count.
-- Remaining source-language leaf count.
+-   Time to first translated visible block.
+-   Time to actual complete.
+-   Input tokens.
+-   Output tokens.
+-   Cache hit count.
+-   Coverage requeue count.
+-   Remaining source-language leaf count.
 
 Exit criteria:
 
-- Live page reaches actual coverage or logs bounded exhausted leaves.
-- No layout break from model output.
-- Token usage does not regress versus current marker-based path on the same
-  sample pages.
+-   Live page reaches actual coverage or logs bounded exhausted leaves.
+-   No layout break from model output.
+-   Token usage does not regress versus current marker-based path on the same
+    sample pages.
 
 ## Benchmark Matrix
 
 Run each benchmark with the same source/target language pair and the same model
 configuration.
 
-| Scenario | Expected result | Metrics |
-| --- | --- | --- |
-| Long article with dominant `main` | body paragraphs and outside title translate | first block latency, complete latency, remaining leaves |
-| Lazy-loaded article body | late paragraphs translate after mutation scan | incremental scan count, coverage requeue count |
-| Link-heavy article | links keep href/target/class; only text changes | marker mismatch count, layout regressions |
-| Code-heavy technical article | code/pre/kbd/samp are preserved | skipped code blocks, false translation count |
-| Mixed Korean and English names | Korean sentences are skipped; names remain natural | target-script false positives |
-| Local OpenAI-compatible model | small batches converge without dropped markers | retry count, missing id count |
-| Gemini cloud | structured or marker mode stays parseable | schema overhead, parse failure count |
-| Chrome built-in | direct text translation path stays fast | session creation latency, batch latency |
+| Scenario                          | Expected result                                    | Metrics                                                 |
+| --------------------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| Long article with dominant `main` | body paragraphs and outside title translate        | first block latency, complete latency, remaining leaves |
+| Lazy-loaded article body          | late paragraphs translate after mutation scan      | incremental scan count, coverage requeue count          |
+| Link-heavy article                | links keep href/target/class; only text changes    | marker mismatch count, layout regressions               |
+| Code-heavy technical article      | code/pre/kbd/samp are preserved                    | skipped code blocks, false translation count            |
+| Mixed Korean and English names    | Korean sentences are skipped; names remain natural | target-script false positives                           |
+| Local OpenAI-compatible model     | small batches converge without dropped markers     | retry count, missing id count                           |
+| Gemini cloud                      | structured or marker mode stays parseable          | schema overhead, parse failure count                    |
+| Chrome built-in                   | direct text translation path stays fast            | session creation latency, batch latency                 |
 
 Minimum metrics to log per page:
 
-- selected root count
-- collected leaf count
-- skipped leaf count by reason
-- input character count
-- estimated input/output tokens when provider exposes them
-- request count
-- parse failure count
-- missing segment count
-- applied segment count
-- coverage scan count
-- coverage requeue count
-- exhausted leaf count
-- final visible source-language leaf count
+-   selected root count
+-   collected leaf count
+-   skipped leaf count by reason
+-   input character count
+-   estimated input/output tokens when provider exposes them
+-   request count
+-   parse failure count
+-   missing segment count
+-   applied segment count
+-   coverage scan count
+-   coverage requeue count
+-   exhausted leaf count
+-   final visible source-language leaf count
 
 ## Risk Register
 
-| Risk | Cause | Mitigation |
-| --- | --- | --- |
-| False complete | completion tied to requests, not DOM state | coverage-first complete contract |
-| Token regression | over-large context or JSON schema overhead | marker protocol baseline and provider caps |
-| Link loss | model controls HTML | inline marker mapping back to original DOM nodes |
-| Layout break | subtree replacement | text-node mutation first, element identity preserved |
-| Dropped markers | batch too large or weak model | adaptive batch shrink and partial success parsing |
-| Re-translation loop | dynamic pages mutate constantly | coalesced scans, stable pass requirement, bounded retry |
-| Target-language false skip | script heuristic too broad | role-aware and length-aware skip tests |
-| Provider lock-in | relying on one structured output feature | marker protocol required for every provider |
-| Debug noise | always-on logs or script mirrors | debug-only event buffer |
+| Risk                       | Cause                                              | Mitigation                                                                      |
+| -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------- |
+| False complete             | completion tied to requests, not DOM state         | coverage-first complete contract                                                |
+| Token regression           | over-large context or JSON schema overhead         | marker protocol baseline and provider caps                                      |
+| Link loss                  | model controls HTML                                | inline marker mapping back to original DOM nodes                                |
+| Layout break               | subtree replacement                                | text-node mutation first, element identity preserved                            |
+| Dropped markers            | batch too large or weak model                      | adaptive batch shrink and partial success parsing                               |
+| Re-translation loop        | dynamic pages mutate constantly                    | coalesced scans, stable pass requirement, bounded retry                         |
+| Target-language false skip | script heuristic too broad                         | role-aware and length-aware skip tests                                          |
+| Same-script language skip  | Latin/Cyrillic script mistaken for a language      | require detected source language to equal target before shared-script fast skip |
+| Stale page cache           | prompt/IR semantics change under a seven-day entry | protocol version in section and segment keys                                    |
+| Cross-role cache pollution | identical short text has different UI meaning      | sparse role marker and role-aware dedupe/cache key                              |
+| Provider lock-in           | relying on one structured output feature           | marker protocol required for every provider                                     |
+| Debug noise                | always-on logs or script mirrors                   | debug-only event buffer                                                         |
 
 ## Definition Of Done
 
 The implementation is done when all are true:
 
-- The LLM never receives full page HTML or real DOM attributes in default AI
-  page translation mode.
-- Every translated segment has a stable ID from collection through apply.
-- A translated page cannot enter `Translation complete` until a stable coverage
-  pass finds no eligible source-language leaves.
-- The observed live failure class is covered by a unit test and a live browser
-  verification note.
-- Local, cloud, and Chrome built-in engines either use the IR path or explicitly
-  document why they are still on a legacy fallback.
-- Debug logs can reconstruct root selection, collection, batching, response
-  parsing, apply, coverage requeue, and final completion.
+-   The LLM never receives full page HTML or real DOM attributes in default AI
+    page translation mode.
+-   Every translated segment has a stable ID from collection through apply.
+-   A translated page cannot enter `Translation complete` until a stable coverage
+    pass finds no eligible source-language leaves.
+-   The observed live failure class is covered by a unit test and a live browser
+    verification note.
+-   Local, cloud, and Chrome built-in engines either use the IR path or explicitly
+    document why they are still on a legacy fallback.
+-   Debug logs can reconstruct root selection, collection, batching, response
+    parsing, apply, coverage requeue, and final completion.
 
 ## Acceptance Criteria
 
-- `Translation complete` means no eligible source-language leaves remain.
-- Source-language leftovers trigger coverage requeue automatically.
-- Whole-page HTML is never sent to the LLM.
-- Real DOM attributes are never model-controlled.
-- Repeated strings hit session or persistent cache.
-- Output parsing tolerates partial marker loss.
-- Local and cloud providers use the same apply pipeline.
-- Unit tests cover the observed live failure mode.
-- Live Chrome verification confirms the extension build path actually loaded.
+-   `Translation complete` means no eligible source-language leaves remain.
+-   Source-language leftovers trigger coverage requeue automatically.
+-   Whole-page HTML is never sent to the LLM.
+-   Real DOM attributes are never model-controlled.
+-   Repeated strings hit session or persistent cache.
+-   Output parsing tolerates partial marker loss.
+-   Provider and controller retries do not multiply the same transport failure.
+-   Missing usage still contributes a visibly estimated value to the runaway guard.
+-   Local and cloud providers use the same apply pipeline.
+-   Unit tests cover the observed live failure mode.
+-   Live Chrome verification confirms the extension build path actually loaded.
 
 ## Open Decisions
 
-- Whether to use JSON structured output by default for OpenAI cloud models.
-- Whether Gemini structured output gives enough reliability to justify schema
-  overhead for page translation.
-- How aggressive the final coverage language heuristic should be for Latin
-  names inside Korean text.
-- Whether exhausted untranslated leaves should be shown in the banner as
-  `Translated with exceptions`.
-- Whether persistent cache should be scoped by domain or full URL for article
-  body text.
+-   Whether to use JSON structured output by default for OpenAI cloud models.
+-   Whether Gemini structured output gives enough reliability to justify schema
+    overhead for page translation.
+-   How aggressive the final coverage language heuristic should be for Latin
+    names inside Korean text.
+-   Whether the durable `Translation incomplete` banner should expose a privacy-safe per-section
+    retry action or diagnostics view; the incomplete state itself is implemented.
+-   Whether persistent cache should be scoped by domain or full URL for article
+    body text.
+-   Whether to add a wave-wide in-flight owner/fan-out registry so the same role/text cannot be sent
+    concurrently by separate batches.
+-   Whether to replace repeated full-buffer streaming parses with a cursor/tail incremental parser.
+-   Whether to namespace/escape `[[n]]` markers to eliminate collisions with literal page text.
+-   How to pass an OpenAI-compatible endpoint/profile fingerprint into the content-side persistent
+    key without exposing credentials.
+-   Whether short ambiguous segments need a bounded heading/domain scope in addition to their role.
 
 ## Recommended Next Step
 
-Implement Phase 1 and Phase 2 first. The main risk is not provider prompting,
-but ambiguous ownership between collection, pending/translated marking, and
-completion. Once IR and coverage are separately testable, provider optimization
-becomes much safer.
+The compact IR, streaming apply, coverage loop, sparse role protocol, and cache versioning are now
+implemented. The next phase should use a controlled live-page corpus and real provider usage/TTFT
+telemetry before changing protocol shape again.
 
-When implementation starts, use this order:
+Recommended order:
 
-1. Add IR primitive tests in `domPageTranslateContext.test.js`.
-2. Implement only enough `dom_page_translate_context.js` exports to satisfy
-   those tests.
-3. Add BannerController coverage-completion tests.
-4. Integrate IR behind a narrow runtime guard.
-5. Run focused unit tests:
+1. Record cold/warm results for a long article, table-heavy docs page, forum/comments page, and
+   repeated-string SPA with the same provider/model/language pair.
+2. Measure first visible segment, 90% visible coverage, full completion, provider input/output
+   usage, marker coverage, source echo, and tag/code/URL preservation.
+3. Add wave-wide in-flight role/text ownership only after a failure handoff test exists.
+4. Replace full-buffer stream parsing with a cursor/tail parser behind equivalence tests for split
+   markers, provider stream restart, duplicate/out-of-order markers, and truncated tails.
+5. Run focused tests while iterating:
 
 ```sh
 npm test -- domPageTranslateContext
 npm test -- bannerController
 ```
 
-Run these from `packages/EdgeTranslate`.
+Run these from `packages/EdgeTranslate`, then finish with root `npm test`, `npm run bench:ai-page`,
+and `npm run build:all`.

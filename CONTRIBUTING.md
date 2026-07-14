@@ -1,45 +1,90 @@
-# Contributing to Edge Translate
+# Contributing to EdgeTranslate-v3
 
-:+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
+Thanks for helping improve EdgeTranslate-v3.
 
-## How to get started
+The source of truth for repository structure, runtime architecture, browser differences,
+testing, and safe-change checklists is the
+[Developer Guide](./docs/DEVELOPMENT_GUIDE.md).
 
-- Fork the repository and run `npm install`.
-- Read project document in [wiki](../../wiki/document)
-- Read [project](../../projects/2), select a target in 'next version todo'
-- Start a pull request to EdgeTranslate
+## Setup
 
-## develop build
+Use the repository root:
 
-develop build for chrome: `npm run dev:chrome`
+```bash
+npm ci
+npm test
+npm run build:chrome
+```
 
-develop build for firefox: `npm run dev:firefox`
+CI uses Node.js 22. Local development should use Node.js 22.13 or newer, or Node.js 24 or
+newer, to satisfy the current `pdfjs-dist` engine requirement. The repository does not
+currently pin an exact npm version.
 
-## production build
+## Development builds
 
-production build for chrome: `npm run build:chrome`
+The extension consumes the generated translators bundle. When editing both workspaces, run
+the translator watcher and the extension watcher in separate terminals:
 
-production build for firefox: `npm run build:firefox`
+```bash
+npm run dev -w @edge_translate/translators
+npm run dev:chrome -w edge_translate
+```
 
-## pack to .zip file
+Firefox and Safari:
 
-chrome: `npm run pack:chrome`
+```bash
+npm run dev:firefox -w edge_translate
+npm run dev:safari -w edge_translate
+```
 
-firefox: `npm run pack:firefox`
+## Production builds and packages
 
-## Testing
+```bash
+npm run build:chrome
+npm run build:firefox
+npm run build:safari
 
-`npm run test` to run test.
+npm run pack:chrome -w edge_translate
+npm run pack:firefox -w edge_translate
+npm run lint:firefox
+```
 
-## Branch strategy
+`build:safari` creates the web-extension output only. Before opening the Xcode project, sync it:
 
-`master`: only contain stable code of the project
+```bash
+npm run safari:sync -w edge_translate
+```
 
-`develop`: the only branch to develop. All of new commits should be pushed to this branch and then merged to `master` branch when they're stable.
+## Tests
 
-`fftf`: It maintains a version only for firefox browser without Google Analytics and webpage translation because of the security policy of firefox addon store.
+```bash
+# All workspaces
+npm test
 
-**Before pushing your local repository, please pull rebase first to avoid explicit branch merge on single branch.**
+# Focused Jest runs
+npm test -w edge_translate -- --runInBand
+npm test -w @edge_translate/translators -- --runInBand
+```
 
-We use [commitizen](https://www.npmjs.com/package/commitizen) to normalize our commit records. So before you commit your local change, install `commitizen` globally through the command `npm install commitizen -g`. Then, you can commit through the command `git commit`. **Hint**: your commit messages must meet the requirement of [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) or you are unable to commit successfully.
+Browser E2E tests require a built target and browser-compatible WebDriver:
 
+```bash
+npm run build:chrome
+npm run e2e:chrome -w edge_translate
+```
+
+See the Developer Guide before changing page translation, persistent cache keys, manifests,
+PDF routing, or provider prompts. Those areas have cross-context and cross-browser contracts
+that are not visible from a single file.
+
+## Pull requests
+
+-   Keep each change focused and rollbackable.
+-   Add or update tests for behavior changes.
+-   Report exactly which browser targets and live journeys were verified.
+-   Do not claim browser E2E coverage when only unit tests ran.
+-   Keep package, manifest, lockfile, and Safari version metadata aligned for releases.
+-   Use Conventional Commit style; a Husky `commit-msg` hook is configured to run `commitlint`.
+
+The active integration branch is `main`. Older documentation that refers to `master`,
+`develop`, or `fftf` describes the original project and is not the current branch policy.

@@ -33,6 +33,15 @@
         "lint:firefox": "npm run pack:firefox && npx --yes web-ext@8.9.0 lint -s packages/EdgeTranslate/build/firefox --ignore-files web/viewer.mjs",
         "local:translate-proxy": "node tools/local-llm-translate-proxy.mjs",
         "bench:ai-page": "node tools/ai-page-translation-benchmark.mjs",
+        "bench:ai-page:v2": "node tools/ai-page-translation-v2-benchmark/cli.mjs",
+        "bench:ai-page:v2:live": "node tools/ai-page-translation-v2-benchmark/live-page.mjs",
+        "gate:ai-page:vnext:offline": "node tools/vnext-gates/run-gate-a.cjs",
+        "smoke:ai-page:v2:chrome": "npm run smoke:ai-page:stable:chrome",
+        "smoke:ai-page:default:chrome": "node tools/ai-page-translation-v2-browser-smoke.mjs --pipeline=default --expect-pipeline=vnext",
+        "smoke:ai-page:stable:chrome": "node tools/ai-page-translation-v2-browser-smoke.mjs --pipeline=stable --expect-pipeline=vnext",
+        "smoke:ai-page:vnext:chrome": "node tools/ai-page-translation-v2-browser-smoke.mjs --pipeline=vnext --expect-pipeline=vnext",
+        "smoke:ai-page:vnext:wikipedia": "node tools/ai-page-translation-v2-browser-smoke.mjs --pipeline=vnext --expect-pipeline=vnext --stub-provider=openai --fixture-url=https://ja.wikipedia.org/wiki/%E4%BA%AC%E9%98%AA%E6%9C%AC%E7%B7%9A --sl=ja --tl=ko --max-requests=260 --timeout-ms=180000",
+        "smoke:ai-page:vnext:wikipedia:gemini": "node tools/ai-page-translation-v2-browser-smoke.mjs --pipeline=vnext --expect-pipeline=vnext --stub-provider=gemini --fixture-url=https://ja.wikipedia.org/wiki/%E4%BA%AC%E9%98%AA%E6%9C%AC%E7%B7%9A --sl=ja --tl=ko --max-requests=260 --timeout-ms=180000",
         "bench:translation": "node tools/translation-quality-benchmark.mjs",
         "smoke:chrome-translation": "node tools/chrome-extension-translation-smoke.mjs"
     },
@@ -49,7 +58,8 @@
         "jest": "^27.5.1",
         "jest-environment-jsdom": "^27.5.1",
         "prettier": "^2.6.0",
-        "turbo": "^1.2.16"
+        "turbo": "^1.2.16",
+        "ws": "^8.21.0"
     },
     "workspaces": [
         "packages/*"

@@ -8,6 +8,137 @@ jest.mock("common/scripts/chrome_builtin_translate.js", () => ({
 
 import { translateWithChromeOnDevice } from "common/scripts/chrome_builtin_translate.js";
 
+describe("TranslatorManager AI page provider profiles", () => {
+    test("can point the real OpenAI Responses adapter at a hidden loopback test endpoint", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 3;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "openai",
+            openaiApiKey: "test-only-key",
+            openaiModel: "gpt-test",
+            aiPageV2OpenAIBaseUrl: "http://127.0.0.1:4321/v1///",
+        };
+
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            protocol: "openai-responses",
+            modelId: "gpt-test",
+            apiKey: "local-stub-key",
+            baseUrl: "http://127.0.0.1:4321/v1",
+            revision: "config-3",
+        });
+    });
+
+    test("can point the real Gemini adapter at a hidden loopback test endpoint", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 4;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "googleAiStudio",
+            apiKey: "test-only-key",
+            model: "gemini-test",
+            aiPageV2GeminiBaseUrl: "https://localhost:4321/v1beta/",
+        };
+
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            protocol: "gemini-generate-content",
+            modelId: "gemini-test",
+            apiKey: "local-stub-key",
+            baseUrl: "https://localhost:4321/v1beta",
+            revision: "config-4",
+        });
+    });
+
+    test("accepts the bracketed IPv6 loopback endpoint", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 5;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "openai",
+            openaiApiKey: "test-only-key",
+            openaiModel: "gpt-test",
+            aiPageV2OpenAIBaseUrl: "http://[::1]:4321/v1/",
+        };
+
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            apiKey: "local-stub-key",
+            baseUrl: "http://[::1]:4321/v1",
+        });
+    });
+
+    test("ignores non-loopback endpoint overrides and preserves the real provider key", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 6;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "openai",
+            openaiApiKey: "real-provider-key",
+            openaiModel: "gpt-test",
+            aiPageV2OpenAIBaseUrl: "https://example.invalid/v1",
+        };
+
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            protocol: "openai-responses",
+            apiKey: "real-provider-key",
+            baseUrl: "",
+        });
+    });
+
+    test("rejects non-HTTP and credential-bearing loopback endpoint overrides", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 7;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "googleAiStudio",
+            apiKey: "real-provider-key",
+            model: "gemini-test",
+            aiPageV2GeminiBaseUrl: "http://user:password@localhost:4321/v1beta",
+        };
+
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            protocol: "gemini-generate-content",
+            apiKey: "real-provider-key",
+            baseUrl: "",
+        });
+    });
+
+    test("leaves an unconfigured OpenAI effort to the adapter's model-family minimum", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 7;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "openai",
+            openaiApiKey: "provider-key",
+            openaiModel: "gpt-5.4-mini",
+        };
+
+        const profile = manager.getAiPageV2ProviderProfile();
+        expect(profile.reasoningControl).toBeUndefined();
+        expect(profile.reasoningValue).toBeUndefined();
+
+        manager.LOCAL_TRANSLATOR_CONFIG.openaiReasoningEffort = "low";
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            reasoningControl: "effort",
+            reasoningValue: "low",
+        });
+    });
+
+    test("treats the historical Gemini zero as a family-aware minimum, not a universal override", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager._aiPageV2ProfileRevision = 8;
+        manager.LOCAL_TRANSLATOR_CONFIG = {
+            mode: "googleAiStudio",
+            apiKey: "provider-key",
+            model: "gemini-3-flash-preview",
+            aiPageV2ThinkingValue: 0,
+        };
+
+        const profile = manager.getAiPageV2ProviderProfile();
+        expect(profile.reasoningControl).toBeUndefined();
+        expect(profile.reasoningValue).toBeUndefined();
+
+        manager.LOCAL_TRANSLATOR_CONFIG.aiPageV2ThinkingValue = "minimal";
+        expect(manager.getAiPageV2ProviderProfile()).toMatchObject({
+            reasoningControl: "thinking-config",
+            reasoningValue: "minimal",
+        });
+    });
+});
+
 describe("TranslatorManager fast tab resolution", () => {
     test("uses sender.tab.id without querying the active tab", async () => {
         const manager = Object.create(TranslatorManager.prototype);
@@ -315,6 +446,91 @@ describe("TranslatorManager on-device bridge injection", () => {
 });
 
 describe("TranslatorManager quiet AI translation routing", () => {
+    test("preserves retry and partial-usage metadata in quiet translation failures", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        const result = manager.createQuietTranslationFailure(
+            {
+                errorCode: "OPENAI_API_ERROR",
+                errorMsg: "temporarily unavailable",
+                httpStatus: 503,
+                retryable: true,
+                providerRetryExhausted: true,
+                tokenUsage: {
+                    inputTokens: 240,
+                    outputTokens: 18,
+                    totalTokens: 258,
+                    estimated: true,
+                },
+                partialOutput: "[[1]]\n번역.\n[[2]]\n미완성",
+            },
+            "[[1]]\nSource"
+        );
+
+        expect(result).toMatchObject({
+            translationFailed: true,
+            errorCode: "OPENAI_API_ERROR",
+            errorMsg: "temporarily unavailable",
+            httpStatus: 503,
+            retryable: true,
+            providerRetryExhausted: true,
+            tokenUsage: { estimated: true, totalTokens: 258 },
+            partialTranslation: "[[1]]\n번역.\n[[2]]\n미완성",
+        });
+    });
+
+    test("does not store historical token usage in the translation cache", () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        manager.cacheOptions = { maxKeyTextLength: 200, translateTtlMs: 1000 };
+        manager.HYBRID_TRANSLATOR_CONFIG = { selections: {} };
+        manager.translationCache = { set: jest.fn() };
+        const result = {
+            originalText: "Hello",
+            mainMeaning: "안녕하세요",
+            tokenUsage: { inputTokens: 30, outputTokens: 5, totalTokens: 35 },
+        };
+
+        manager.rememberTranslation("Hello", "en", "ko", "LocalTranslate", result, "page");
+
+        const cached = manager.translationCache.set.mock.calls[0][1];
+        expect(cached).toMatchObject({ originalText: "Hello", mainMeaning: "안녕하세요" });
+        expect(cached.tokenUsage).toBeUndefined();
+        expect(result.tokenUsage).toEqual({ inputTokens: 30, outputTokens: 5, totalTokens: 35 });
+    });
+
+    test("strips token usage from in-flight success and failure joiners without mutating the owner", async () => {
+        const manager = Object.create(TranslatorManager.prototype);
+        const ownerResult = {
+            originalText: "Hello",
+            mainMeaning: "안녕하세요",
+            tokenUsage: { inputTokens: 30, outputTokens: 5, totalTokens: 35 },
+        };
+        const joinedResult = await manager.joinInflightTranslationWithoutUsage(
+            Promise.resolve(ownerResult)
+        );
+
+        expect(joinedResult).not.toBe(ownerResult);
+        expect(joinedResult.tokenUsage).toBeUndefined();
+        expect(ownerResult.tokenUsage.totalTokens).toBe(35);
+
+        const ownerFailure = Object.assign(new Error("invalid API key"), {
+            errorCode: "OPENAI_API_ERROR",
+            httpStatus: 401,
+            tokenUsage: { inputTokens: 30, totalTokens: 30, estimated: true },
+        });
+        const joinedFailure = await manager
+            .joinInflightTranslationWithoutUsage(Promise.reject(ownerFailure))
+            .catch((error) => error);
+
+        expect(joinedFailure).not.toBe(ownerFailure);
+        expect(joinedFailure).toMatchObject({
+            message: "invalid API key",
+            errorCode: "OPENAI_API_ERROR",
+            httpStatus: 401,
+        });
+        expect(joinedFailure.tokenUsage).toBeUndefined();
+        expect(ownerFailure.tokenUsage.totalTokens).toBe(30);
+    });
+
     test("passes page translation options through the LocalTranslate proxy", async () => {
         const manager = Object.create(TranslatorManager.prototype);
         const localTranslator = {

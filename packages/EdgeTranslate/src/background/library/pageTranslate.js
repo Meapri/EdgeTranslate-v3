@@ -91,20 +91,23 @@ function executeGoogleScript(channel) {
             typeof chrome !== "undefined" && chrome.scripting && chrome.scripting.executeScript;
 
         if (!canExecuteScript) {
+            channel.emitToTabs(tabId, "start_page_translate", {
+                translator: "google",
+            });
             channel.emitToTabs(tabId, "inject_page_translate", {});
             return;
         }
 
+        // Transfer ownership away from an active AI DOM session before Google injects its own
+        // page observer. The inverse transition performs the same handoff in BannerController.
+        channel.emitToTabs(tabId, "start_page_translate", {
+            translator: "google",
+        });
         chrome.scripting
             .executeScript({
                 target: { tabId, allFrames: false },
                 files: ["google/init.js"],
                 injectImmediately: true,
-            })
-            .then(() => {
-                channel.emitToTabs(tabId, "start_page_translate", {
-                    translator: "google",
-                });
             })
             .catch((error) => {
                 logWarn(`Chrome scripting error: ${error}`);

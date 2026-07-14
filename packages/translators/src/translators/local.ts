@@ -133,7 +133,7 @@ const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_COMPATIBLE_MODEL = "gpt-oss-20b";
 // Bump whenever the prompts below or the user-message layout changes so cached translations
 // from older prompts are invalidated and rebuilt with the new shape.
-const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-06-10-lean-v4";
+const LOCAL_TRANSLATOR_PROMPT_VERSION = "local-prompt-2026-07-12-page-v6-semantic";
 const GOOGLE_AI_STUDIO_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 // Speed-first: lift the in-process limiter to 32 to match the page-translate dispatch's
@@ -142,9 +142,9 @@ const OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/complet
 // bottleneck.
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 32;
 
-// Static system prompts. We deliberately keep these byte-identical across every request so
-// that prefix-aware KV caches on llama.cpp (`cache_prompt: true`), OpenAI/Anthropic prompt
-// caching, and Gemini context caches can amortize the prefill on every subsequent call.
+// Static system prompts. Keep these byte-identical across requests so runtimes/providers
+// that support matching-prefix reuse can amortize prefill when their own eligibility rules
+// are met; do not assume every provider caches a short prompt.
 // Per-request directives (source/target language, dictionary mode) all live in the user
 // message header — see buildUserMessage. Quality directives that apply uniformly (script
 // rules, proper-noun handling, formatting preservation) live HERE so the cache absorbs them.
@@ -171,7 +171,7 @@ const PAGE_HTML_TRANSLATION_SYSTEM_PROMPT =
 // (Token count is mirrored by AI_PAGE_PER_REQUEST_OVERHEAD_TOK in banner_controller.js — keep
 // the two in sync; the batch-size floor is derived from it.)
 const PAGE_SEGMENTED_TRANSLATION_SYSTEM_PROMPT =
-    "Translate each [[n]] segment into natural, fluent target-language text. Output every [[n]] marker exactly once, in order, on its own line, with the translation right after it — nothing else. Keep inline tags (<a>,<b>,<i>,<code>…), numbers and URLs intact, with the target language's natural spacing around tags. Never mix scripts or leave source-script characters; render Han-script (kanji/Chinese) terms as complete target-language words. If a segment is already fully in the target language, output its marker then = only; never use = for source-script text.";
+    "Translate each [[n]] webpage segment naturally to the target language, using neighbors and role suffixes like :title for context. Return every marker unchanged, once, in order, followed only by its translation. Preserve :row/:list JSON arrays and their length. Preserve inline tags, code, URLs, numbers and established names. Fully translate other prose; no mixed-script words or partial Han terms. For already-target text, return =; otherwise never use =.";
 
 const REALTIME_CAPTION_SYSTEM_PROMPT =
     "You are a subtitle translator. Return only translated subtitles.";
@@ -248,14 +248,40 @@ async function retryWithBackoff<T>(
     baseDelayMs = 500
 ): Promise<T> {
     let lastError: unknown;
+    let accumulatedUsage: TranslationTokenUsage | undefined;
+    let bestPartialOutput = "";
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-            return await fn();
+            const result: any = await fn();
+            if (accumulatedUsage && result && typeof result === "object") {
+                result.tokenUsage = mergeTokenUsage(accumulatedUsage, result.tokenUsage);
+            }
+            return result as T;
         } catch (error: any) {
             lastError = error;
+            accumulatedUsage = mergeTokenUsage(accumulatedUsage, error?.tokenUsage);
+            if (String(error?.partialOutput || "").length > bestPartialOutput.length) {
+                bestPartialOutput = String(error.partialOutput);
+            }
             const msg = error?.errorMsg || error?.message || "";
-            const isRetryable = /429|500|502|503|rate/i.test(msg);
-            if (!isRetryable || attempt === maxRetries) throw error;
+            const status = Number(error?.httpStatus ?? error?.status);
+            const isRetryable =
+                error?.providerRetryExhausted === true || error?.retryable === false
+                    ? false
+                    : error?.retryable === true ||
+                      status === 429 ||
+                      (status >= 500 && status <= 599) ||
+                      /\b(?:429|500|502|503)\b|rate.?limit|too many requests/i.test(msg);
+            if (!isRetryable || attempt === maxRetries) {
+                if (isRetryable && error && typeof error === "object") {
+                    error.providerRetryExhausted = true;
+                }
+                if (error && typeof error === "object") {
+                    if (accumulatedUsage) error.tokenUsage = accumulatedUsage;
+                    if (bestPartialOutput) error.partialOutput = bestPartialOutput;
+                }
+                throw error;
+            }
             // Exponential backoff with full jitter so concurrent retries don't dogpile a
             // rate-limited endpoint at the exact same instant.
             const ceiling = baseDelayMs * Math.pow(2, attempt);
@@ -264,6 +290,20 @@ async function retryWithBackoff<T>(
         }
     }
     throw lastError;
+}
+
+function isRetryableTransportError(error: any) {
+    const status = Number(error?.status ?? error?.httpStatus);
+    const message = String(error?.message || error?.errorMsg || "");
+    return (
+        error?.name === "AbortError" ||
+        error?.name === "TypeError" ||
+        status === 429 ||
+        (status >= 500 && status <= 599) ||
+        /failed to fetch|fetch failed|network error|network request failed|connection (?:closed|reset|lost)|socket|econnreset|econnrefused|stream (?:closed|dropped|failed)/i.test(
+            message
+        )
+    );
 }
 
 function normalizeMode(mode?: string): LocalTranslatorMode {
@@ -289,12 +329,18 @@ function addNumbers(...values: Array<number | undefined>) {
 
 function cleanTokenUsage(usage: TranslationTokenUsage): TranslationTokenUsage | undefined {
     const cleaned: TranslationTokenUsage = {};
-    for (const [key, value] of Object.entries(usage) as Array<
-        [keyof TranslationTokenUsage, number | undefined]
-    >) {
+    for (const key of [
+        "inputTokens",
+        "outputTokens",
+        "reasoningTokens",
+        "cachedInputTokens",
+        "totalTokens",
+    ] as const) {
+        const value = usage[key];
         const numeric = Number(value || 0);
         if (Number.isFinite(numeric) && numeric > 0) cleaned[key] = numeric;
     }
+    if (usage.estimated === true) cleaned.estimated = true;
     return Object.keys(cleaned).length ? cleaned : undefined;
 }
 
@@ -308,7 +354,28 @@ function mergeTokenUsage(
         reasoningTokens: addNumbers(a?.reasoningTokens, b?.reasoningTokens),
         cachedInputTokens: addNumbers(a?.cachedInputTokens, b?.cachedInputTokens),
         totalTokens: addNumbers(a?.totalTokens, b?.totalTokens),
+        estimated: a?.estimated === true || b?.estimated === true,
     });
+}
+
+// Provider token usage is a one-owner cost event. Cache hits and concurrent in-flight joiners
+// reuse the linguistic result/error but must not replay the owner's usage into a second caller's
+// meter. Clone failures too: mutating the shared rejection object would erase the owner's usage.
+function cloneWithoutTokenUsage<T>(value: T): T {
+    if (!value || typeof value !== "object") return value;
+    if (value instanceof Error) {
+        const cloned = Object.assign(new Error(value.message), value) as Error & {
+            tokenUsage?: TranslationTokenUsage;
+        };
+        cloned.name = value.name;
+        cloned.stack = value.stack;
+        cloned.tokenUsage = undefined;
+        return cloned as unknown as T;
+    }
+    return {
+        ...(value as Record<string, unknown>),
+        tokenUsage: undefined,
+    } as unknown as T;
 }
 
 function extractGoogleAiStudioTokenUsage(payload: any): TranslationTokenUsage | undefined {
@@ -333,6 +400,113 @@ function extractOpenAiTokenUsage(payload: any): TranslationTokenUsage | undefine
         cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
         totalTokens: usage.total_tokens,
     });
+}
+
+function finalizeAttemptTokenUsage(
+    actual: TranslationTokenUsage | undefined,
+    {
+        systemText = "",
+        userText = "",
+        rawOutput = "",
+        isPage = false,
+    }: {
+        systemText?: string;
+        userText?: string;
+        rawOutput?: string;
+        isPage?: boolean;
+    }
+): TranslationTokenUsage | undefined {
+    const exact = cleanTokenUsage(actual || {}) || {};
+    let estimated = exact.estimated === true;
+    let inputTokens = Number(exact.inputTokens || 0);
+    let outputTokens = Number(exact.outputTokens || 0);
+
+    if (!(inputTokens > 0)) {
+        inputTokens = estimateTextTokens(systemText) + estimateTextTokens(userText) + 16;
+        if (inputTokens > 0) estimated = true;
+    }
+    if (!(outputTokens > 0) && rawOutput) {
+        outputTokens = isPage
+            ? estimateTextTokens(stripPagePromptStructure(rawOutput)) +
+              estimatePageStructuralTokens(rawOutput)
+            : estimateTextTokens(rawOutput);
+        if (outputTokens > 0) estimated = true;
+    }
+
+    const totalTokens =
+        Number(exact.totalTokens || 0) > 0
+            ? Number(exact.totalTokens)
+            : addNumbers(inputTokens, outputTokens);
+    return cleanTokenUsage({
+        inputTokens,
+        outputTokens,
+        reasoningTokens: exact.reasoningTokens,
+        cachedInputTokens: exact.cachedInputTokens,
+        totalTokens,
+        estimated,
+    });
+}
+
+function attachAttemptUsageToError(
+    error: any,
+    context: Parameters<typeof finalizeAttemptTokenUsage>[1]
+) {
+    if (!error || typeof error !== "object") return error;
+    error.tokenUsage = finalizeAttemptTokenUsage(error.tokenUsage, context);
+    if (context.rawOutput) error.partialOutput = context.rawOutput;
+    return error;
+}
+
+function createPageOutputIncompleteError(
+    message: string,
+    tokenUsage: TranslationTokenUsage | undefined,
+    partialOutput: string
+) {
+    const error: any = new Error(message);
+    error.errorCode = "PAGE_OUTPUT_INCOMPLETE";
+    error.retryable = false;
+    error.tokenUsage = tokenUsage;
+    error.partialOutput = partialOutput;
+    return error;
+}
+
+function isSuccessfulPageFinishReason(reason: string) {
+    return /^(?:stop|eos|eos_token|end_turn)$/i.test(String(reason || ""));
+}
+
+function isTruncatedPageFinishReason(reason: string) {
+    return /^(?:length|max_tokens)$/i.test(String(reason || ""));
+}
+
+function createPageTerminalError(
+    provider: string,
+    reason: string,
+    tokenUsage: TranslationTokenUsage | undefined,
+    partialOutput: string
+) {
+    const error: any = new Error(`${provider} stopped page translation with ${reason}.`);
+    error.errorCode = "PAGE_OUTPUT_BLOCKED";
+    error.retryable = false;
+    error.tokenUsage = tokenUsage;
+    error.partialOutput = partialOutput;
+    return error;
+}
+
+function stopAfterPageRecoveryFailure(
+    error: any,
+    accumulatedUsage: TranslationTokenUsage | undefined
+) {
+    const failure =
+        error && typeof error === "object"
+            ? error
+            : new Error(String(error || "Page recovery failed."));
+    const wasRetryableTransport = isRetryableTransportError(failure);
+    failure.tokenUsage = mergeTokenUsage(accumulatedUsage, failure.tokenUsage);
+    // The zero-prefix recovery call was already the one bounded exception. Never let the
+    // outer provider backoff replay the whole page a third time.
+    failure.retryable = false;
+    if (wasRetryableTransport) failure.providerRetryExhausted = true;
+    return failure;
 }
 
 function toLanguageName(language: string) {
@@ -375,7 +549,7 @@ function isDictionaryCandidate(text: string) {
     if (!trimmed || trimmed.length > 64) return false;
     if (/https?:\/\//i.test(trimmed)) return false;
     if (
-        /\[\[\d+:[a-z][a-z0-9-]*]]/.test(trimmed) ||
+        /\[\[\d+(?::[a-z][a-z0-9-]*)?]]/.test(trimmed) ||
         /<<<EDGE_TRANSLATE_SEGMENT_\d+(?:\s+role=[a-z-]+)?>>>/.test(trimmed)
     ) {
         return false;
@@ -389,6 +563,21 @@ function isDictionaryCandidate(text: string) {
     if (cjkChars && cjkChars.length > 4) return false;
 
     return trimmed.split(/\s+/).length <= 2;
+}
+
+function isDictionaryTranslationRequest(text: string, options: LocalTranslationOptions = {}) {
+    // Page payloads win over the short-term dictionary heuristic. In particular,
+    // compact `[[1]]\nHome` used to be treated as a dictionary lookup because the
+    // old exclusion recognized only role-suffixed markers (`[[1:p]]`). That forced
+    // JSON mode and disabled streaming on the first visible page segment.
+    if (isPageTranslationRequest(text, options)) {
+        return false;
+    }
+    return isDictionaryCandidate(text);
+}
+
+function isPageTranslationRequest(text: string, options: LocalTranslationOptions = {}) {
+    return options.translationProfile === "page" || hasPageTranslationSegments(text);
 }
 
 function stripCodeFence(text: string) {
@@ -473,6 +662,36 @@ function parsePlainTranslationOutput(output: string) {
             "examples",
         ]) || cleaned.trim()
     );
+}
+
+// Page replies may legitimately translate documentation containing a JSON example
+// such as {"translation":"foo"}. The generic selection/dictionary parser extracts
+// that field and would collapse an entire marker batch to "foo". Page mode only
+// removes transport wrappers/reasoning/prompt echo; marker parsing remains owned by
+// the page controller.
+function parsePageTranslationOutput(output: string, dropIncompleteTail = false) {
+    let cleaned = stripCodeFence(output);
+    // Thinking-capable compatible servers may leak a leading reasoning block that itself
+    // mentions our marker protocol. Remove only complete blocks anchored before the reply;
+    // never touch a <think> code example after the first real marker.
+    cleaned = cleaned.replace(/^(?:\s*<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>\s*)+/i, "");
+    // The stream may still be inside reasoning. Until its closing tag arrives there is no
+    // trustworthy page payload to parse; markers inside the thought text are not segments.
+    if (/^\s*<think(?:ing)?>/i.test(cleaned)) return "";
+    const firstMarker = cleaned.search(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/i);
+    // A page reply must begin at its first marker. Dropping a leading reasoning/
+    // commentary preamble this way does not mistake a translated <think> code example
+    // inside a segment for model reasoning. Once markers begin, every following line
+    // is user-visible payload: a valid English translation may itself start with
+    // "Translate", "Source language", or another phrase recognized as prompt echo.
+    cleaned =
+        firstMarker >= 0
+            ? cleaned.slice(firstMarker).trim()
+            : stripPromptEcho(stripReasoningArtifacts(cleaned));
+    if (!dropIncompleteTail || !cleaned) return cleaned;
+    const markers = Array.from(cleaned.matchAll(/\[\[\d+(?::[a-z][a-z0-9-]*)?]]/gi));
+    if (markers.length <= 1) return "";
+    return cleaned.slice(0, markers[markers.length - 1].index).trim();
 }
 
 function getKoreanMixedScriptFragments(text: string) {
@@ -941,12 +1160,24 @@ class LocalTranslator {
         if (cached) return cached;
 
         const existing = this.inflight.get(key);
-        if (existing) return existing;
+        if (existing) {
+            // One provider request has one cost event. Joiners receive the translation but
+            // not a duplicate copy of that request's usage accounting — including rejection
+            // metadata, which otherwise made two callers charge one failed fetch twice.
+            return existing.then(
+                (result) => cloneWithoutTokenUsage(result),
+                (error) => {
+                    throw cloneWithoutTokenUsage(error);
+                }
+            );
+        }
 
         const request = localRequestLimiter
             .run(() => this.requestTranslation(text, from, to, options))
             .then((result) => {
-                this.cache.set(key, result);
+                // Token usage is a cost event for this provider call, not part of the
+                // reusable translation. A cache hit must never replay historical spend.
+                this.cache.set(key, { ...result, tokenUsage: undefined });
                 return result;
             })
             .finally(() => this.inflight.delete(key));
@@ -990,9 +1221,14 @@ class LocalTranslator {
         if (this.mode === "chromeBuiltin") {
             return this.requestChromeBuiltinTranslation(text, from, to);
         }
-        // Captions fail fast — a retry (with backoff) only ever lands a stale line and
-        // re-spends tokens; the next caption or the Google fast fallback covers the gap.
-        const retries = this.isRealtimeCaptionTranslation(options) ? 0 : 2;
+        // Captions fail immediately. Page requests also make exactly ONE provider call:
+        // the page controller owns transport recovery because it can first salvage completed
+        // streamed markers and then resend only the unresolved tail after a shared cooldown.
+        // Retrying here would blindly replay the whole batch before the controller can salvage
+        // it, multiplying both token spend and a 429 burst. Selection/dictionary keeps the
+        // generic provider retry limit because it has no page-level recovery pipeline.
+        const isPageTranslation = isPageTranslationRequest(text, options);
+        const retries = this.isRealtimeCaptionTranslation(options) || isPageTranslation ? 0 : 2;
         if (this.mode === "googleAiStudio") {
             return retryWithBackoff(
                 () => this.requestGoogleAiStudioTranslation(text, from, to, options),
@@ -1178,13 +1414,8 @@ class LocalTranslator {
         // Either way we want the same lean directive header — the system prompt carries the
         // HTML preservation rules and the structural guarantees.
         if (options.translationProfile === "page" || hasPageTranslationSegments(text)) {
-            const hasMarkers = hasPageTranslationSegments(text);
-            const header = [
-                sourceLanguage && targetLanguage ? `${sourceLanguage}>${targetLanguage}` : "",
-                hasMarkers ? "Keep markers." : "",
-            ]
-                .filter(Boolean)
-                .join("\n");
+            const header =
+                sourceLanguage && targetLanguage ? `${sourceLanguage}>${targetLanguage}` : "";
             return header ? `${header}\n${text}` : text;
         }
 
@@ -1201,7 +1432,7 @@ class LocalTranslator {
             langLine,
             "Preserve proper nouns and official names. Use the target language's writing system.",
         ];
-        const isDictionary = isDictionaryCandidate(text);
+        const isDictionary = isDictionaryTranslationRequest(text, options);
         if (isDictionary) {
             headerLines.push(
                 'Dictionary entry. Return only one valid JSON object: {"translation":"...","detailedMeanings":[{"pos":"","meaning":"","synonyms":[]}],"definitions":[{"pos":"","meaning":"","example":"","synonyms":[]}],"examples":[{"source":"","target":""}]}.',
@@ -1243,8 +1474,8 @@ class LocalTranslator {
     ) {
         if (this.isRealtimeCaptionTranslation(options)) return REALTIME_CAPTION_SYSTEM_PROMPT;
         // Page-mode dispatch wins regardless of whether the payload uses [[n:r]] markers.
-        // The section-level path sends raw HTML with no markers and still needs the page
-        // prompt's HTML preservation rules.
+        // A legacy section-level caller can still send validated HTML without markers and
+        // therefore needs the compatibility prompt's HTML preservation rules.
         if (options.translationProfile === "page" || hasPageTranslationSegments(text)) {
             if (hasPageTranslationSegments(text)) {
                 return PAGE_SEGMENTED_TRANSLATION_SYSTEM_PROMPT;
@@ -1265,8 +1496,9 @@ class LocalTranslator {
         return (payload?.text || payload?.output || "").trim();
     }
 
-    private parseOpenAiResponse(payload: any) {
-        return stripReasoningArtifacts(extractOpenAIResponseText(payload));
+    private parseOpenAiResponse(payload: any, preservePageMarkup = false) {
+        const output = extractOpenAIResponseText(payload);
+        return preservePageMarkup ? output : stripReasoningArtifacts(output);
     }
 
     private getGoogleAiStudioCompatibilityModes(options: LocalTranslationOptions = {}) {
@@ -1458,32 +1690,49 @@ class LocalTranslator {
         to: string,
         options: LocalTranslationOptions = {}
     ) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        let controller = new AbortController();
+        let timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        const resetRequestDeadline = () => {
+            clearTimeout(timeoutId);
+            controller = new AbortController();
+            timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        };
+        const isPageTranslation = isPageTranslationRequest(text, options);
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
             const model = encodeURIComponent(this.model);
-            const isDictionary = !isRealtimeCaption && isDictionaryCandidate(text);
+            const isDictionary =
+                !isRealtimeCaption && isDictionaryTranslationRequest(text, options);
             // Dictionary lookups return structured JSON — streaming would flash raw JSON
             // fragments in the panel preview, so they run non-streaming (OpenAI parity).
             const useStreaming = typeof options.onProgress === "function" && !isDictionary;
-            const requestPayload = async (compatibilityMode: "minimal" | "bare") => {
+            const systemText = this.getTranslationSystemPrompt(text, from, to, options);
+            const userText = this.buildGoogleAiStudioPrompt(text, from, to, options);
+            const requestPayload = async (
+                compatibilityMode: "minimal" | "bare",
+                outputScale = 1
+            ) => {
                 const generationConfig = this.buildGoogleAiStudioGenerationConfig(
                     text.length,
                     compatibilityMode,
                     options,
                     isDictionary
                 );
+                if (generationConfig?.maxOutputTokens && outputScale > 1) {
+                    generationConfig.maxOutputTokens = Math.ceil(
+                        generationConfig.maxOutputTokens * outputScale
+                    );
+                }
                 const body: Record<string, any> = {
                     systemInstruction: {
-                        parts: [{ text: this.getTranslationSystemPrompt(text, from, to, options) }],
+                        parts: [{ text: systemText }],
                     },
                     contents: [
                         {
                             role: "user",
                             parts: [
                                 {
-                                    text: this.buildGoogleAiStudioPrompt(text, from, to, options),
+                                    text: userText,
                                 },
                             ],
                         },
@@ -1497,15 +1746,24 @@ class LocalTranslator {
                     : `${GOOGLE_AI_STUDIO_ENDPOINT_BASE}/${model}:generateContent?key=${encodeURIComponent(
                           this.apiKey
                       )}`;
-                const response = await fetch(endpoint, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        ...(useStreaming ? { Accept: "text/event-stream" } : {}),
-                    },
-                    body: JSON.stringify(body),
-                    signal: controller.signal,
-                });
+                let response: Response;
+                try {
+                    response = await fetch(endpoint, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            ...(useStreaming ? { Accept: "text/event-stream" } : {}),
+                        },
+                        body: JSON.stringify(body),
+                        signal: controller.signal,
+                    });
+                } catch (error) {
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        isPage: isPageTranslation,
+                    });
+                }
                 if (!useStreaming) {
                     const payload = await response.json().catch(() => ({}));
                     if (!response.ok) {
@@ -1514,7 +1772,12 @@ class LocalTranslator {
                                 `Google AI Studio request failed with ${response.status}`
                         );
                         error.status = response.status;
-                        throw error;
+                        throw attachAttemptUsageToError(error, {
+                            systemText,
+                            userText,
+                            rawOutput: this.parseGoogleAiStudioResponse(payload),
+                            isPage: isPageTranslation,
+                        });
                     }
                     return payload;
                 }
@@ -1525,40 +1788,60 @@ class LocalTranslator {
                             `Google AI Studio request failed with ${response.status}`
                     );
                     error.status = response.status;
-                    throw error;
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        rawOutput: this.parseGoogleAiStudioResponse(payload),
+                        isPage: isPageTranslation,
+                    });
                 }
                 // Streaming SSE: each event is a partial candidate; assemble incrementally.
                 let accumulated = "";
                 let finishReason = "";
                 let usageMetadata: any = null;
                 let lastCandidate: any = null;
-                await consumeSseStream(response, (data) => {
-                    try {
-                        const json = JSON.parse(data);
-                        const candidate = json.candidates?.[0];
-                        if (candidate) {
-                            lastCandidate = candidate;
-                            const parts = candidate.content?.parts;
-                            if (Array.isArray(parts)) {
-                                for (const part of parts) {
-                                    if (typeof part?.text === "string" && part.text) {
-                                        accumulated += part.text;
+                try {
+                    await consumeSseStream(response, (data) => {
+                        try {
+                            const json = JSON.parse(data);
+                            const candidate = json.candidates?.[0];
+                            if (candidate) {
+                                lastCandidate = candidate;
+                                const parts = candidate.content?.parts;
+                                if (Array.isArray(parts)) {
+                                    for (const part of parts) {
+                                        if (typeof part?.text === "string" && part.text) {
+                                            accumulated += part.text;
+                                        }
+                                    }
+                                    try {
+                                        options.onProgress?.(accumulated);
+                                    } catch {
+                                        /* noop */
                                     }
                                 }
-                                try {
-                                    options.onProgress?.(accumulated);
-                                } catch {
-                                    /* noop */
-                                }
+                                if (candidate.finishReason)
+                                    finishReason = String(candidate.finishReason);
                             }
-                            if (candidate.finishReason)
-                                finishReason = String(candidate.finishReason);
+                            if (json.usageMetadata) usageMetadata = json.usageMetadata;
+                        } catch {
+                            /* skip malformed event */
                         }
-                        if (json.usageMetadata) usageMetadata = json.usageMetadata;
-                    } catch {
-                        /* skip malformed event */
+                    });
+                } catch (error) {
+                    const actual = usageMetadata
+                        ? extractGoogleAiStudioTokenUsage({ usageMetadata })
+                        : undefined;
+                    if (actual && error && typeof error === "object") {
+                        (error as any).tokenUsage = actual;
                     }
-                });
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        rawOutput: accumulated,
+                        isPage: isPageTranslation,
+                    });
+                }
                 // Synthesize a payload object shaped like the non-streaming response so the
                 // downstream parsing code (parseGoogleAiStudioResponse, etc.) works unchanged.
                 const synthesizedCandidate = {
@@ -1573,33 +1856,67 @@ class LocalTranslator {
             };
             let payload: any;
             let tokenUsage: TranslationTokenUsage | undefined;
+            let successfulCompatibilityMode: "minimal" | "bare" | null = null;
             const compatibilityModes = this.getGoogleAiStudioCompatibilityModes(options);
             for (let index = 0; index < compatibilityModes.length; index += 1) {
                 const mode = compatibilityModes[index];
                 const isLastMode = index === compatibilityModes.length - 1;
                 try {
                     payload = await requestPayload(mode);
+                    const rawAttemptOutput = this.parseGoogleAiStudioResponse(payload);
                     tokenUsage = mergeTokenUsage(
                         tokenUsage,
-                        extractGoogleAiStudioTokenUsage(payload)
+                        finalizeAttemptTokenUsage(extractGoogleAiStudioTokenUsage(payload), {
+                            systemText,
+                            userText,
+                            rawOutput: rawAttemptOutput,
+                            isPage: isPageTranslation,
+                        })
                     );
-                    if (this.isGoogleAiStudioTruncatedPayload(payload) && !isLastMode) {
+                    if (
+                        this.isGoogleAiStudioTruncatedPayload(payload) &&
+                        !isPageTranslation &&
+                        !isLastMode
+                    ) {
                         continue;
                     }
-                    if (!this.parseGoogleAiStudioResponse(payload) && !isLastMode) {
+                    if (
+                        !this.parseGoogleAiStudioResponse(payload) &&
+                        !isPageTranslation &&
+                        !isLastMode
+                    ) {
                         continue;
                     }
+                    successfulCompatibilityMode = mode;
                     break;
-                } catch (error) {
+                } catch (error: any) {
+                    tokenUsage = mergeTokenUsage(tokenUsage, error?.tokenUsage);
                     const canRetry =
                         !isLastMode && this.shouldRetryGoogleAiStudioWithCompatibilityConfig(error);
-                    if (!canRetry) throw error;
+                    if (!canRetry) {
+                        if (error && typeof error === "object") error.tokenUsage = tokenUsage;
+                        throw error;
+                    }
                 }
             }
 
-            const rawOutput = this.parseGoogleAiStudioResponse(payload);
+            let rawOutput = this.parseGoogleAiStudioResponse(payload);
+            let googleFinishReason = String(payload?.candidates?.[0]?.finishReason || "");
+            if (
+                isPageTranslation &&
+                googleFinishReason &&
+                !isSuccessfulPageFinishReason(googleFinishReason) &&
+                !isTruncatedPageFinishReason(googleFinishReason)
+            ) {
+                throw createPageTerminalError(
+                    "Google AI Studio",
+                    googleFinishReason,
+                    tokenUsage,
+                    rawOutput
+                );
+            }
             const structured =
-                !isRealtimeCaption && isDictionaryCandidate(text)
+                !isRealtimeCaption && isDictionaryTranslationRequest(text, options)
                     ? parseStructuredDictionaryOutput(rawOutput, text)
                     : null;
             if (structured) {
@@ -1612,9 +1929,79 @@ class LocalTranslator {
                 } as TranslationResult;
             }
 
-            let translated = parsePlainTranslationOutput(rawOutput);
+            let pageOutputIncomplete =
+                isPageTranslation &&
+                (isTruncatedPageFinishReason(googleFinishReason) ||
+                    (useStreaming && !googleFinishReason));
+            let translated = isPageTranslation
+                ? parsePageTranslationOutput(rawOutput, pageOutputIncomplete)
+                : parsePlainTranslationOutput(rawOutput);
+            if (
+                !translated &&
+                pageOutputIncomplete &&
+                countPageSegmentMarkers(text) <= 1 &&
+                successfulCompatibilityMode === "minimal" &&
+                Number(
+                    this.buildGoogleAiStudioGenerationConfig(
+                        text.length,
+                        successfulCompatibilityMode,
+                        options,
+                        isDictionary
+                    )?.maxOutputTokens || 0
+                ) > 0
+            ) {
+                const priorUsage = tokenUsage;
+                let retryPayload: Awaited<ReturnType<typeof requestPayload>>;
+                try {
+                    resetRequestDeadline();
+                    retryPayload = await requestPayload(successfulCompatibilityMode, 2);
+                } catch (error: any) {
+                    throw stopAfterPageRecoveryFailure(error, priorUsage);
+                }
+                const retryRawOutput = this.parseGoogleAiStudioResponse(retryPayload);
+                tokenUsage = mergeTokenUsage(
+                    priorUsage,
+                    finalizeAttemptTokenUsage(extractGoogleAiStudioTokenUsage(retryPayload), {
+                        systemText,
+                        userText,
+                        rawOutput: retryRawOutput,
+                        isPage: true,
+                    })
+                );
+                payload = retryPayload;
+                rawOutput = retryRawOutput;
+                googleFinishReason = String(payload?.candidates?.[0]?.finishReason || "");
+                if (
+                    googleFinishReason &&
+                    !isSuccessfulPageFinishReason(googleFinishReason) &&
+                    !isTruncatedPageFinishReason(googleFinishReason)
+                ) {
+                    throw createPageTerminalError(
+                        "Google AI Studio",
+                        googleFinishReason,
+                        tokenUsage,
+                        rawOutput
+                    );
+                }
+                pageOutputIncomplete =
+                    isTruncatedPageFinishReason(googleFinishReason) ||
+                    (useStreaming && !googleFinishReason);
+                translated = parsePageTranslationOutput(rawOutput, pageOutputIncomplete);
+            }
             if (!translated) {
-                throw new Error("Google AI Studio returned an empty translation.");
+                if (pageOutputIncomplete) {
+                    throw createPageOutputIncompleteError(
+                        "Google AI Studio returned no complete page segment before truncation.",
+                        tokenUsage,
+                        rawOutput
+                    );
+                }
+                const emptyError: any = new Error(
+                    "Google AI Studio returned an empty translation."
+                );
+                emptyError.tokenUsage = tokenUsage;
+                emptyError.partialOutput = rawOutput;
+                throw emptyError;
             }
             try {
                 // Skip the optional repair round-trip on profiles where the second call costs
@@ -1655,8 +2042,23 @@ class LocalTranslator {
         } catch (error: any) {
             throw {
                 errorType: "API_ERR",
-                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "GOOGLE_AI_STUDIO_ERROR",
+                errorCode:
+                    error?.errorCode ||
+                    (error?.name === "AbortError" ? "TIMEOUT" : "GOOGLE_AI_STUDIO_ERROR"),
                 errorMsg: error?.message || "Google AI Studio request failed.",
+                httpStatus: Number(error?.status) || undefined,
+                retryable:
+                    error?.retryable === false
+                        ? false
+                        : isRetryableTransportError(error) &&
+                          !(
+                              isPageTranslation &&
+                              (error?.name === "AbortError" ||
+                                  countPageSegmentMarkers(error?.partialOutput || "") > 1)
+                          ),
+                providerRetryExhausted: error?.providerRetryExhausted === true,
+                tokenUsage: error?.tokenUsage,
+                partialOutput: error?.partialOutput,
                 errorAct: {
                     api: "local",
                     mode: "googleAiStudio",
@@ -1704,13 +2106,19 @@ class LocalTranslator {
         to: string,
         options: LocalTranslationOptions = {}
     ) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        let controller = new AbortController();
+        let timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        const resetRequestDeadline = () => {
+            clearTimeout(timeoutId);
+            controller = new AbortController();
+            timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        };
+        const isPageTranslation = isPageTranslationRequest(text, options);
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
-            const isPageTranslation =
-                options.translationProfile === "page" || hasPageTranslationSegments(text);
             const reasoningEffort = this.getOpenAiReasoningEffort(options);
+            const systemText = this.getTranslationSystemPrompt(text, from, to, options);
+            const userText = this.buildOpenAiPrompt(text, from, to, options);
             // GPT-5.x and o-series reasoning models only accept the default temperature, so
             // sending an explicit value triggers a 400 from the API.
             const supportsTemperature = !this.shouldUseOpenAiReasoningEffort();
@@ -1719,15 +2127,15 @@ class LocalTranslator {
                 messages: [
                     {
                         role: "system",
-                        content: this.getTranslationSystemPrompt(text, from, to, options),
+                        content: systemText,
                     },
                     {
                         role: "user",
-                        content: this.buildOpenAiPrompt(text, from, to, options),
+                        content: userText,
                     },
                 ],
                 ...(supportsTemperature ? { temperature: 0 } : {}),
-                ...(!isRealtimeCaption && isDictionaryCandidate(text)
+                ...(!isRealtimeCaption && isDictionaryTranslationRequest(text, options)
                     ? { response_format: { type: "json_object" } }
                     : {}),
                 ...(includeReasoningEffort && reasoningEffort
@@ -1763,7 +2171,7 @@ class LocalTranslator {
             // Streaming is incompatible with response_format JSON (used for dictionary entries).
             const useStreaming =
                 typeof options.onProgress === "function" &&
-                !(isDictionaryCandidate(text) && !isRealtimeCaption);
+                !(isDictionaryTranslationRequest(text, options) && !isRealtimeCaption);
             const requestPayload = async (includeReasoningEffort = true, tokenMultiplier = 4) => {
                 const headers: Record<string, string> = {
                     Authorization: `Bearer ${this.openaiApiKey}`,
@@ -1774,39 +2182,77 @@ class LocalTranslator {
                     string,
                     unknown
                 >;
-                if (useStreaming) body.stream = true;
-                const response = await fetch(OPENAI_CHAT_COMPLETIONS_ENDPOINT, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(body),
-                    signal: controller.signal,
-                });
+                if (useStreaming) {
+                    body.stream = true;
+                    // OpenAI emits token usage for a streamed completion only when
+                    // requested. The final usage-only chunk keeps the page token meter
+                    // and the output-runaway guard accurate.
+                    body.stream_options = { include_usage: true };
+                }
+                let response: Response;
+                try {
+                    response = await fetch(OPENAI_CHAT_COMPLETIONS_ENDPOINT, {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify(body),
+                        signal: controller.signal,
+                    });
+                } catch (error) {
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        isPage: isPageTranslation,
+                    });
+                }
                 if (!useStreaming || !response.ok) {
                     const payload = await response.json().catch(() => ({}));
-                    return { response, payload };
+                    const rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                    return {
+                        response,
+                        payload,
+                        tokenUsage: finalizeAttemptTokenUsage(extractOpenAiTokenUsage(payload), {
+                            systemText,
+                            userText,
+                            rawOutput,
+                            isPage: isPageTranslation,
+                        }),
+                    };
                 }
                 let accumulated = "";
                 let finishReason = "";
                 let usage: any = null;
-                await consumeSseStream(response, (data) => {
-                    try {
-                        const json = JSON.parse(data);
-                        const choice = json.choices?.[0];
-                        const delta = choice?.delta?.content ?? choice?.message?.content;
-                        if (delta) {
-                            accumulated += String(delta);
-                            try {
-                                options.onProgress?.(accumulated);
-                            } catch {
-                                /* noop */
+                try {
+                    await consumeSseStream(response, (data) => {
+                        try {
+                            const json = JSON.parse(data);
+                            const choice = json.choices?.[0];
+                            const delta = choice?.delta?.content ?? choice?.message?.content;
+                            if (delta) {
+                                accumulated += String(delta);
+                                try {
+                                    options.onProgress?.(accumulated);
+                                } catch {
+                                    /* noop */
+                                }
                             }
+                            if (choice?.finish_reason) finishReason = String(choice.finish_reason);
+                            if (json.usage) usage = json.usage;
+                        } catch {
+                            /* skip malformed event */
                         }
-                        if (choice?.finish_reason) finishReason = String(choice.finish_reason);
-                        if (json.usage) usage = json.usage;
-                    } catch {
-                        /* skip malformed event */
+                    });
+                } catch (error) {
+                    const actual = usage ? extractOpenAiTokenUsage({ usage }) : undefined;
+                    if (actual && error && typeof error === "object") {
+                        (error as any).tokenUsage = actual;
                     }
-                });
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        rawOutput: accumulated,
+                        isPage: isPageTranslation,
+                    });
+                }
                 const payload = {
                     choices: [
                         {
@@ -1816,27 +2262,43 @@ class LocalTranslator {
                     ],
                     ...(usage ? { usage } : {}),
                 };
-                return { response, payload };
+                return {
+                    response,
+                    payload,
+                    tokenUsage: finalizeAttemptTokenUsage(extractOpenAiTokenUsage(payload), {
+                        systemText,
+                        userText,
+                        rawOutput: accumulated,
+                        isPage: isPageTranslation,
+                    }),
+                };
             };
 
             let includeReasoningConfig = true;
-            let { response, payload } = await requestPayload(includeReasoningConfig, 4);
+            let firstAttempt = await requestPayload(includeReasoningConfig, 4);
+            let { response, payload } = firstAttempt;
+            let tokenUsage = firstAttempt.tokenUsage;
             if (
                 !response.ok &&
                 reasoningEffort &&
                 this.shouldRetryOpenAiWithoutReasoningConfig(payload)
             ) {
                 includeReasoningConfig = false;
-                ({ response, payload } = await requestPayload(includeReasoningConfig, 4));
+                const retry = await requestPayload(includeReasoningConfig, 4);
+                tokenUsage = mergeTokenUsage(tokenUsage, retry.tokenUsage);
+                ({ response, payload } = retry);
             }
             if (!response.ok) {
-                throw new Error(
+                const requestError: any = new Error(
                     payload?.error?.message || `OpenAI API request failed with ${response.status}`
                 );
+                requestError.status = response.status;
+                requestError.tokenUsage = tokenUsage;
+                requestError.partialOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                throw requestError;
             }
-            let tokenUsage = extractOpenAiTokenUsage(payload);
-            let rawOutput = this.parseOpenAiResponse(payload);
-            const finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+            let rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+            let finishReason = String(payload?.choices?.[0]?.finish_reason || "");
             // Retry on true truncation (finish_reason "length") and on a streamed reply
             // that ended WITHOUT any finish_reason — an SSE stream cut mid-generation
             // (proxy drop, server error event) would otherwise pass off a truncated page
@@ -1846,20 +2308,28 @@ class LocalTranslator {
             // markers with a missing-leaves-only request.
             const shouldRetryForCompletion =
                 !isRealtimeCaption &&
-                (finishReason === "length" || (useStreaming && !finishReason));
+                !isPageTranslation &&
+                (isTruncatedPageFinishReason(finishReason) || (useStreaming && !finishReason));
             if (shouldRetryForCompletion) {
                 const retry = await requestPayload(includeReasoningConfig, 8);
+                tokenUsage = mergeTokenUsage(tokenUsage, retry.tokenUsage);
                 if (retry.response.ok) {
-                    tokenUsage = mergeTokenUsage(
-                        tokenUsage,
-                        extractOpenAiTokenUsage(retry.payload)
-                    );
                     payload = retry.payload;
-                    rawOutput = this.parseOpenAiResponse(payload);
+                    rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                    finishReason = String(payload?.choices?.[0]?.finish_reason || "");
                 }
             }
+            if (
+                isPageTranslation &&
+                finishReason &&
+                !isSuccessfulPageFinishReason(finishReason) &&
+                !isTruncatedPageFinishReason(finishReason)
+            ) {
+                throw createPageTerminalError("OpenAI API", finishReason, tokenUsage, rawOutput);
+            }
             const structured =
-                !this.isRealtimeCaptionTranslation(options) && isDictionaryCandidate(text)
+                !this.isRealtimeCaptionTranslation(options) &&
+                isDictionaryTranslationRequest(text, options)
                     ? parseStructuredDictionaryOutput(rawOutput, text)
                     : null;
             if (structured) {
@@ -1872,9 +2342,70 @@ class LocalTranslator {
                 } as TranslationResult;
             }
 
-            const translated = parsePlainTranslationOutput(rawOutput);
+            let pageOutputIncomplete =
+                isPageTranslation &&
+                (isTruncatedPageFinishReason(finishReason) || (useStreaming && !finishReason));
+            let translated = isPageTranslation
+                ? parsePageTranslationOutput(rawOutput, pageOutputIncomplete)
+                : parsePlainTranslationOutput(rawOutput);
+            // A truncated multi-marker page is cheaper to split in the controller. A single
+            // atomic leaf has nothing to split, so only when ZERO complete prefix exists do
+            // one larger-budget attempt; this is the bounded quality exception to the
+            // no-full-reroll page rule.
+            if (!translated && pageOutputIncomplete && countPageSegmentMarkers(text) <= 1) {
+                const priorUsage = tokenUsage;
+                let retry: Awaited<ReturnType<typeof requestPayload>>;
+                try {
+                    resetRequestDeadline();
+                    retry = await requestPayload(includeReasoningConfig, 8);
+                } catch (error) {
+                    throw stopAfterPageRecoveryFailure(error, priorUsage);
+                }
+                tokenUsage = mergeTokenUsage(priorUsage, retry.tokenUsage);
+                if (!retry.response.ok) {
+                    const retryError: any = new Error(
+                        retry.payload?.error?.message ||
+                            `OpenAI API request failed with ${retry.response.status}`
+                    );
+                    retryError.status = retry.response.status;
+                    retryError.tokenUsage = retry.tokenUsage;
+                    retryError.partialOutput = this.parseOpenAiResponse(
+                        retry.payload,
+                        isPageTranslation
+                    );
+                    throw stopAfterPageRecoveryFailure(retryError, priorUsage);
+                }
+                payload = retry.payload;
+                rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+                if (
+                    finishReason &&
+                    !isSuccessfulPageFinishReason(finishReason) &&
+                    !isTruncatedPageFinishReason(finishReason)
+                ) {
+                    throw createPageTerminalError(
+                        "OpenAI API",
+                        finishReason,
+                        tokenUsage,
+                        rawOutput
+                    );
+                }
+                pageOutputIncomplete =
+                    isTruncatedPageFinishReason(finishReason) || (useStreaming && !finishReason);
+                translated = parsePageTranslationOutput(rawOutput, pageOutputIncomplete);
+            }
             if (!translated) {
-                throw new Error("OpenAI API returned an empty translation.");
+                if (pageOutputIncomplete) {
+                    throw createPageOutputIncompleteError(
+                        "OpenAI API returned no complete page segment before truncation.",
+                        tokenUsage,
+                        rawOutput
+                    );
+                }
+                const emptyError: any = new Error("OpenAI API returned an empty translation.");
+                emptyError.tokenUsage = tokenUsage;
+                emptyError.partialOutput = rawOutput;
+                throw emptyError;
             }
 
             return {
@@ -1887,8 +2418,23 @@ class LocalTranslator {
         } catch (error: any) {
             throw {
                 errorType: "API_ERR",
-                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_API_ERROR",
+                errorCode:
+                    error?.errorCode ||
+                    (error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_API_ERROR"),
                 errorMsg: error?.message || "OpenAI API request failed.",
+                httpStatus: Number(error?.status) || undefined,
+                retryable:
+                    error?.retryable === false
+                        ? false
+                        : isRetryableTransportError(error) &&
+                          !(
+                              isPageTranslation &&
+                              (error?.name === "AbortError" ||
+                                  countPageSegmentMarkers(error?.partialOutput || "") > 1)
+                          ),
+                providerRetryExhausted: error?.providerRetryExhausted === true,
+                tokenUsage: error?.tokenUsage,
+                partialOutput: error?.partialOutput,
                 errorAct: {
                     api: "local",
                     mode: "openai",
@@ -1910,22 +2456,28 @@ class LocalTranslator {
         to: string,
         options: LocalTranslationOptions = {}
     ) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        let controller = new AbortController();
+        let timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        const resetRequestDeadline = () => {
+            clearTimeout(timeoutId);
+            controller = new AbortController();
+            timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMsFor(options));
+        };
+        const isPageTranslation = isPageTranslationRequest(text, options);
         try {
             const isRealtimeCaption = this.isRealtimeCaptionTranslation(options);
-            const isPageTranslation =
-                options.translationProfile === "page" || hasPageTranslationSegments(text);
+            const systemText = this.getTranslationSystemPrompt(text, from, to, options);
+            const userText = this.buildOpenAiPrompt(text, from, to, options);
             const buildBody = (tokenMultiplier = 4) => ({
                 model: this.openaiCompatibleModel,
                 messages: [
                     {
                         role: "system",
-                        content: this.getTranslationSystemPrompt(text, from, to, options),
+                        content: systemText,
                     },
                     {
                         role: "user",
-                        content: this.buildOpenAiPrompt(text, from, to, options),
+                        content: userText,
                     },
                 ],
                 // Skip response_format JSON for openaiCompatible so local LLM servers
@@ -1948,8 +2500,8 @@ class LocalTranslator {
                       ),
                 temperature: 0,
                 // llama.cpp / vLLM / TGI honor this; unknown servers ignore unknown fields.
-                // The stable system prompt prefix (see AI_TRANSLATION_SYSTEM_PROMPT) makes
-                // this 5-10x cheaper per concurrent request because the KV-cache is reused.
+                // A stable system-prompt prefix lets compatible local runtimes reuse KV
+                // state when they support this extension.
                 cache_prompt: true,
                 // Disable chain-of-thought for translation — it's pure latency/token waste.
                 // Qwen3 & friends read enable_thinking from chat_template_kwargs (vLLM/sglang/
@@ -1962,7 +2514,7 @@ class LocalTranslator {
             // Dictionary lookups produce JSON — never stream them into the panel preview.
             const useStreaming =
                 typeof options.onProgress === "function" &&
-                !(isDictionaryCandidate(text) && !isRealtimeCaption);
+                !(isDictionaryTranslationRequest(text, options) && !isRealtimeCaption);
             const requestPayload = async (tokenMultiplier = 4) => {
                 const headers: Record<string, string> = {
                     "Content-Type": "application/json",
@@ -1973,41 +2525,73 @@ class LocalTranslator {
                 }
                 const body = buildBody(tokenMultiplier);
                 if (useStreaming) (body as Record<string, unknown>).stream = true;
-                const response = await fetch(this.openaiCompatibleEndpoint, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(body),
-                    signal: controller.signal,
-                });
+                let response: Response;
+                try {
+                    response = await fetch(this.openaiCompatibleEndpoint, {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify(body),
+                        signal: controller.signal,
+                    });
+                } catch (error) {
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        isPage: isPageTranslation,
+                    });
+                }
                 if (!useStreaming || !response.ok) {
                     const payload = await response.json().catch(() => ({}));
-                    return { response, payload };
+                    const rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                    return {
+                        response,
+                        payload,
+                        tokenUsage: finalizeAttemptTokenUsage(extractOpenAiTokenUsage(payload), {
+                            systemText,
+                            userText,
+                            rawOutput,
+                            isPage: isPageTranslation,
+                        }),
+                    };
                 }
                 // Streaming path: parse SSE deltas, accumulate text, surface progress.
                 let accumulated = "";
                 let finishReason = "";
                 let usage: any = null;
-                await consumeSseStream(response, (data) => {
-                    try {
-                        const json = JSON.parse(data);
-                        const choice = json.choices?.[0];
-                        const delta = choice?.delta?.content ?? choice?.message?.content;
-                        if (delta) {
-                            accumulated += String(delta);
-                            try {
-                                // Surface the reasoning-stripped text so a thinking
-                                // model's <think> stream doesn't flash in the panel.
-                                options.onProgress?.(stripReasoningArtifacts(accumulated));
-                            } catch {
-                                /* ignore listener errors */
+                try {
+                    await consumeSseStream(response, (data) => {
+                        try {
+                            const json = JSON.parse(data);
+                            const choice = json.choices?.[0];
+                            const delta = choice?.delta?.content ?? choice?.message?.content;
+                            if (delta) {
+                                accumulated += String(delta);
+                                try {
+                                    // Surface the reasoning-stripped text so a thinking
+                                    // model's <think> stream doesn't flash in the panel.
+                                    options.onProgress?.(stripReasoningArtifacts(accumulated));
+                                } catch {
+                                    /* ignore listener errors */
+                                }
                             }
+                            if (choice?.finish_reason) finishReason = String(choice.finish_reason);
+                            if (json.usage) usage = json.usage;
+                        } catch {
+                            /* malformed SSE event — skip */
                         }
-                        if (choice?.finish_reason) finishReason = String(choice.finish_reason);
-                        if (json.usage) usage = json.usage;
-                    } catch {
-                        /* malformed SSE event — skip */
+                    });
+                } catch (error) {
+                    const actual = usage ? extractOpenAiTokenUsage({ usage }) : undefined;
+                    if (actual && error && typeof error === "object") {
+                        (error as any).tokenUsage = actual;
                     }
-                });
+                    throw attachAttemptUsageToError(error, {
+                        systemText,
+                        userText,
+                        rawOutput: accumulated,
+                        isPage: isPageTranslation,
+                    });
+                }
                 // Synthesize a payload object compatible with the non-streaming code path below.
                 const payload = {
                     choices: [
@@ -2018,39 +2602,66 @@ class LocalTranslator {
                     ],
                     ...(usage ? { usage } : {}),
                 };
-                return { response, payload };
+                return {
+                    response,
+                    payload,
+                    tokenUsage: finalizeAttemptTokenUsage(extractOpenAiTokenUsage(payload), {
+                        systemText,
+                        userText,
+                        rawOutput: accumulated,
+                        isPage: isPageTranslation,
+                    }),
+                };
             };
 
-            let { response, payload } = await requestPayload(4);
+            const firstAttempt = await requestPayload(4);
+            let { response, payload } = firstAttempt;
+            let tokenUsage = firstAttempt.tokenUsage;
             if (!response.ok) {
-                throw new Error(
+                const requestError: any = new Error(
                     payload?.error?.message ||
                         `OpenAI-compatible API request failed with ${response.status}`
                 );
+                requestError.status = response.status;
+                requestError.tokenUsage = tokenUsage;
+                requestError.partialOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                throw requestError;
             }
-            let tokenUsage = extractOpenAiTokenUsage(payload);
-            let rawOutput = this.parseOpenAiResponse(payload);
-            const finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+            let rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+            let finishReason = String(payload?.choices?.[0]?.finish_reason || "");
             // Truncation retry (+ streamed replies that ended with NO finish_reason — an
             // SSE cut mid-generation, common on local servers under load). Marker gaps in
             // COMPLETED replies are healed by the page pipeline's missing-leaves-only
             // re-request, not a full re-roll.
             const shouldRetryForCompletion =
                 !isRealtimeCaption &&
-                (finishReason === "length" || (useStreaming && !finishReason));
+                !isPageTranslation &&
+                (isTruncatedPageFinishReason(finishReason) || (useStreaming && !finishReason));
             if (shouldRetryForCompletion) {
                 const retry = await requestPayload(8);
+                tokenUsage = mergeTokenUsage(tokenUsage, retry.tokenUsage);
                 if (retry.response.ok) {
-                    tokenUsage = mergeTokenUsage(
-                        tokenUsage,
-                        extractOpenAiTokenUsage(retry.payload)
-                    );
                     payload = retry.payload;
-                    rawOutput = this.parseOpenAiResponse(payload);
+                    rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                    finishReason = String(payload?.choices?.[0]?.finish_reason || "");
                 }
             }
+            if (
+                isPageTranslation &&
+                finishReason &&
+                !isSuccessfulPageFinishReason(finishReason) &&
+                !isTruncatedPageFinishReason(finishReason)
+            ) {
+                throw createPageTerminalError(
+                    "OpenAI-compatible API",
+                    finishReason,
+                    tokenUsage,
+                    rawOutput
+                );
+            }
             const structured =
-                !this.isRealtimeCaptionTranslation(options) && isDictionaryCandidate(text)
+                !this.isRealtimeCaptionTranslation(options) &&
+                isDictionaryTranslationRequest(text, options)
                     ? parseStructuredDictionaryOutput(rawOutput, text)
                     : null;
             if (structured) {
@@ -2063,9 +2674,68 @@ class LocalTranslator {
                 } as TranslationResult;
             }
 
-            const translated = parsePlainTranslationOutput(rawOutput);
+            let pageOutputIncomplete =
+                isPageTranslation &&
+                (isTruncatedPageFinishReason(finishReason) || (useStreaming && !finishReason));
+            let translated = isPageTranslation
+                ? parsePageTranslationOutput(rawOutput, pageOutputIncomplete)
+                : parsePlainTranslationOutput(rawOutput);
+            if (!translated && pageOutputIncomplete && countPageSegmentMarkers(text) <= 1) {
+                const priorUsage = tokenUsage;
+                let retry: Awaited<ReturnType<typeof requestPayload>>;
+                try {
+                    resetRequestDeadline();
+                    retry = await requestPayload(8);
+                } catch (error) {
+                    throw stopAfterPageRecoveryFailure(error, priorUsage);
+                }
+                tokenUsage = mergeTokenUsage(priorUsage, retry.tokenUsage);
+                if (!retry.response.ok) {
+                    const retryError: any = new Error(
+                        retry.payload?.error?.message ||
+                            `OpenAI-compatible API request failed with ${retry.response.status}`
+                    );
+                    retryError.status = retry.response.status;
+                    retryError.tokenUsage = retry.tokenUsage;
+                    retryError.partialOutput = this.parseOpenAiResponse(
+                        retry.payload,
+                        isPageTranslation
+                    );
+                    throw stopAfterPageRecoveryFailure(retryError, priorUsage);
+                }
+                payload = retry.payload;
+                rawOutput = this.parseOpenAiResponse(payload, isPageTranslation);
+                finishReason = String(payload?.choices?.[0]?.finish_reason || "");
+                if (
+                    finishReason &&
+                    !isSuccessfulPageFinishReason(finishReason) &&
+                    !isTruncatedPageFinishReason(finishReason)
+                ) {
+                    throw createPageTerminalError(
+                        "OpenAI-compatible API",
+                        finishReason,
+                        tokenUsage,
+                        rawOutput
+                    );
+                }
+                pageOutputIncomplete =
+                    isTruncatedPageFinishReason(finishReason) || (useStreaming && !finishReason);
+                translated = parsePageTranslationOutput(rawOutput, pageOutputIncomplete);
+            }
             if (!translated) {
-                throw new Error("OpenAI-compatible API returned an empty translation.");
+                if (pageOutputIncomplete) {
+                    throw createPageOutputIncompleteError(
+                        "OpenAI-compatible API returned no complete page segment before truncation.",
+                        tokenUsage,
+                        rawOutput
+                    );
+                }
+                const emptyError: any = new Error(
+                    "OpenAI-compatible API returned an empty translation."
+                );
+                emptyError.tokenUsage = tokenUsage;
+                emptyError.partialOutput = rawOutput;
+                throw emptyError;
             }
 
             return {
@@ -2078,8 +2748,23 @@ class LocalTranslator {
         } catch (error: any) {
             throw {
                 errorType: "API_ERR",
-                errorCode: error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_COMPATIBLE_API_ERROR",
+                errorCode:
+                    error?.errorCode ||
+                    (error?.name === "AbortError" ? "TIMEOUT" : "OPENAI_COMPATIBLE_API_ERROR"),
                 errorMsg: error?.message || "OpenAI-compatible API request failed.",
+                httpStatus: Number(error?.status) || undefined,
+                retryable:
+                    error?.retryable === false
+                        ? false
+                        : isRetryableTransportError(error) &&
+                          !(
+                              isPageTranslation &&
+                              (error?.name === "AbortError" ||
+                                  countPageSegmentMarkers(error?.partialOutput || "") > 1)
+                          ),
+                providerRetryExhausted: error?.providerRetryExhausted === true,
+                tokenUsage: error?.tokenUsage,
+                partialOutput: error?.partialOutput,
                 errorAct: {
                     api: "local",
                     mode: "openaiCompatible",

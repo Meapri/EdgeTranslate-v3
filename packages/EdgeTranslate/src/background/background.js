@@ -76,10 +76,18 @@ const REALTIME_CAPTION_SETTINGS_MENU_ID = "open_realtime_caption_settings";
 
 function updateRealtimeCaptionContextMenu(checked) {
     try {
-        chrome.contextMenus.update(REALTIME_CAPTION_MENU_ID, {
-            checked: Boolean(checked),
-        });
-        void chrome.runtime.lastError;
+        chrome.contextMenus.update(
+            REALTIME_CAPTION_MENU_ID,
+            {
+                checked: Boolean(checked),
+            },
+            () => {
+                // The menu is created by onInstalled and can legitimately be absent in a fresh
+                // unpacked test profile. Reading lastError in the callback consumes that result
+                // instead of producing an unhandled MV3 Promise rejection.
+                void chrome.runtime.lastError;
+            }
+        );
     } catch {}
 }
 

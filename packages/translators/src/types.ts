@@ -16,6 +16,8 @@ export type TranslationTokenUsage = {
     reasoningTokens?: number;
     cachedInputTokens?: number;
     totalTokens?: number;
+    /** True when one or more fields are conservative client-side estimates. */
+    estimated?: boolean;
 };
 export type DetailedMeaning = {
     pos?: string;
@@ -36,6 +38,13 @@ export type TranslationError = {
     errorType: string;
     errorCode: string;
     errorMsg: string;
+    httpStatus?: number;
+    retryable?: boolean;
+    /** The provider-layer retry budget was already consumed; callers must not retry again. */
+    providerRetryExhausted?: boolean;
+    tokenUsage?: TranslationTokenUsage;
+    /** Raw generated prefix received before a streaming request failed. */
+    partialOutput?: string;
     errorAct: {
         api: string;
         action: string;

@@ -25,6 +25,9 @@ jobs:
             - name: Run tests
               run: npm test
 
+            - name: Run AI page translation vNext offline gate
+              run: npm run gate:ai-page:vnext:offline
+
             - name: Build Chrome target
               run: npm run build
 

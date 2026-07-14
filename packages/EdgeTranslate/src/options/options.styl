@@ -488,6 +488,31 @@ select:focus
     box-shadow: inset 0 0 0 2px color-primary, focus-ring-light
     transform: scale(1.003)
 
+.model-refresh-button
+    align-self: flex-end
+    min-height: 34px
+    width: auto
+    padding: 6px 14px
+    color: color-on-surface-variant
+    background-color: rgba(255, 255, 255, .76)
+    border: 0
+    border-radius: 12px
+    box-shadow: inset 0 0 0 1px rgba(221, 230, 239, .92)
+    font: inherit
+    font-size: 15px
+    font-weight: 700
+    line-height: 1
+    cursor: pointer
+    transition: background-color motion-fast, box-shadow motion-fast
+
+.model-refresh-button:hover
+    background-color: rgba(255, 255, 255, .96)
+
+.model-refresh-button:disabled,
+.model-refresh-button.is-busy
+    cursor: default
+    opacity: .55
+
 .column.provider-heading
     grid-column: 1 / -1
     min-height: 56px
@@ -688,6 +713,14 @@ footer a:hover
     select:focus
         background-color: rgba(27, 32, 38, .98)
         box-shadow: inset 0 0 0 2px color-primary-dark, focus-ring-dark
+
+    .model-refresh-button
+        color: color-on-surface-variant-dark
+        background-color: rgba(21, 25, 29, .72)
+        box-shadow: inset 0 0 0 1px color-outline-variant-dark
+
+    .model-refresh-button:hover
+        background-color: rgba(36, 42, 49, .9)
 
     .column.provider-heading
         border-color: rgba(255, 255, 255, .04)

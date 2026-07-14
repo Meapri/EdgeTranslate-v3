@@ -258,8 +258,24 @@
         "description": "Open PDF files in EdgeTranslate's built-in pdf.js viewer instead of the browser's default viewer."
     },
     "AiPageLazyTranslate": {
-        "message": "Lazy AI page translation (translate on scroll)",
-        "description": "Translate content near the viewport first and the rest as you scroll, instead of sending the whole page to the AI at once."
+        "message": "Legacy/V2 lazy translation (translate on scroll)",
+        "description": "Used only by the explicit V1 and V2 pipelines. The default Google-style pipeline translates the whole document without viewport gating."
+    },
+    "AiPagePipelineVersion": {
+        "message": "AI page translation pipeline",
+        "description": "Choose the stable or preview AI page translation pipeline."
+    },
+    "AiPagePipelineAuto": {
+        "message": "Auto (continuous Google-style)",
+        "description": "Batch the whole document without a manual token pause and automatically recover only missing strings."
+    },
+    "AiPagePipelineV1": {
+        "message": "V1 (stable rollback)",
+        "description": "Force the existing stable pipeline."
+    },
+    "AiPagePipelineV2": {
+        "message": "V2 preview (bounded structured translation)",
+        "description": "Try the new structured, token-budgeted pipeline."
     },
     "AiPageSkipBoilerplate": {
         "message": "Skip references and navigation when AI-translating pages",
@@ -1403,6 +1419,10 @@
     "LocalTranslatorOpenAIModel": {
         "message": "OpenAI model",
         "description": "OpenAI model name."
+    },
+    "RefreshModelList": {
+        "message": "Refresh model list",
+        "description": "Refetch the provider's available models using the saved API key."
     },
     "TranslateNormal": {
         "message": "Normal translation",

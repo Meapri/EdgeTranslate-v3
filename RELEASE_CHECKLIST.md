@@ -1,3 +1,10 @@
+# EdgeTranslate legacy manual release checklist
+
+> 이 문서는 이전 프로젝트의 수동 기능 점검표라서 현재 AI 페이지 번역, 실시간 자막,
+> PDF, Safari 경로를 모두 다루지 않는다. 현재 릴리스 절차는
+> [개발 가이드](./docs/DEVELOPMENT_GUIDE.md#20-%EB%A6%B4%EB%A6%AC%EC%8A%A4)를 먼저 따르고,
+> 이 목록은 추가 UI 점검표로만 사용한다.
+
 ## 功能测试
 
 ### 核心功能
@@ -53,6 +60,66 @@
 -   [ ] 各翻译器功能测试
 
 -   [ ] 默认翻译器设置
+
+-   [x] cloud AI `auto`/default가 vNext, 명시적 `stable`이 rollback으로 라우팅되는지 확인
+
+-   [x] `chromeBuiltin`은 기존 V1, `GooglePageTranslate`는 별도 injection 경로인지 확인
+
+-   [x] `npm run gate:ai-page:vnext:offline` 통과
+
+-   [x] `npm run build:chrome` 뒤 default-vNext와 explicit-stable Chrome smoke 모두 통과
+
+-   [x] 京阪本線 exact OpenAI/Gemini-shaped local stub: 각각 baseline 27 requests,
+        2,004/2,004 targets, failed/recovery 0, anchor 100, runtime exception 0
+
+-   [x] 京阪本線의 30 requests는 fixture regression ceiling이며 arbitrary page global
+        guarantee가 아님을 문서화
+
+-   [x] same-packet backoff failure는 실제 provider를 재호출하고,
+        success/delivery-unknown/recovery-class만 idempotency cache replay하는지 확인
+
+-   [x] startup hydration root buffer, active-provider cancel terminal, CAS 포함
+        viewport/reveal priority 없음, unsafe inline chunk atomic degrade 회귀 테스트
+
+-   [x] normalized UsageReceipt `{value,source}` EMA와 warm modern 8K fallback floor 보존 확인
+
+-   [x] provider input/combined context 90% 안전선과 pre-dispatch rejection, production
+        5,282-inline `<=30` balanced-request 회귀 테스트
+
+-   [x] 병렬 first-wave 429/5xx는 조기 circuit을 열지 않고, retry-exhausted lineage만
+        no-output circuit에 집계되는지 확인
+
+-   [x] 429/5xx/timeout/provider-status가 교대로 발생해도 한 lineage의 transport retry
+        budget이 3회를 넘지 않는지 확인
+
+-   [x] `pt3-2` exact item-count/alias schema, protected-value prompt, interactive order retry와
+        atomic fallback, 19,500자 recovery rechunk 회귀 테스트
+
+-   [x] receipt EMA 이후 recovery fragment 증폭 제한, existing chunk의 nested-rechunk 차단,
+        불가능한 singleton local terminalize 확인
+
+-   [x] SPA revision 교체 뒤 이전 success/failure/chunk reply가 새 source recovery 또는
+        새 chunk group을 오염시키지 않는지 확인
+
+-   [x] failed string이 새 SPA revision에서 성공하면 incomplete 수치도 감소하고, 무공백
+        CJK prose source echo는 성공으로 오인하지 않는지 확인
+
+-   [x] 실패 진단이 `failedStrings`/`failedRepresentatives`/`failedByReason`을 분리하는지 확인
+
+-   [ ] OpenAI/Gemini live Gate C 품질 A/B
+
+-   [ ] live Gate D latency와 full drain
+
+-   [ ] 같은 provider/snapshot의 stable 대비 Gate E 실제 usage receipts
+
+-   [ ] Gate F 30분 human spot-check
+
+-   [x] provider-reported usage와 배너 total 일치; content-channel owner response loss는
+        estimated request 1회로 세고, 배너는 exact integer 및 추정 시 `~` 표시
+
+-   [ ] API key는 fresh local environment에만 두고 대화/repo/log/artifact에는 남기지 않기
+
+-   [ ] Gates C-F와 production soak 전 stable/V1/호환 runtime 삭제하지 않기
 
 ### 黑名单功能
 

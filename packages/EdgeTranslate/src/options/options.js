@@ -1,82 +1,58 @@
 import Channel from "common/scripts/channel.js";
 import { i18nHTML } from "common/scripts/common.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
+import {
+    getModelCatalog,
+    GOOGLE_AI_STUDIO_FALLBACK_MODELS,
+    OPENAI_FALLBACK_MODELS,
+} from "common/scripts/model_catalog.js";
 
 /**
  * Communication channel.
  */
 const channel = new Channel();
 const DEFAULT_GOOGLE_AI_STUDIO_TRANSLATION_MODEL = "gemini-2.5-flash-lite";
-const GOOGLE_AI_STUDIO_TRANSLATION_MODELS = new Set([
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-flash-latest",
-    "gemini-flash-lite-latest",
-    "gemini-pro-latest",
-    "gemma-4-31b-it",
-    "gemma-4-26b-a4b-it",
-]);
+// Seed lists live in model_catalog.js and double as the offline fallback; the
+// options dropdowns are refreshed with the provider's live model list at runtime.
+const GOOGLE_AI_STUDIO_TRANSLATION_MODELS = new Set(GOOGLE_AI_STUDIO_FALLBACK_MODELS);
 const DEFAULT_OPENAI_TRANSLATION_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_COMPATIBLE_TRANSLATION_MODEL = "gpt-oss-20b";
-const OPENAI_TRANSLATION_MODELS = new Set([
-    "gpt-5.5",
-    "gpt-5.5-2026-04-23",
-    "gpt-5.4",
-    "gpt-5.4-2026-03-05",
-    "gpt-5.4-mini",
-    "gpt-5.4-mini-2026-03-17",
-    "gpt-5.4-nano",
-    "gpt-5.4-nano-2026-03-17",
-    "gpt-5.3-chat-latest",
-    "gpt-5.2",
-    "gpt-5.2-2025-12-11",
-    "gpt-5.2-chat-latest",
-    "gpt-5.1",
-    "gpt-5.1-2025-11-13",
-    "gpt-5.1-chat-latest",
-    "gpt-5",
-    "gpt-5-2025-08-07",
-    "gpt-5-mini",
-    "gpt-5-mini-2025-08-07",
-    "gpt-5-nano",
-    "gpt-5-nano-2025-08-07",
-    "gpt-5-chat-latest",
-    "gpt-4.1",
-    "gpt-4.1-2025-04-14",
-    "gpt-4.1-mini",
-    "gpt-4.1-mini-2025-04-14",
-    "gpt-4.1-nano",
-    "gpt-4.1-nano-2025-04-14",
-    "gpt-4o",
-    "gpt-4o-2024-11-20",
-    "gpt-4o-2024-08-06",
-    "gpt-4o-2024-05-13",
-    "gpt-4o-mini",
-    "gpt-4o-mini-2024-07-18",
-    "gpt-4-turbo",
-    "gpt-4-turbo-2024-04-09",
-    "gpt-4",
-    "gpt-4-0613",
-    "gpt-3.5-turbo",
-    "gpt-3.5-turbo-0125",
-    "gpt-3.5-turbo-1106",
-    "gpt-3.5-turbo-16k",
-    "o1",
-    "o1-2024-12-17",
-    "o3",
-    "o3-2025-04-16",
-    "o3-mini",
-    "o3-mini-2025-01-31",
-    "o4-mini",
-    "o4-mini-2025-04-16",
-]);
+const OPENAI_TRANSLATION_MODELS = new Set(OPENAI_FALLBACK_MODELS);
+
+// Wiring for the four provider-model dropdowns that should auto-refresh from the
+// live model catalog. Google's Local + Precise selects share one API key, as do
+// OpenAI's, so a single fetch per provider repopulates both of its selects.
+const MODEL_SELECTS = [
+    {
+        id: "local-translator-model",
+        provider: "googleAiStudio",
+        keyPath: ["LocalTranslatorConfig", "apiKey"],
+        valuePath: ["LocalTranslatorConfig", "model"],
+    },
+    {
+        id: "local-translator-openai-model",
+        provider: "openai",
+        keyPath: ["LocalTranslatorConfig", "openaiApiKey"],
+        valuePath: ["LocalTranslatorConfig", "openaiModel"],
+    },
+    {
+        id: "precise-translator-model",
+        provider: "googleAiStudio",
+        keyPath: ["LocalTranslatorConfig", "apiKey"],
+        valuePath: ["PreciseTranslatorConfig", "model"],
+    },
+    {
+        id: "precise-translator-openai-model",
+        provider: "openai",
+        keyPath: ["LocalTranslatorConfig", "openaiApiKey"],
+        valuePath: ["PreciseTranslatorConfig", "openaiModel"],
+    },
+];
+// API-key inputs whose edits should re-trigger a live model fetch.
+const MODEL_KEY_FIELD_PROVIDERS = {
+    "local-translator-api-key": "googleAiStudio",
+    "local-translator-openai-api-key": "openai",
+};
 const LOCAL_TRANSLATOR_TIMEOUT_MS_OPTIONS = new Set([
     "30000",
     "60000",
@@ -166,16 +142,20 @@ window.onload = () => {
                 settingItemValue = "chromeBuiltin";
                 saveOption(result, settingItemPath, settingItemValue);
             }
+            // Model values are validated by presence only: any non-empty stored
+            // model is preserved (it may be a freshly-released one the seed list
+            // hasn't caught up to yet, chosen from the live catalog). Only a blank
+            // value falls back to the default.
             if (
                 settingItemPath.join(" ") === "LocalTranslatorConfig model" &&
-                !GOOGLE_AI_STUDIO_TRANSLATION_MODELS.has(settingItemValue)
+                !String(settingItemValue || "").trim()
             ) {
                 settingItemValue = DEFAULT_GOOGLE_AI_STUDIO_TRANSLATION_MODEL;
                 saveOption(result, settingItemPath, settingItemValue);
             }
             if (
                 settingItemPath.join(" ") === "LocalTranslatorConfig openaiModel" &&
-                !OPENAI_TRANSLATION_MODELS.has(settingItemValue)
+                !String(settingItemValue || "").trim()
             ) {
                 settingItemValue = DEFAULT_OPENAI_TRANSLATION_MODEL;
                 saveOption(result, settingItemPath, settingItemValue);
@@ -189,7 +169,7 @@ window.onload = () => {
             }
             if (
                 settingItemPath.join(" ") === "PreciseTranslatorConfig model" &&
-                !GOOGLE_AI_STUDIO_TRANSLATION_MODELS.has(settingItemValue)
+                !String(settingItemValue || "").trim()
             ) {
                 settingItemValue =
                     DEFAULT_SETTINGS.PreciseTranslatorConfig?.model ||
@@ -198,7 +178,7 @@ window.onload = () => {
             }
             if (
                 settingItemPath.join(" ") === "PreciseTranslatorConfig openaiModel" &&
-                !OPENAI_TRANSLATION_MODELS.has(settingItemValue)
+                !String(settingItemValue || "").trim()
             ) {
                 settingItemValue =
                     DEFAULT_SETTINGS.PreciseTranslatorConfig?.openaiModel ||
@@ -327,6 +307,12 @@ window.onload = () => {
                         const target = event.target;
                         const settingItemPath = target.getAttribute("setting-path").split(/\s/g);
                         saveOption(result, settingItemPath, target.value.trim());
+                        // Editing a provider API key invalidates the previous
+                        // key's model list — refetch this provider's catalog.
+                        const provider = MODEL_KEY_FIELD_PROVIDERS[target.id];
+                        if (provider) {
+                            refreshModelSelectsForProvider(result, provider, { force: true });
+                        }
                     };
                     break;
                 default:
@@ -336,6 +322,13 @@ window.onload = () => {
         syncLocalTranslatorFields(result.LocalTranslatorConfig?.mode || "chromeBuiltin");
         syncPreciseTranslatorFields(result.PreciseTranslatorConfig?.mode || "openai");
         syncAiPageTranslatorVisibility(result);
+
+        // Add a "refresh" control next to each provider-model select and load
+        // the live model catalog (cache-first) so newly-released models appear
+        // without a manual extension update.
+        setUpModelRefreshControls(result);
+        refreshModelSelectsForProvider(result, "googleAiStudio");
+        refreshModelSelectsForProvider(result, "openai");
 
         // Update AI page translator visibility when local-translator-enabled changes
         const enabledCheckbox = document.getElementById("local-translator-enabled");
@@ -407,6 +400,110 @@ function populatePreciseTranslatorModelSelects() {
     }
     if (openAiSelect) {
         replaceSelectOptions(openAiSelect, Array.from(OPENAI_TRANSLATION_MODELS), {});
+    }
+}
+
+/**
+ * Insert a small "refresh model list" button after each provider-model select.
+ * Clicking it force-refetches that provider's live catalog.
+ */
+function setUpModelRefreshControls(result) {
+    const label = chrome.i18n.getMessage("RefreshModelList") || "Refresh model list";
+    for (const entry of MODEL_SELECTS) {
+        const select = document.getElementById(entry.id);
+        if (!select || select.dataset.refreshWired) continue;
+        select.dataset.refreshWired = "1";
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "model-refresh-button";
+        button.id = `${entry.id}-refresh`;
+        button.textContent = "↻"; // ↻
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.addEventListener("click", () => {
+            refreshModelSelectsForProvider(result, entry.provider, { force: true });
+        });
+        select.insertAdjacentElement("afterend", button);
+    }
+}
+
+/**
+ * Fetch the live model catalog for one provider (cache-first unless forced) and
+ * repopulate every select bound to it, preserving each select's stored value.
+ */
+async function refreshModelSelectsForProvider(result, provider, { force = false } = {}) {
+    const entries = MODEL_SELECTS.filter((entry) => entry.provider === provider);
+    if (!entries.length) return;
+
+    const apiKey = getSetting(result, entries[0].keyPath);
+    const buttons = entries
+        .map((entry) => document.getElementById(`${entry.id}-refresh`))
+        .filter(Boolean);
+    buttons.forEach((button) => setRefreshButtonBusy(button, true));
+
+    let catalog;
+    try {
+        catalog = await getModelCatalog(provider, apiKey, { force });
+    } catch (error) {
+        catalog = { models: [], source: "fallback", error: error?.message || String(error) };
+    }
+
+    for (const entry of entries) {
+        const select = document.getElementById(entry.id);
+        if (!select) continue;
+        // The stored setting is authoritative for the current value: the select
+        // may not yet contain it if it's a live-only model.
+        const currentValue = String(getSetting(result, entry.valuePath) || "").trim();
+        applyModelsToSelect(select, catalog.models, currentValue, catalog.capabilities);
+    }
+
+    buttons.forEach((button) => setRefreshButtonBusy(button, false, catalog));
+}
+
+function setRefreshButtonBusy(button, busy, catalog) {
+    button.disabled = busy;
+    button.classList.toggle("is-busy", busy);
+    if (busy) {
+        button.dataset.baseTitle = button.title;
+        return;
+    }
+    const base = button.dataset.baseTitle || button.title;
+    if (catalog?.error) {
+        button.title = `${base} — ${catalog.error}`;
+    } else {
+        button.title = base;
+    }
+}
+
+/**
+ * Replace a select's options with `models`, guaranteeing the currently-selected
+ * value stays available (prepended if the live list doesn't include it) so a
+ * user's saved choice is never silently dropped.
+ */
+function applyModelsToSelect(select, models, currentValue, capabilities = {}) {
+    const values = Array.isArray(models) ? [...models] : [];
+    const current = (currentValue || select.value || "").trim();
+    if (current && !values.includes(current)) values.unshift(current);
+    if (!values.length) return; // nothing to show; leave existing options intact
+    replaceSelectOptions(select, values, {});
+    for (const option of select.options) {
+        const capability = capabilities?.[option.value] || {
+            pageTranslationStatus: "unknown",
+            source: "selected-value",
+        };
+        option.dataset.pageTranslationStatus = capability.pageTranslationStatus;
+        option.title = `AI page translation: ${capability.pageTranslationStatus} (${capability.source})`;
+    }
+    if (current) select.value = current;
+    const updateSelectedCapability = () => {
+        select.dataset.pageTranslationStatus =
+            select.selectedOptions[0]?.dataset.pageTranslationStatus || "unknown";
+    };
+    updateSelectedCapability();
+    if (!select.dataset.capabilityWired) {
+        select.dataset.capabilityWired = "1";
+        select.addEventListener("change", updateSelectedCapability);
     }
 }
 

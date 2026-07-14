@@ -23,6 +23,7 @@
  */
 
 const STYLE_ID = "edge-translate-language-menu-styles";
+const EXTENSION_OWNED_ATTRIBUTE = "data-edge-translate-owned";
 let instanceCounter = 0;
 
 function normalizeLanguages(languages) {
@@ -89,6 +90,7 @@ export function createLanguageMenu(options = {}) {
 
     const wrapper = doc.createElement("div");
     wrapper.className = "et-lang-menu";
+    wrapper.setAttribute(EXTENSION_OWNED_ATTRIBUTE, "");
 
     const trigger = doc.createElement("button");
     trigger.type = "button";
@@ -111,6 +113,7 @@ export function createLanguageMenu(options = {}) {
     // or a host page's stacking context.
     const popover = doc.createElement("div");
     popover.className = "et-lang-popover";
+    popover.setAttribute(EXTENSION_OWNED_ATTRIBUTE, "");
     popover.setAttribute("role", "listbox");
     popover.id = `${id}-popover`;
     popover.hidden = true;

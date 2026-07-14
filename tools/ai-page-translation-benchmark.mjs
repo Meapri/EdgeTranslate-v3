@@ -123,7 +123,7 @@ function packBatches(entries, options) {
     let currentInputTokens = 0;
     let currentOutputTokens = 0;
     for (const entry of entries) {
-        const chars = entry.sourceHtml.length;
+        const chars = entry.sourceText.length;
         const inputTokens = entry.inputTokens;
         const outputTokens = entry.outputTokens;
         if (
@@ -166,19 +166,22 @@ function printSummary(summary) {
         `DOM collect median/p95: ${summary.collectTiming.medianMs}ms / ${summary.collectTiming.p95Ms}ms`
     );
     console.log(
-        `strip+segment median/p95: ${summary.payloadTiming.medianMs}ms / ${summary.payloadTiming.p95Ms}ms`
+        `leaf IR median/p95: ${summary.payloadTiming.medianMs}ms / ${summary.payloadTiming.p95Ms}ms`
     );
     console.log(
-        `payload chars: ${summary.rawChars} raw -> ${summary.strippedChars} stripped (${summary.charReductionPct}% less)`
+        `payload chars: ${summary.rawChars} raw HTML -> ${summary.segmentChars} segment IR (${summary.charReductionPct}% less)`
     );
     console.log(
-        `token estimate: ${summary.rawTokens} raw -> ${summary.strippedTokens} stripped (${summary.tokenReductionPct}% less)`
+        `token estimate: ${summary.rawTokens} raw HTML -> ${summary.segmentTokens} segment IR (${summary.tokenReductionPct}% less)`
     );
     console.log(
-        `compact markers: ${summary.verboseMarkerChars} chars -> ${summary.compactMarkerChars} chars`
+        `markers: ${summary.verboseMarkerChars} verbose chars -> ${summary.compactMarkerChars} compact -> ${summary.roleHintMarkerChars} sparse-role`
     );
     console.log(
-        `openaiCompatible requests: base ${summary.openaiCompatibleBaseBatches}, adaptive-fast ${summary.openaiCompatibleAdaptiveBatches}`
+        `fixed prompt estimate: ${summary.legacyPromptTokens} -> ${summary.optimizedPromptTokens} tokens/request (${summary.promptTokenReductionPct}% less)`
+    );
+    console.log(
+        `cloud planner: ${summary.legacyCloudRequests} -> ${summary.optimizedCloudRequests} parallel requests; output/request ${summary.legacyOutputPerRequest} -> ${summary.optimizedOutputPerRequest}`
     );
     console.log(JSON.stringify(summary, null, 2));
 }
@@ -192,6 +195,7 @@ let latestSections = [];
 let latestEntries = [];
 let latestVerbose = "";
 let latestCompact = "";
+let latestRoleHinted = "";
 
 const collectTiming = collectTimed(() => {
     const dom = new JSDOM(html);
@@ -203,22 +207,41 @@ const collectTiming = collectTimed(() => {
 }, iterations);
 
 const payloadTiming = collectTimed(() => {
-    latestEntries = latestSections.map((section) => {
-        const sourceHtml = context.buildStrippedSectionHtml(section.children);
-        return {
-            sourceHtml,
-            role: section.role,
-            plainText: section.plainText,
-            inputTokens: estimateLlmPayloadTokens(sourceHtml),
-            outputTokens: estimateLlmOutputTokens(section.plainText, sourceHtml),
-        };
-    });
+    latestEntries = latestSections
+        .map((section) => {
+            const leaves = [];
+            for (const child of section.children) {
+                for (const element of context.findLeafBlocksInElement(child)) {
+                    const leaf = context.serializeTranslationLeaf(element);
+                    if (leaf?.text) leaves.push(leaf);
+                }
+            }
+            const semanticUnits = context.buildSemanticTranslationUnits(leaves);
+            const ir = context.buildTranslationIrBatch(semanticUnits, {
+                compactMarkers: true,
+                includeRoleHints: true,
+            });
+            return {
+                sourceText: ir.text,
+                segments: ir.segments,
+                role: section.role,
+                plainText: section.plainText,
+                inputTokens: estimateLlmPayloadTokens(ir.text),
+                outputTokens: estimateLlmOutputTokens(section.plainText, ir.text),
+            };
+        })
+        .filter((entry) => entry.sourceText);
+    const units = latestEntries.flatMap((entry) => entry.segments);
     latestVerbose = context.buildSegmentedTranslationText(
-        latestEntries.map((entry) => ({ text: entry.sourceHtml, role: entry.role }))
+        units.map((segment) => ({ text: segment.text, role: segment.role }))
     );
     latestCompact = context.buildSegmentedTranslationText(
-        latestEntries.map((entry) => ({ text: entry.sourceHtml, role: entry.role })),
+        units.map((segment) => ({ text: segment.text, role: segment.role })),
         { compactMarkers: true }
+    );
+    latestRoleHinted = context.buildSegmentedTranslationText(
+        units.map((segment) => ({ text: segment.text, role: segment.role })),
+        { compactMarkers: true, includeRoleHints: true }
     );
 }, iterations);
 
@@ -226,11 +249,29 @@ const rawHtml = latestSections
     .map((section) => section.children.map((child) => child.outerHTML).join("\n"))
     .join("\n");
 const rawChars = rawHtml.length;
-const strippedChars = latestEntries.reduce((sum, entry) => sum + entry.sourceHtml.length, 0);
+const segmentChars = latestEntries.reduce((sum, entry) => sum + entry.sourceText.length, 0);
 const rawTokens = estimateLlmPayloadTokens(rawHtml);
-const strippedTokens = latestEntries.reduce((sum, entry) => sum + entry.inputTokens, 0);
+const segmentTokens = latestEntries.reduce((sum, entry) => sum + entry.inputTokens, 0);
 const baseOptions = { maxChars: 3200, maxInputTokens: 1050, maxOutputTokens: 1250, maxItems: 2 };
 const adaptiveFastOptions = scaleOptions(baseOptions, 1.35);
+const legacyPrompt =
+    "Translate each [[n]] segment into natural, fluent target-language text. Output every [[n]] marker exactly once, in order, on its own line, with the translation right after it — nothing else. Keep inline tags (<a>,<b>,<i>,<code>…), numbers and URLs intact, with the target language's natural spacing around tags. Never mix scripts or leave source-script characters; render Han-script (kanji/Chinese) terms as complete target-language words. If a segment is already fully in the target language, output its marker then = only; never use = for source-script text.\nEnglish>Korean\nKeep markers.";
+const optimizedPrompt =
+    "Translate each [[n]] webpage segment naturally to the target language, using neighbors and role suffixes like :title for context. Return every marker unchanged, once, in order, followed only by its translation. Preserve :row/:list JSON arrays and their length. Preserve inline tags, code, URLs, numbers and established names. Fully translate other prose; no mixed-script words or partial Han terms. For already-target text, return =; otherwise never use =.\nEnglish>Korean";
+const legacyPromptTokens = estimateLlmPayloadTokens(legacyPrompt);
+const optimizedPromptTokens = estimateLlmPayloadTokens(optimizedPrompt);
+const totalOutputTokens = latestEntries.reduce((sum, entry) => sum + entry.outputTokens, 0);
+const cloudConcurrency = 32;
+const legacyUnitTarget = Math.ceil(legacyPromptTokens / 0.06);
+const optimizedUnitTarget = Math.ceil(optimizedPromptTokens / 0.06);
+const legacyCloudRequests = Math.max(
+    1,
+    Math.min(cloudConcurrency, Math.ceil(totalOutputTokens / legacyUnitTarget))
+);
+const optimizedCloudRequests = Math.max(
+    1,
+    Math.min(cloudConcurrency, Math.floor(totalOutputTokens / optimizedUnitTarget))
+);
 const summary = {
     sections: sectionCount,
     entries: latestEntries.length,
@@ -239,13 +280,29 @@ const summary = {
     collectTiming,
     payloadTiming,
     rawChars,
-    strippedChars,
-    charReductionPct: Number((((rawChars - strippedChars) / rawChars) * 100).toFixed(1)),
+    segmentChars,
+    charReductionPct: Number((((rawChars - segmentChars) / rawChars) * 100).toFixed(1)),
     rawTokens,
-    strippedTokens,
-    tokenReductionPct: Number((((rawTokens - strippedTokens) / rawTokens) * 100).toFixed(1)),
+    segmentTokens,
+    tokenReductionPct: Number((((rawTokens - segmentTokens) / rawTokens) * 100).toFixed(1)),
     verboseMarkerChars: latestVerbose.length,
     compactMarkerChars: latestCompact.length,
+    roleHintMarkerChars: latestRoleHinted.length,
+    roleHintExtraTokens:
+        estimateLlmPayloadTokens(latestRoleHinted) - estimateLlmPayloadTokens(latestCompact),
+    legacyPromptTokens,
+    optimizedPromptTokens,
+    promptTokenReductionPct: Number(
+        (((legacyPromptTokens - optimizedPromptTokens) / legacyPromptTokens) * 100).toFixed(1)
+    ),
+    totalOutputTokens,
+    legacyCloudRequests,
+    optimizedCloudRequests,
+    legacyOutputPerRequest: Math.ceil(totalOutputTokens / legacyCloudRequests),
+    optimizedOutputPerRequest: Math.ceil(totalOutputTokens / optimizedCloudRequests),
+    legacyFixedPromptTokensTotal: legacyCloudRequests * legacyPromptTokens,
+    optimizedFixedPromptTokensTotal: optimizedCloudRequests * optimizedPromptTokens,
+    visibleSingleRequestFixedTokensSaved: optimizedPromptTokens * 2,
     openaiCompatibleBaseBatches: packBatches(latestEntries, baseOptions).length,
     openaiCompatibleAdaptiveBatches: packBatches(latestEntries, adaptiveFastOptions).length,
 };
@@ -253,8 +310,8 @@ const summary = {
 printSummary(summary);
 
 // ---------------------------------------------------------------------------
-// Boilerplate-skip token reduction (opt-in). Models a long encyclopedia article
-// (à la a big Wikipedia page) whose token cost is dominated by a huge references
+// Boilerplate-skip token reduction (opt-in). Models a generic long document
+// whose token cost is dominated by a huge references
 // list and navigation boxes rather than the article body itself.
 // ---------------------------------------------------------------------------
 function buildEncyclopediaPage({ bodyParagraphs, references, navboxLinks }) {
@@ -274,36 +331,40 @@ function buildEncyclopediaPage({ bodyParagraphs, references, navboxLinks }) {
     ).join("\n");
     const nav = Array.from(
         { length: navboxLinks },
-        (_, i) => `<a href="/wiki/Station_${i + 1}">Station ${i + 1}</a>`
+        (_, i) => `<a href="/stations/${i + 1}">Station ${i + 1}</a>`
     ).join(" ");
     return `<main>
-        <div class="mw-parser-output">
-            <div id="toc" class="toc"><ul><li>1 History</li><li>2 Route</li><li>3 Stations</li><li>4 References</li></ul></div>
+        <div class="article-content">
+            <div class="table-of-contents"><ul><li>1 History</li><li>2 Route</li><li>3 Stations</li><li>4 References</li></ul></div>
             ${body}
-            <h2>References <span class="mw-editsection"><a href="#">edit</a></span></h2>
+            <h2>References <span class="page-action"><a href="?action=edit">edit</a></span></h2>
             <ol class="references">${refs}</ol>
-            <table class="navbox"><tbody><tr><td class="navbox-list">${nav}</td></tr></tbody></table>
-            <div class="catlinks"><ul><li><a href="/wiki/Category:Rail">Category: Railway lines</a></li><li><a href="/wiki/Category:1910">Category: 1910 establishments</a></li></ul></div>
+            <table class="navigation-box"><tbody><tr><td class="navigation-box-list">${nav}</td></tr></tbody></table>
+            <div class="category-links"><ul><li><a href="/categories/rail">Category: Railway lines</a></li><li><a href="/categories/1910">Category: 1910 establishments</a></li></ul></div>
         </div>
     </main>`;
 }
 
 function leafTokens(leaves) {
-    return leaves.reduce((sum, leaf) => sum + estimateLlmPayloadTokens(leaf.plainText || ""), 0);
+    return leaves.reduce(
+        (sum, leaf) => sum + estimateLlmPayloadTokens(leaf.text || leaf.plainText || ""),
+        0
+    );
 }
 
 const encyclopediaDom = new JSDOM(
     buildEncyclopediaPage({ bodyParagraphs: 60, references: 200, navboxLinks: 80 })
 );
 const encyclopediaRoot = encyclopediaDom.window.document.querySelector("main");
-const allLeaves = context.collectTranslationLeaves([encyclopediaRoot]);
-const articleLeaves = context.collectTranslationLeaves([encyclopediaRoot], {
-    skipBoilerplate: true,
-});
+const allLeaves = context
+    .findLeafBlocksInElement(encyclopediaRoot)
+    .map((element) => context.serializeTranslationLeaf(element))
+    .filter(Boolean);
+const articleLeaves = allLeaves.filter((leaf) => !context.isBoilerplateRegion(leaf.element));
 const allTokens = leafTokens(allLeaves);
 const articleTokens = leafTokens(articleLeaves);
 const boilerplateSummary = {
-    fixture: "encyclopedia (60 body paragraphs, 200 references, 80 navbox links)",
+    fixture: "generic long document (60 body paragraphs, 200 references, 80 navigation links)",
     leavesFull: allLeaves.length,
     leavesArticleOnly: articleLeaves.length,
     leafReductionPct: Number(
@@ -323,3 +384,72 @@ console.log(
         `(${boilerplateSummary.tokenReductionPct}% less)`
 );
 console.log(JSON.stringify(boilerplateSummary, null, 2));
+
+// ---------------------------------------------------------------------------
+// Site-agnostic semantic packing. The fixture intentionally uses only standard HTML table/list
+// elements — no framework classes or URL checks. Its table shape mirrors a large document's
+// common case (many short cells concentrated in far fewer rows) without embedding site content.
+// ---------------------------------------------------------------------------
+function buildSemanticPackingPage() {
+    let cellIndex = 0;
+    const rows = Array.from({ length: 266 }, (_, rowIndex) => {
+        const cells = rowIndex < 114 ? 5 : 4; // 114*5 + 152*4 = 1,178 cells
+        return `<tr>${Array.from({ length: cells }, (_, columnIndex) => {
+            cellIndex += 1;
+            const tag = columnIndex === 0 ? "th" : "td";
+            return `<${tag}>項目${cellIndex} 行${rowIndex + 1}</${tag}>`;
+        }).join("")}</tr>`;
+    }).join("\n");
+    const list = Array.from(
+        { length: 120 },
+        (_, index) => `<li>一般的な一覧項目 ${index + 1}</li>`
+    ).join("");
+    return `<main><table><tbody>${rows}</tbody></table><ul>${list}</ul></main>`;
+}
+
+const semanticDom = new JSDOM(buildSemanticPackingPage());
+const semanticRoot = semanticDom.window.document.querySelector("main");
+const semanticLeaves = context
+    .findLeafBlocksInElement(semanticRoot)
+    .map((element) => context.serializeTranslationLeaf(element))
+    .filter(Boolean);
+const semanticUnits = context.buildSemanticTranslationUnits(semanticLeaves);
+const leafIr = context.buildTranslationIrBatch(semanticLeaves, {
+    compactMarkers: true,
+    includeRoleHints: true,
+});
+const packedIr = context.buildTranslationIrBatch(semanticUnits, {
+    compactMarkers: true,
+    includeRoleHints: true,
+});
+const semanticPackingSummary = {
+    fixture: "generic semantic DOM (266 table rows / 1,178 cells / 120 list items)",
+    leafMarkers: leafIr.segments.length,
+    semanticMarkers: packedIr.segments.length,
+    markerReductionPct: Number(
+        (
+            ((leafIr.segments.length - packedIr.segments.length) / leafIr.segments.length) *
+            100
+        ).toFixed(1)
+    ),
+    leafInputTokens: estimateLlmPayloadTokens(leafIr.text),
+    semanticInputTokens: estimateLlmPayloadTokens(packedIr.text),
+};
+semanticPackingSummary.inputTokenReductionPct = Number(
+    (
+        ((semanticPackingSummary.leafInputTokens - semanticPackingSummary.semanticInputTokens) /
+            semanticPackingSummary.leafInputTokens) *
+        100
+    ).toFixed(1)
+);
+console.log("\nSemantic DOM packing (site-agnostic)");
+console.log(
+    `markers: ${semanticPackingSummary.leafMarkers} -> ${semanticPackingSummary.semanticMarkers} ` +
+        `(${semanticPackingSummary.markerReductionPct}% fewer)`
+);
+console.log(
+    `input token estimate: ${semanticPackingSummary.leafInputTokens} -> ` +
+        `${semanticPackingSummary.semanticInputTokens} ` +
+        `(${semanticPackingSummary.inputTokenReductionPct}% less)`
+);
+console.log(JSON.stringify(semanticPackingSummary, null, 2));

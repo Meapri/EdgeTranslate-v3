@@ -9,3 +9,6 @@
 **/.DS_Store
 **/.idea
 **/*.log
+
+# local benchmark ledgers, latency measurements, and delete-backups (scratch/output)
+.artifacts/

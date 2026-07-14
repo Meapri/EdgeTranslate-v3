@@ -1,0 +1,273 @@
+{
+    "$schema": "edge-translate/vnext-gate-a-fixtures/v1",
+    "cases": [
+        {
+            "id": "generic-complex-ja-ko",
+            "families": [
+                "paragraph",
+                "table",
+                "inline-tags",
+                "interactive-link",
+                "word-order",
+                "attributes"
+            ],
+            "sourceLanguage": "ja",
+            "targetLanguage": "ko",
+            "html": "<main id=\"main\"><h1 data-check=\"heading\">交通案内</h1><p data-check=\"paragraph\">この路線は大阪と京都を結びます。</p><p data-check=\"word-order-adversarial\"><strong>京阪本線</strong>を私は毎日利用します。</p><p data-check=\"word-order-movable\">私は<strong>京阪本線</strong>を毎日利用します。</p><table data-check=\"table\"><thead><tr><th>駅名</th><th>乗換案内</th></tr></thead><tbody><tr><td><a href=\"#central\">中央駅</a></td><td>地下鉄に乗り換えます。</td></tr></tbody></table><img data-check=\"image\" src=\"route.png\" alt=\"路線図\"><input data-check=\"input\" placeholder=\"駅名を入力\"><button data-check=\"button\" aria-label=\"検索\">検索する</button></main><aside id=\"outside\">DO_NOT_TRANSLATE</aside>",
+            "allowedFlattenMax": 1,
+            "expectAlternatives": [
+                {
+                    "label": "styling-wrapper-flatten",
+                    "assertions": [
+                        {
+                            "selector": "[data-check=word-order-adversarial]",
+                            "property": "textContent",
+                            "equals": "나는 매일 게이한 본선을 이용해."
+                        },
+                        {
+                            "selector": "[data-check=word-order-adversarial] strong",
+                            "property": "textContent",
+                            "equals": ""
+                        }
+                    ]
+                },
+                {
+                    "label": "safe-keep-source",
+                    "assertions": [
+                        {
+                            "selector": "[data-check=word-order-adversarial]",
+                            "property": "textContent",
+                            "equals": "京阪本線を私は毎日利用します。"
+                        },
+                        {
+                            "selector": "[data-check=word-order-adversarial] strong",
+                            "property": "textContent",
+                            "equals": "京阪本線"
+                        }
+                    ]
+                }
+            ],
+            "expect": [
+                {
+                    "selector": "[data-check=heading]",
+                    "property": "textContent",
+                    "equals": "교통 안내"
+                },
+                {
+                    "selector": "[data-check=paragraph]",
+                    "property": "textContent",
+                    "equals": "이 노선은 오사카와 교토를 연결해."
+                },
+                {
+                    "selector": "[data-check=word-order-movable]",
+                    "property": "textContent",
+                    "equals": "나는 매일 게이한 본선을 이용해."
+                },
+                {
+                    "selector": "[data-check=word-order-movable] strong",
+                    "property": "textContent",
+                    "equals": "게이한 본선"
+                },
+                {
+                    "selector": "[data-check=table] th:nth-child(1)",
+                    "property": "textContent",
+                    "equals": "역 이름"
+                },
+                {
+                    "selector": "[data-check=table] th:nth-child(2)",
+                    "property": "textContent",
+                    "equals": "환승 안내"
+                },
+                {
+                    "selector": "[data-check=table] a",
+                    "property": "textContent",
+                    "equals": "중앙역"
+                },
+                {
+                    "selector": "[data-check=table] td:nth-child(2)",
+                    "property": "textContent",
+                    "equals": "지하철로 갈아타."
+                },
+                {
+                    "selector": "[data-check=image]",
+                    "attribute": "alt",
+                    "equals": "노선도"
+                },
+                {
+                    "selector": "[data-check=input]",
+                    "attribute": "placeholder",
+                    "equals": "역 이름 입력"
+                },
+                {
+                    "selector": "[data-check=button]",
+                    "attribute": "aria-label",
+                    "equals": "검색"
+                },
+                {
+                    "selector": "[data-check=button]",
+                    "property": "textContent",
+                    "equals": "검색하기"
+                },
+                {
+                    "selector": "#outside",
+                    "property": "textContent",
+                    "equals": "DO_NOT_TRANSLATE"
+                }
+            ],
+            "expected": {
+                "phase": "complete",
+                "failedStrings": 0,
+                "incompleteStrings": 0
+            }
+        },
+        {
+            "id": "rtl-inline-ar-ko",
+            "families": ["rtl"],
+            "sourceLanguage": "ar",
+            "targetLanguage": "ko",
+            "html": "<main id=\"main\" dir=\"rtl\"><p data-check=\"rtl\">هذا مسار يربط المدينة بالمطار.</p></main><aside id=\"outside\">DO_NOT_TRANSLATE</aside>",
+            "expect": [
+                {
+                    "selector": "[data-check=rtl]",
+                    "property": "textContent",
+                    "equals": "이것은 도시와 공항을 연결하는 노선이야."
+                },
+                {
+                    "selector": "#main",
+                    "attribute": "dir",
+                    "equals": "rtl"
+                }
+            ],
+            "expected": {
+                "phase": "complete",
+                "failedStrings": 0,
+                "incompleteStrings": 0
+            }
+        },
+        {
+            "id": "spa-late-and-attribute-mutation",
+            "families": ["spa-late-insert", "attribute-mutation"],
+            "sourceLanguage": "ja",
+            "targetLanguage": "ko",
+            "html": "<main id=\"main\"><p data-check=\"initial\">初期コンテンツです。</p><input data-check=\"dynamic-input\" placeholder=\"最初の入力案内\"></main><aside id=\"outside\">DO_NOT_TRANSLATE</aside>",
+            "expect": [
+                {
+                    "selector": "[data-check=initial]",
+                    "property": "textContent",
+                    "equals": "초기 콘텐츠야."
+                },
+                {
+                    "selector": "[data-check=dynamic-input]",
+                    "attribute": "placeholder",
+                    "equals": "첫 입력 안내",
+                    "stage": "initial"
+                }
+            ],
+            "mutations": [
+                {
+                    "type": "appendHtml",
+                    "selector": "#main",
+                    "html": "<p data-check=\"late\">後から追加された案内です。</p>",
+                    "expect": {
+                        "selector": "[data-check=late]",
+                        "property": "textContent",
+                        "equals": "나중에 추가된 안내야."
+                    }
+                },
+                {
+                    "type": "setAttribute",
+                    "selector": "[data-check=dynamic-input]",
+                    "attribute": "placeholder",
+                    "value": "更新された入力案内",
+                    "expect": {
+                        "selector": "[data-check=dynamic-input]",
+                        "attribute": "placeholder",
+                        "equals": "업데이트된 입력 안내"
+                    }
+                }
+            ],
+            "expected": {
+                "phase": "complete",
+                "failedStrings": 0,
+                "incompleteStrings": 0
+            }
+        },
+        {
+            "id": "explicit-incomplete-accounting",
+            "families": ["explicit-incomplete-accounting"],
+            "sourceLanguage": "ja",
+            "targetLanguage": "ko",
+            "expectedRecoveryHint": "reinforced-semantic",
+            "html": "<main id=\"main\"><p data-check=\"failure\">これは意図的な失敗を検証するための十分に長い文章であり、原文を安全に維持する必要があります。</p></main><aside id=\"outside\">DO_NOT_TRANSLATE</aside>",
+            "expect": [
+                {
+                    "selector": "[data-check=failure]",
+                    "property": "textContent",
+                    "equals": "これは意図的な失敗を検証するための十分に長い文章であり、原文を安全に維持する必要があります。"
+                }
+            ],
+            "expected": {
+                "phase": "complete",
+                "failedStrings": 1,
+                "incompleteStrings": 1
+            }
+        },
+        {
+            "id": "missing-usage-estimate",
+            "families": ["missing-usage-receipt"],
+            "sourceLanguage": "ja",
+            "targetLanguage": "ko",
+            "usageMode": "missing",
+            "html": "<main id=\"main\"><p data-check=\"missing-usage\">利用状況の情報がない場合も安全に見積もります。</p></main><aside id=\"outside\">DO_NOT_TRANSLATE</aside>",
+            "expect": [
+                {
+                    "selector": "[data-check=missing-usage]",
+                    "property": "textContent",
+                    "equals": "사용량 정보가 없어도 안전하게 추정해."
+                }
+            ],
+            "expected": {
+                "phase": "complete",
+                "failedStrings": 0,
+                "incompleteStrings": 0,
+                "estimatedTokensMin": 1
+            }
+        },
+        {
+            "id": "large-synthetic-semantic-packing",
+            "families": ["large-dom-semantic-packing"],
+            "sourceLanguage": "ja",
+            "targetLanguage": "ko",
+            "generate": {
+                "type": "largeSemanticBlocks",
+                "blocks": 600,
+                "textNodesPerBlock": 5,
+                "viewportBlocks": 12
+            },
+            "expect": [
+                {
+                    "selector": "[data-large-index=\"1\"]",
+                    "property": "textContent",
+                    "equals": "대규모검증블록번호0001안내"
+                },
+                {
+                    "selector": "[data-large-index=\"600\"]",
+                    "property": "textContent",
+                    "equals": "대규모검증블록번호0600안내"
+                },
+                {
+                    "selector": "#outside",
+                    "property": "textContent",
+                    "equals": "DO_NOT_TRANSLATE"
+                }
+            ],
+            "expected": {
+                "phase": "complete",
+                "failedStrings": 0,
+                "incompleteStrings": 0,
+                "totalStrings": 600,
+                "domTextNodes": 3000
+            }
+        }
+    ]
+}

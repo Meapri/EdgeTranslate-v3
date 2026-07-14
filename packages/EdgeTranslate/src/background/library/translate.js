@@ -10,6 +10,7 @@ import {
 } from "common/scripts/chrome_builtin_translate.js";
 import TtlCache from "./ttlCache.js";
 import { executeGoogleScript } from "./pageTranslate.js";
+import { AiPageTranslationTransport } from "./ai_page_translation_transport.js";
 
 const GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS = 2;
 const LOCAL_AI_TRANSLATION_CACHE_VERSION = "local-ai-prompt-2026-06-10-lean-v4";
@@ -22,6 +23,21 @@ function fnv1a32Hash(str) {
         hash = (hash * 0x01000193) >>> 0;
     }
     return hash.toString(36);
+}
+
+function loopbackAiPageTestBaseUrl(value) {
+    try {
+        const url = new URL(String(value || ""));
+        const isHttp = url.protocol === "http:" || url.protocol === "https:";
+        const isLoopback =
+            url.hostname === "localhost" ||
+            url.hostname === "127.0.0.1" ||
+            url.hostname === "[::1]";
+        if (!isHttp || !isLoopback || url.username || url.password) return "";
+        return url.href.replace(/\/+$/, "");
+    } catch {
+        return "";
+    }
 }
 
 // Cheap, deterministic dominant-script detection. The AI translator's detect() returns "auto"
@@ -165,6 +181,15 @@ class TranslatorManager {
         this.geminiNanoMaxConcurrentTranslations = GEMINI_NANO_MAX_CONCURRENT_TRANSLATIONS;
         this.geminiNanoActiveTranslations = 0;
         this.geminiNanoTranslationQueue = [];
+        this._aiPageV2ProfileRevision = 1;
+        // vNext transport (schema page-v3-1). Rides the shared local-ai-page provider profile
+        // resolved by getAiPageV2ProviderProfile (persisted aiPageV2* setting keys retained).
+        this.aiPageTranslationTransport = new AiPageTranslationTransport({
+            resolveProfile: async (profileId) => {
+                await this.config_loader;
+                return this.getAiPageV2ProviderProfile(profileId);
+            },
+        });
 
         /**
          * Start to provide services and listen to event.
@@ -176,6 +201,80 @@ class TranslatorManager {
     /**
      * Clear caches when configuration or language settings change
      */
+    getAiPageV2ProviderProfile(profileId = "local-ai-page") {
+        if (profileId !== "local-ai-page") return null;
+        const config = this.LOCAL_TRANSLATOR_CONFIG || {};
+        const revision = `config-${this._aiPageV2ProfileRevision}`;
+        const common = {
+            id: profileId,
+            revision,
+            maxInputTokens: Number(config.aiPageV2MaxInputTokens) || undefined,
+            maxOutputTokens: Number(config.aiPageV2MaxOutputTokens) || undefined,
+            maxCombinedTokens: Number(config.aiPageV2MaxCombinedTokens) || undefined,
+            timeoutMs: Math.max(1000, Number(config.timeoutMs) || 120000),
+        };
+        if (config.mode === "openai") {
+            const baseUrl = loopbackAiPageTestBaseUrl(config.aiPageV2OpenAIBaseUrl);
+            const configuredEffort = String(config.openaiReasoningEffort || "").trim();
+            return {
+                ...common,
+                protocol: "openai-responses",
+                modelId: config.openaiModel || "",
+                // A loopback test endpoint must never receive a user's actual provider key.
+                apiKey: baseUrl ? "local-stub-key" : config.openaiApiKey || "",
+                // Intentionally has no options-page control. Browser integration tests may
+                // point the real Responses adapter at a loopback stub; an omitted value keeps
+                // the shipping https://api.openai.com/v1 default unchanged.
+                baseUrl,
+                structuredOutput: "json-schema",
+                // With no explicit override, let the adapter select the lowest effort the
+                // model family supports. Forcing `none` here used to disable that policy and
+                // could leave older GPT-5 models on their costlier provider default.
+                ...(configuredEffort
+                    ? { reasoningControl: "effort", reasoningValue: configuredEffort }
+                    : {}),
+            };
+        }
+        if (config.mode === "openaiCompatible") {
+            return {
+                ...common,
+                protocol: "openai-chat",
+                modelId: config.openaiCompatibleModel || "",
+                apiKey: config.openaiCompatibleApiKey || "",
+                baseUrl: String(config.openaiCompatibleBaseUrl || "").replace(/\/+$/, ""),
+                structuredOutput: config.aiPageV2CompatibleStructuredOutput || "prompt-json",
+                outputLimitField: config.aiPageV2CompatibleOutputLimitField || "max_tokens",
+            };
+        }
+        const baseUrl = loopbackAiPageTestBaseUrl(config.aiPageV2GeminiBaseUrl);
+        const configuredThinking = config.aiPageV2ThinkingValue;
+        const hasThinkingOverride =
+            configuredThinking !== undefined &&
+            configuredThinking !== null &&
+            String(configuredThinking).trim() !== "" &&
+            Number(configuredThinking) !== 0;
+        return {
+            ...common,
+            protocol: "gemini-generate-content",
+            modelId: config.model || "",
+            apiKey: baseUrl ? "local-stub-key" : config.apiKey || "",
+            // Same loopback-only test seam as the OpenAI profile above. Blank means the
+            // official Gemini v1beta endpoint selected by the adapter.
+            baseUrl,
+            structuredOutput: "json-schema",
+            temperatureSupported: config.aiPageV2TemperatureSupported === true,
+            // Zero is the historical default, not a universal Gemini parameter. Let the
+            // adapter map it to each family minimum (2.5 Flash=0, 2.5 Pro=128, Gemini 3=
+            // thinkingLevel); only a genuine non-zero/string override bypasses that policy.
+            ...(hasThinkingOverride
+                ? {
+                      reasoningControl: "thinking-config",
+                      reasoningValue: configuredThinking,
+                  }
+                : {}),
+        };
+    }
+
     createLocalTranslatorProxy(localTranslator, initialConfig = {}) {
         let config = initialConfig || {};
         const manager = this;
@@ -1114,7 +1213,33 @@ class TranslatorManager {
 
     rememberTranslation(text, sl, tl, translatorId, result, cacheProfile = "") {
         const key = this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
-        this.translationCache.set(key, result, this.cacheOptions.translateTtlMs);
+        // Usage belongs to the provider call that produced this value, not to the reusable
+        // translation asset. Keeping it in cache would charge the same historical spend again
+        // on every cache hit and could falsely trip the page runaway guard.
+        const cachedResult =
+            result && typeof result === "object" ? { ...result, tokenUsage: undefined } : result;
+        this.translationCache.set(key, cachedResult, this.cacheOptions.translateTtlMs);
+    }
+
+    cloneTranslationValueWithoutUsage(value) {
+        if (!value || typeof value !== "object") return value;
+        if (value instanceof Error) {
+            const cloned = Object.assign(new Error(value.message), value);
+            cloned.name = value.name;
+            cloned.stack = value.stack;
+            cloned.tokenUsage = undefined;
+            return cloned;
+        }
+        return { ...value, tokenUsage: undefined };
+    }
+
+    joinInflightTranslationWithoutUsage(promise) {
+        return promise.then(
+            (result) => this.cloneTranslationValueWithoutUsage(result),
+            (error) => {
+                throw this.cloneTranslationValueWithoutUsage(error);
+            }
+        );
     }
 
     makeQuietTranslateCacheProfile(engine = "", textRole = "", translationProfile = "") {
@@ -1131,6 +1256,28 @@ class TranslatorManager {
      * This should be called for only once!
      */
     provideServices() {
+        // vNext AI page translation services (schema page-v3-1) — the sole cloud page
+        // translation transport now that the V2/stable/google engines are retired.
+        this.channel.provide("get_page_translation_capabilities", async (params) => {
+            await this.config_loader;
+            return this.aiPageTranslationTransport.getCapabilities(params || {});
+        });
+
+        this.channel.provide("count_page_translation_tokens", async (params) => {
+            await this.config_loader;
+            return this.aiPageTranslationTransport.countInput(params || {});
+        });
+
+        this.channel.provide("translate_page_packet", async (params, sender) => {
+            await this.config_loader;
+            return this.aiPageTranslationTransport.translate(params || {}, sender);
+        });
+
+        this.channel.provide("cancel_page_translation", async (params, sender) => {
+            await this.config_loader;
+            return this.aiPageTranslationTransport.cancel(params || {}, sender);
+        });
+
         // Translate service.
         this.channel.provide("translate", (params, sender) =>
             this.translate(
@@ -1206,7 +1353,9 @@ class TranslatorManager {
                         ? null
                         : this.makeTranslateKey(text, sl, tl, translatorId, cacheProfile);
                     if (key && this.inflightTranslate.has(key)) {
-                        result = await this.inflightTranslate.get(key);
+                        result = await this.joinInflightTranslationWithoutUsage(
+                            this.inflightTranslate.get(key)
+                        );
                     } else {
                         const translatorOptions = {
                             textRole,
@@ -1245,12 +1394,7 @@ class TranslatorManager {
                 }
                 return Promise.resolve(result || { originalText: text, translatedText: text });
             } catch (e) {
-                return Promise.resolve({
-                    originalText: text,
-                    translatedText: text,
-                    translationFailed: true,
-                    errorMsg: this.getErrorMessage(e),
-                });
+                return Promise.resolve(this.createQuietTranslationFailure(e, text));
             } finally {
                 this.currentChromeBuiltinTabId = previousChromeBuiltinTabId;
             }
@@ -1362,6 +1506,9 @@ class TranslatorManager {
 
                     if (changes["LocalTranslatorConfig"]) {
                         this.LOCAL_TRANSLATOR_CONFIG = changes["LocalTranslatorConfig"].newValue;
+                        this._aiPageV2ProfileRevision += 1;
+                        this.aiPageTranslationTransport?.cancelAll("profile-changed");
+                        this.aiPageTranslationTransport?.invalidateCapabilities();
                         this.HYBRID_TRANSLATOR.useLocalConfig(
                             changes["LocalTranslatorConfig"].newValue
                         );
@@ -1699,7 +1846,10 @@ class TranslatorManager {
                     if (this.inflightTranslate.has(key)) {
                         // A duplicate concurrent request joins the in-flight one (it simply
                         // doesn't get its own stream preview — the final result still lands).
-                        result = await this.inflightTranslate.get(key);
+                        // Only the owner receives provider usage; the joiner reuses text/error.
+                        result = await this.joinInflightTranslationWithoutUsage(
+                            this.inflightTranslate.get(key)
+                        );
                     } else {
                         // Cloud SSE streaming for the selection panel: forward accumulated
                         // text as preview frames through the existing stream pipeline. The
@@ -1812,11 +1962,31 @@ class TranslatorManager {
         }
     }
 
+    createQuietTranslationFailure(error, originalText = "") {
+        const status = Number(error?.httpStatus ?? error?.status);
+        return {
+            originalText,
+            translatedText: originalText,
+            translationFailed: true,
+            errorCode: error?.errorCode || error?.name || "TRANSLATION_ERROR",
+            errorMsg: this.getErrorMessage(error),
+            ...(Number.isFinite(status) && status > 0 ? { httpStatus: status } : {}),
+            retryable: error?.retryable === true,
+            providerRetryExhausted: error?.providerRetryExhausted === true,
+            ...(error?.tokenUsage ? { tokenUsage: error.tokenUsage } : {}),
+            ...(error?.partialOutput ? { partialTranslation: String(error.partialOutput) } : {}),
+        };
+    }
+
     serializeError(error) {
+        const status = Number(error?.httpStatus ?? error?.status);
         return {
             errorType: error?.errorType || "API_ERR",
             errorCode: error?.errorCode || error?.name || "Error",
             errorMsg: this.getErrorMessage(error),
+            ...(Number.isFinite(status) && status > 0 ? { httpStatus: status } : {}),
+            retryable: error?.retryable === true,
+            providerRetryExhausted: error?.providerRetryExhausted === true,
             errorAct: error?.errorAct || (error?.stack ? { stack: error.stack } : undefined),
         };
     }

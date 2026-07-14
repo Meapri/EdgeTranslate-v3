@@ -254,8 +254,24 @@
         "description": "PDF 파일을 브라우저 기본 뷰어 대신 EdgeTranslate 내장 pdf.js 뷰어로 엽니다."
     },
     "AiPageLazyTranslate": {
-        "message": "AI 페이지 지연 번역 (스크롤 시 번역)",
-        "description": "전체 페이지를 한 번에 AI로 보내는 대신, 화면 근처 콘텐츠를 먼저 번역하고 나머지는 스크롤할 때 번역합니다."
+        "message": "레거시/V2 지연 번역 (스크롤 시 번역)",
+        "description": "명시적 V1·V2에서만 사용합니다. 기본 Google 방식 경로는 화면 거리 판단 없이 문서 전체를 번역합니다."
+    },
+    "AiPagePipelineVersion": {
+        "message": "AI 페이지 번역 파이프라인",
+        "description": "안정 버전 또는 미리보기 페이지 번역 파이프라인을 선택합니다."
+    },
+    "AiPagePipelineAuto": {
+        "message": "자동 (Google 방식 연속 번역)",
+        "description": "수동 토큰 중단 없이 문서 전체를 묶음 처리하고 누락된 문자열만 자동 복구합니다."
+    },
+    "AiPagePipelineV1": {
+        "message": "V1 (안정 롤백)",
+        "description": "기존 안정 파이프라인을 강제로 사용합니다."
+    },
+    "AiPagePipelineV2": {
+        "message": "V2 미리보기 (구조화·토큰 제한)",
+        "description": "새 구조화 출력과 하드 토큰 예산 파이프라인을 시험합니다."
     },
     "AiPageSkipBoilerplate": {
         "message": "AI 페이지 번역 시 참고문헌·내비게이션 건너뛰기",
@@ -1403,6 +1419,10 @@
     "LocalTranslatorOpenAIModel": {
         "message": "OpenAI 모델",
         "description": "OpenAI 모델 이름"
+    },
+    "RefreshModelList": {
+        "message": "모델 목록 새로고침",
+        "description": "Refetch the provider's available models using the saved API key."
     },
     "TranslateNormal": {
         "message": "일반 번역",

@@ -1,17 +1,21 @@
 import {
     applyHtmlPageSection,
     applyPageSegments,
+    applySemanticPageSegments,
     buildContextTranslationGroups,
     buildSafeTranslatedHtml,
     buildSegmentedTranslationText,
+    buildSemanticTranslationUnits,
     buildStrippedSectionHtml,
     buildTranslationIrBatch,
     captureLeafSegmentTexts,
     captureLeafTextsFromElement,
     collectHtmlPageSections,
     findLeafBlocksInElement,
+    expandSemanticTranslationUnits,
     leafBlockOwnText,
     inferDomPageTextRole,
+    isAlreadyInTargetLanguage,
     isBoilerplateRegion,
     applyPageSegmentToBlock,
     splitTextIntoSentences,
@@ -25,6 +29,104 @@ import {
     stripPresentationAttrs,
     wrapLeafLineSegmentsInSpans,
 } from "../../../src/content/dom_page_translate_context.js";
+
+describe("site-agnostic semantic IR packing", () => {
+    it("packs standard table cells by row and applies every destination without touching links", () => {
+        document.body.innerHTML = `
+            <table><tbody>
+                <tr id="r1"><th>駅名</th><td><a href="/station">淀屋橋駅</a></td><td>特急停車</td></tr>
+                <tr id="r2"><th>距離</th><td>1.3 km</td></tr>
+            </tbody></table>
+        `;
+        const leaves = findLeafBlocksInElement(document.querySelector("table"))
+            .map((leaf) => serializeTranslationLeaf(leaf))
+            .filter(Boolean);
+        const units = buildSemanticTranslationUnits(leaves);
+
+        expect(units).toHaveLength(2);
+        expect(units.map((unit) => unit.kind)).toEqual(["table-row", "table-row"]);
+        expect(units[0].targets).toHaveLength(3);
+        expect(JSON.parse(units[0].text)).toEqual(["駅名", "淀屋橋駅", "特急停車"]);
+
+        const applied = applySemanticPageSegments(
+            units,
+            new Map([
+                [1, JSON.stringify(["역명", "요도야바시역", "특급 정차"])],
+                [2, JSON.stringify(["거리", "1.3 km"])],
+            ])
+        );
+        expect(applied).toBe(2);
+        expect(document.getElementById("r1").textContent.replace(/\s+/g, " ").trim()).toBe(
+            "역명요도야바시역특급 정차"
+        );
+        expect(document.querySelector("a").getAttribute("href")).toBe("/station");
+    });
+
+    it("uses only standard ARIA row/cell relationships, never site classes", () => {
+        document.body.innerHTML = `
+            <div role="table">
+                <div role="row" class="arbitrary-site-class">
+                    <span role="columnheader">Plan</span><span role="cell">Price</span>
+                </div>
+            </div>
+        `;
+        const leaves = Array.from(document.querySelectorAll("[role='columnheader'],[role='cell']"))
+            .map((leaf) => serializeTranslationLeaf(leaf))
+            .filter(Boolean);
+        const units = buildSemanticTranslationUnits(leaves);
+        expect(units).toHaveLength(1);
+        expect(units[0].kind).toBe("table-row");
+        expect(units[0].targets.map((target) => target.element.getAttribute("role"))).toEqual([
+            "columnheader",
+            "cell",
+        ]);
+    });
+
+    it("keeps multiple leaf blocks from one cell inside the same row unit", () => {
+        document.body.innerHTML = `
+            <table><tr><td><p>First line</p><p>Second line</p></td><td>Third cell</td></tr></table>
+        `;
+        const leaves = findLeafBlocksInElement(document.querySelector("table"))
+            .map((leaf) => serializeTranslationLeaf(leaf))
+            .filter(Boolean);
+        const units = buildSemanticTranslationUnits(leaves);
+        expect(units).toHaveLength(1);
+        expect(units[0].kind).toBe("table-row");
+        expect(units[0].targets).toHaveLength(3);
+    });
+
+    it("packs only sibling list items and keeps nested lists in their own run", () => {
+        document.body.innerHTML = `
+            <ul id="outer">
+                <li id="a">第一項</li><li id="b">第二項</li>
+                <li id="c">親項目<ul id="inner"><li id="d">子項目一</li><li id="e">子項目二</li></ul></li>
+            </ul>
+        `;
+        const leaves = findLeafBlocksInElement(document.getElementById("outer"))
+            .map((leaf) => serializeTranslationLeaf(leaf))
+            .filter(Boolean);
+        const units = buildSemanticTranslationUnits(leaves);
+        const listRuns = units.filter((unit) => unit.kind === "list-run");
+        expect(listRuns).toHaveLength(2);
+        expect(listRuns[0].targets.map((target) => target.element.id)).toEqual(["a", "b", "c"]);
+        expect(listRuns[1].targets.map((target) => target.element.id)).toEqual(["d", "e"]);
+    });
+
+    it("rejects a malformed packed array and expands only that unit to proven leaf markers", () => {
+        document.body.innerHTML = `<table><tr><td>One</td><td>Two</td></tr></table>`;
+        const leaves = findLeafBlocksInElement(document.querySelector("table"))
+            .map((leaf) => serializeTranslationLeaf(leaf))
+            .filter(Boolean);
+        const units = buildSemanticTranslationUnits(leaves);
+
+        expect(applySemanticPageSegments(units, new Map([[1, JSON.stringify(["하나"])]]))).toBe(0);
+        expect(units[0]._formatFailed).toBe(true);
+        const expanded = expandSemanticTranslationUnits(units, { onlyFailed: true });
+        expect(expanded).toHaveLength(2);
+        expect(expanded.every((unit) => unit.kind === "leaf")).toBe(true);
+        expect(document.querySelector("tr").textContent).toBe("OneTwo");
+    });
+});
 
 describe("DOM page translation context grouping", () => {
     it("groups sibling text nodes under the same block into one context translation request", () => {
@@ -214,6 +316,17 @@ describe("DOM page translation context grouping", () => {
             { compactMarkers: true }
         );
         expect(compactSource).toBe("[[1]]\nFirst paragraph.\n[[2]]\nSecond paragraph.");
+        const hintedCompactSource = buildSegmentedTranslationText(
+            [
+                { text: "Notice title", role: "title" },
+                { text: "Article body text.", role: "paragraph" },
+                { text: "2025-07-12", role: "date" },
+            ],
+            { compactMarkers: true, includeRoleHints: true }
+        );
+        expect(hintedCompactSource).toBe(
+            "[[1:title]]\nNotice title\n[[2]]\nArticle body text.\n[[3:date]]\n2025-07-12"
+        );
         expect(splitSegmentedTranslationText("[[1]]\n첫 문단.\n[[2]]\n둘째 문단.", 2)).toEqual([
             "첫 문단.",
             "둘째 문단.",
@@ -253,6 +366,41 @@ describe("LLM translation IR primitives", () => {
 
         expect(batch.text).toBe("[[1]]\nArticle title\n[[2]]\nArticle body sentence.");
         expect(batch.segments.map((segment) => segment.id)).toEqual([1, 2]);
+    });
+
+    it("adds sparse role hints to compact IR without charging paragraph markers", () => {
+        document.body.innerHTML = `
+            <article>
+                <h1 id="title">Article title</h1>
+                <p id="body">Article body sentence.</p>
+            </article>
+        `;
+        const batch = buildTranslationIrBatch(
+            [
+                { element: document.getElementById("title") },
+                { element: document.getElementById("body") },
+            ],
+            { compactMarkers: true, includeRoleHints: true }
+        );
+
+        expect(batch.text).toBe("[[1:title]]\nArticle title\n[[2]]\nArticle body sentence.");
+    });
+});
+
+describe("already-target-language fast path", () => {
+    it("never treats a different Latin language as already translated", () => {
+        expect(isAlreadyInTargetLanguage("Hello from the project team.", "fr", "en")).toBe(false);
+        expect(isAlreadyInTargetLanguage("Bonjour de toute l'équipe.", "fr", "fr")).toBe(true);
+    });
+
+    it("never treats a different Cyrillic language as already translated", () => {
+        expect(isAlreadyInTargetLanguage("Это русский исходный текст.", "uk", "ru")).toBe(false);
+        expect(isAlreadyInTargetLanguage("Це вже український текст.", "uk", "uk")).toBe(true);
+    });
+
+    it("never treats a kanji-only Japanese heading as already Chinese", () => {
+        expect(isAlreadyInTargetLanguage("東京都知事選挙結果", "zh", "ja")).toBe(false);
+        expect(isAlreadyInTargetLanguage("北京市人民政府公告", "zh", "zh")).toBe(true);
     });
 });
 
@@ -988,10 +1136,10 @@ describe("Boilerplate region detection (opt-in token saver)", () => {
 
     it("flags navboxes, category links, the TOC and edit links", () => {
         frag(`
-            <table class="navbox"><tr><td id="nav">Related lines and stations</td></tr></table>
-            <div class="catlinks"><p id="cat">Categories list</p></div>
-            <div id="toc" class="toc"><p id="tocItem">Contents</p></div>
-            <span class="mw-editsection"><a id="edit" href="#">edit</a></span>
+            <table class="navigation-box"><tr><td id="nav">Related lines and stations</td></tr></table>
+            <div class="category-links"><p id="cat">Categories list</p></div>
+            <div id="table-of-contents"><p id="tocItem">Contents</p></div>
+            <span class="page-action"><a id="edit" href="?mode=edit">edit</a></span>
         `);
         expect(isBoilerplateRegion(document.getElementById("nav"))).toBe(true);
         expect(isBoilerplateRegion(document.getElementById("cat"))).toBe(true);
@@ -1008,7 +1156,7 @@ describe("Boilerplate region detection (opt-in token saver)", () => {
 
     it("does NOT flag ordinary article prose", () => {
         frag(`
-            <article class="mw-parser-output">
+            <article class="article-content random-site-theme">
                 <p id="lead">The line opened in 1910 and has been expanded several times since.</p>
                 <p id="body">It connects two major cities and carries heavy commuter traffic with <a href="#">one inline link</a> only.</p>
             </article>

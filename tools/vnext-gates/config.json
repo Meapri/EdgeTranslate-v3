@@ -1,0 +1,202 @@
+{
+    "$comment": "vNext AI page translation — pinned ship-gate thresholds. Source of truth: docs/AI_PAGE_TRANSLATION_VNEXT.md §5. Gating runs against NDJSON ledgers only; hand-written tables are not evidence. No pipeline change ships without Gates A-E.",
+    "promptVersion": "pt3-3",
+    "wireVersion": "pt3",
+    "gate0_placeholderProbe": {
+        "$comment": "Pre-freeze live probe: 3 providers x 2 pairs (ja->ko, ja->en) x n=5, fixture blocks with 2-6 placeholders in 64-block packets. Runs BEFORE the session layer is built; on fail, revise placeholder alphabet (candidate ⟦n⟧) and re-run.",
+        "minIntactInventoryRate": 0.98,
+        "providers": [
+            "openai",
+            "googleAiStudio",
+            "openaiCompatible"
+        ],
+        "pairs": [
+            "ja-ko",
+            "ja-en"
+        ],
+        "runsPerCell": 5
+    },
+    "gateA_offlineReplay": {
+        "$comment": "CI, free, every PR. >=6 of 12 fixture families + recorded provider replies.",
+        "minFixtureFamilies": 6,
+        "wrongTargetApply": 0,
+        "wrongTargetApplyIsAbsolute": true,
+        "minPlaceholderFidelityNoFlatten": 0.99,
+        "packetTokenPinTolerance": 0.05,
+        "usageDoubleCount": 0
+    },
+    "gateB_placeholderProperties": {
+        "$comment": "CI, free. Generative round-trip + adversarial mangling. Ladder must terminate in repair|flatten|atomic-degrade; never throw, never write outside block, never blank interactive-element text, never loop.",
+        "generativeIterations": 200,
+        "maxNestingDepth": 4
+    },
+    "gateC_liveQuality": {
+        "$comment": "n>=5 AB/BA, pre-ship + weekly. chrF refs generated once by strongest model, human spot-checked, committed.",
+        "runs": 5,
+        "providers": [
+            "openai",
+            "googleAiStudio"
+        ],
+        "pairs": [
+            "ja-ko",
+            "en-ko",
+            "ja-en"
+        ],
+        "snapshots": 3,
+        "chrfDeltaWordOrderPairs": 3.0,
+        "chrfDeltaOtherPairs": -0.5,
+        "fallbackRule": {
+            "$comment": "Pre-registered deadlock breaker: PASS if wordOrderProbes >= threshold AND chrF >= stable-0.5 on every pair.",
+            "wordOrderProbesMin": 18,
+            "wordOrderProbesTotal": 20,
+            "chrfDeltaFloor": -0.5
+        },
+        "terminologyRecallMin": 0.95,
+        "placeholderFidelityLiveMin": 0.98,
+        "flattenRateMax": 0.01
+    },
+    "gateD_latency": {
+        "$comment": "Live Chrome, 4G throttle, same harness. TTFP = first CAS commit.",
+        "m1": {
+            "ttfpP50Ms": 2500,
+            "ttfpP90Ms": 4000,
+            "viewportCompleteP50Ms": 6000,
+            "fullDrainMaxMs": {
+                "googleAiStudio": 60000,
+                "openai": 90000
+            },
+            "retryAmplificationBeyondSpec7": 0
+        },
+        "m2_streaming": {
+            "ttfpP50Ms": 1800
+        }
+    },
+    "gateE_tokens": {
+        "$comment": "Receipts-vs-receipts only. Stable baseline recorded ONCE in the same harness/snapshot/provider before comparison; the 155K heuristic is NOT a valid baseline.",
+        "e1_coldMaxRatioVsStableSettled": 0.95,
+        "e2_warmRevisitMaxRatioVsStableCold": 0.1
+    },
+    "gateF_humanSpotCheck": {
+        "$comment": "Bounded, once, before default flip. 3 pages x 2 pairs, 20 random blocks each, 1-4 adequacy/fluency, logged to ledger.",
+        "durationMinutes": 30,
+        "meanMin": 3.0,
+        "blockScoreFloor": 2
+    },
+    "packetSizing": {
+        "$comment": "Output-token-derived caps. drain shrunk to small-packet regime (decode-bound latency, small packets win on tail + parallelism). Basis: .artifacts/vnext-gates/latency-gpt-5.6-luna-none.md (2026-07-14). outputTokenHeadroomFactor is the SIZING/feasibility reserve (1.25x est-out) and is DECOUPLED from the max_output actually sent — see maxOutputSend* below.",
+        "firstPaint": {
+            "maxBlocks": 12,
+            "maxSrcChars": 1500,
+            "maxEstOutTokens": 600
+        },
+        "viewportHorizon": {
+            "maxBlocks": 24,
+            "maxEstOutTokens": 1200
+        },
+        "drain": {
+            "maxBlocks": 16,
+            "maxSrcChars": 2400,
+            "maxEstOutTokens": 1000,
+            "minEstOutTokens": 500,
+            "outputTokenHeadroomFactor": 1.25
+        },
+        "maxOutputSend": {
+            "$comment": "The max_output_tokens REQUESTED from the provider is decoupled from est-out sizing: max(3x est-out, 2048 floor), always capped DOWN by the provider/combined output ceiling (never raises the feasibility bar, never forces chunking). Prevents dense ja->ko decode from truncating at a tight limit and splitting into extra requests; costs no latency when the model stops early.",
+            "headroomFactor": 3,
+            "floor": 2048
+        },
+        "deliveryCeilingItems": {
+            "googleAiStudio": 128,
+            "openai": 128,
+            "openaiCompatible": 32
+        },
+        "openaiCompatibleOutputCeilingFloor": 1024
+    },
+    "concurrencyAimd": {
+        "$comment": "Spec §2.3 — per (provider, apiKeyHash); cooldowns scoped per key, always recovering.",
+        "googleAiStudio": {
+            "start": 4,
+            "floor": 1,
+            "cap": 12,
+            "additivePerClean": 1
+        },
+        "openai": {
+            "$comment": "cap raised 8->32; a real key sustained conc32/128 packets, 0x429. Basis: .artifacts/vnext-gates/latency-gpt-5.6-luna-none.md (2026-07-14, gpt-5.6-luna, reasoning:none).",
+            "start": 40,
+            "floor": 1,
+            "cap": 40,
+            "additivePerClean": 4
+        },
+        "openaiCompatible": {
+            "start": 2,
+            "floor": 1,
+            "cap": 4,
+            "additivePerClean": 4
+        },
+        "multiplicativeDecrease": 0.5,
+        "backoff": {
+            "baseMs": 500,
+            "factor": 2,
+            "jitter": 0.2,
+            "capMs": 15000
+        }
+    },
+    "estimator": {
+        "$comment": "Spec §4.1 — the ONE formula. All legacy formulas deleted.",
+        "cjkTokensPerChar": 0.8,
+        "otherCharsPerToken": 3.6,
+        "perItemInTokens": 7,
+        "fixedInTokens": 180,
+        "perItemOutTokens": 4,
+        "outRatioSeed": 1.15,
+        "outRatioPinned": {
+            "ja-ko": 1.9,
+            "ja-en": 1.6,
+            "zh-ko": 1.8,
+            "zh-en": 1.5,
+            "en-ja": 1.3,
+            "en-de": 1.25
+        },
+        "outRatioSourceFloor": {
+            "$comment": "ja/zh SOURCE tokenizes densely -> high output-token expansion for every target. Floor supersedes lower legacy en pins (ja-en 1.6->1.8, zh-en 1.5->1.7) so packets are sized from realistic output and max_output no longer truncates.",
+            "ja": 1.8,
+            "zh": 1.7
+        },
+        "emaAlpha": 0.3,
+        "outputCeilingSafetyFactor": 0.9,
+        "safetyFactorMinSamples": 3,
+        "openaiIncidentalReasoningOutTokens": 60
+    },
+    "resilience": {
+        "$comment": "Spec §7 bounds.",
+        "transientRetries": 3,
+        "rateLimitRetries": 3,
+        "outputLimitSplits": 2,
+        "schemaInvalidMaxRequests": 3,
+        "placeholderRepairRetries": 1,
+        "placeholderDegradesPerBlock": 1,
+        "semanticRetries": 1,
+        "deliveryUnknownReplays": 1,
+        "consecutiveNoOutputCircuit": 4,
+        "runawayLatchRatio": 2.5,
+        "globalAttemptCeilingFactor": 3
+    },
+    "cache": {
+        "$comment": "Spec §9.",
+        "persistentKeyPrefix": "pt3",
+        "ttlDays": 7,
+        "sessionLruSize": 6000,
+        "qualityTiers": {
+            "onDevice": 0,
+            "cloud": 1
+        },
+        "prefetchRaceGateMs": 150
+    },
+    "scheduling": {
+        "$comment": "One-pass whole-document collection; no viewport/focus priority.",
+        "collectionPasses": 1,
+        "cacheRaceGateMs": 150,
+        "mutationCoalesceMs": 75,
+        "initialQueueTier": 1
+    }
+}

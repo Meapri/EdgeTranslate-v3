@@ -247,3 +247,4 @@ export type {
 } from "./translators/hybrid";
 
 export * from "./types";
+export * from "./page_translation_v2";

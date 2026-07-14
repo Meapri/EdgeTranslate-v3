@@ -130,6 +130,7 @@ describe("LocalTranslator", () => {
                 totalTokens: 38,
             },
         });
+        expect(result.tokenUsage?.estimated).toBeUndefined();
         expect(fetchMock.mock.calls[0][0]).toBe(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=studio-test-key"
         );
@@ -313,6 +314,11 @@ describe("LocalTranslator", () => {
         expect(body.messages[0].content).toContain("high-fidelity translation engine");
         expect(body.messages[1].content).toContain("Source language: English");
         expect(body.messages[1].content).toContain("Target language: Korean");
+
+        const cachedResult = await translator.translate("hello there.", "en", "ko");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(cachedResult.mainMeaning).toBe("안녕");
+        expect(cachedResult.tokenUsage).toBeUndefined();
     });
 
     test("normalizes OpenAI-compatible base URLs and allows local endpoints without API keys", async () => {
@@ -544,18 +550,435 @@ describe("LocalTranslator", () => {
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         const prompt = body.contents[0].parts[0].text;
-        expect(body.systemInstruction.parts[0].text).toContain("Translate each [[n]] segment");
         expect(body.systemInstruction.parts[0].text).toContain(
-            "Output every [[n]] marker exactly once"
+            "Translate each [[n]] webpage segment"
+        );
+        expect(body.systemInstruction.parts[0].text).toContain(
+            "Return every marker unchanged, once, in order"
         );
         expect(body.systemInstruction.parts[0].text).not.toContain(
             "subtitle cue numbers, timestamps"
         );
         expect(prompt).toContain("English>Korean");
-        expect(prompt).toContain("Keep markers.");
+        expect(prompt).not.toContain("Keep markers.");
         expect(prompt).not.toContain("same number of translated payload lines");
         expect(prompt).not.toContain("Use neighboring segments only to keep terminology");
         expect(prompt).toContain("<a>llama.cpp</a>");
+    });
+
+    test("never routes a short compact page segment through dictionary JSON mode", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "[[1]]\n홈" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+        });
+        const result = await translator.translate("[[1]]\nHome", "en", "ko", {
+            translationProfile: "page",
+        });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig?.responseMimeType).toBeUndefined();
+        expect(body.contents[0].parts[0].text).toBe("English>Korean\n[[1]]\nHome");
+        expect(result.mainMeaning).toBe("[[1]]\n홈");
+    });
+
+    test("preserves JSON examples inside page marker output", async () => {
+        const pageReply = [
+            "[[1]]",
+            '설명: <code>{"translation":"foo"}</code>',
+            "[[2]]",
+            "다음 문단입니다.",
+        ].join("\n");
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: pageReply }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+        });
+        const result = await translator.translate(
+            '[[1]]\nExplain <code>{"translation":"foo"}</code>\n[[2]]\nNext paragraph.',
+            "en",
+            "ko",
+            { translationProfile: "page" }
+        );
+
+        expect(result.mainMeaning).toBe(pageReply);
+    });
+
+    test("preserves page translations that look like prompt-echo instructions", async () => {
+        const pageReply = [
+            "[[1]]",
+            "Translate this page.",
+            "[[2]]",
+            "Source language settings are available here.",
+        ].join("\n");
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: pageReply }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+        });
+        const result = await translator.translate(
+            "[[1]]\n이 페이지를 번역하세요.\n[[2]]\n원본 언어 설정은 여기에서 사용할 수 있습니다.",
+            "ko",
+            "en",
+            { translationProfile: "page" }
+        );
+
+        expect(result.mainMeaning).toBe(pageReply);
+    });
+
+    test("ignores a leading reasoning block even when it mentions page markers", async () => {
+        const actualReply = "[[1]]\nTranslate this page.";
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [
+                    {
+                        finish_reason: "stop",
+                        message: {
+                            content:
+                                "<think>Plan around [[1]] and preserve it.</think>\n" + actualReply,
+                        },
+                    },
+                ],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleModel: "thinking-model",
+        });
+        const result = await translator.translate("[[1]]\n이 페이지를 번역하세요.", "ko", "en", {
+            translationProfile: "page",
+        });
+
+        expect(result.mainMeaning).toBe(actualReply);
+    });
+
+    test("leaves page transport recovery to the marker-aware page controller", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 503,
+            json: async () => ({ error: { message: "temporarily unavailable" } }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4o-mini",
+        });
+        await expect(
+            translator.translate("[[1]]\nPage text.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "OPENAI_API_ERROR",
+            httpStatus: 503,
+            retryable: true,
+            providerRetryExhausted: true,
+            tokenUsage: expect.objectContaining({ estimated: true }),
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("surfaces a page fetch TypeError for marker-aware controller recovery", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        { message: { content: "[[1]]\n번역입니다." }, finish_reason: "stop" },
+                    ],
+                    usage: { prompt_tokens: 30, completion_tokens: 7, total_tokens: 37 },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4o-mini",
+        });
+        await expect(
+            translator.translate("[[1]]\nPage text.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "OPENAI_API_ERROR",
+            retryable: true,
+            providerRetryExhausted: true,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not retry non-retryable page authentication errors", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ error: { message: "invalid API key" } }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "bad-key",
+            openaiModel: "gpt-4o-mini",
+        });
+        await expect(
+            translator.translate("[[1]]\nPage text.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "OPENAI_API_ERROR",
+            httpStatus: 401,
+            retryable: false,
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not retry page timeouts at the provider layer", async () => {
+        const fetchMock = jest.fn(
+            (_url, init: any) =>
+                new Promise((_resolve, reject) => {
+                    init.signal.addEventListener("abort", () => {
+                        const error = new Error("request timed out");
+                        error.name = "AbortError";
+                        reject(error);
+                    });
+                })
+        );
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-4o-mini",
+            timeoutMs: 5,
+        });
+        await expect(
+            translator.translate("[[1]]\nPage text.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "TIMEOUT",
+            retryable: false,
+            tokenUsage: expect.objectContaining({ estimated: true }),
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("estimates missing OpenAI-compatible page usage from the actual prompt and output", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [
+                    {
+                        message: { content: "[[1]]\n안녕하세요." },
+                        finish_reason: "stop",
+                    },
+                ],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleModel: "local-model",
+        });
+        const result = await translator.translate("[[1]]\nHello.", "en", "ko", {
+            translationProfile: "page",
+        });
+
+        expect(result.tokenUsage).toMatchObject({ estimated: true });
+        expect(result.tokenUsage?.inputTokens).toBeGreaterThan(0);
+        expect(result.tokenUsage?.outputTokens).toBeGreaterThan(0);
+        expect(result.tokenUsage?.totalTokens).toBe(
+            Number(result.tokenUsage?.inputTokens) + Number(result.tokenUsage?.outputTokens)
+        );
+    });
+
+    test("uses a fresh abort signal for an OpenAI-compatible single-marker recovery", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            message: { content: "[[1]]\n미완성" },
+                            finish_reason: "length",
+                        },
+                    ],
+                    usage: { prompt_tokens: 40, completion_tokens: 8, total_tokens: 48 },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            message: { content: "[[1]]\n완성된 번역입니다." },
+                            finish_reason: "stop",
+                        },
+                    ],
+                    usage: { prompt_tokens: 40, completion_tokens: 12, total_tokens: 52 },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleModel: "local-model",
+        });
+        const result = await translator.translate("[[1]]\nA very long paragraph.", "en", "ko", {
+            translationProfile: "page",
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const firstSignal = fetchMock.mock.calls[0][1].signal;
+        const recoverySignal = fetchMock.mock.calls[1][1].signal;
+        expect(firstSignal).toBeDefined();
+        expect(recoverySignal).toBeDefined();
+        expect(recoverySignal).not.toBe(firstSignal);
+        expect(result.mainMeaning).toBe("[[1]]\n완성된 번역입니다.");
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 80,
+            outputTokens: 20,
+            totalTokens: 100,
+        });
+    });
+
+    test("treats OpenAI-compatible max_tokens as page truncation", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            message: { content: "[[1]]\n미완성" },
+                            finish_reason: "max_tokens",
+                        },
+                    ],
+                    usage: { prompt_tokens: 40, completion_tokens: 8, total_tokens: 48 },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            message: { content: "[[1]]\n완성된 번역입니다." },
+                            finish_reason: "stop",
+                        },
+                    ],
+                    usage: { prompt_tokens: 40, completion_tokens: 12, total_tokens: 52 },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleModel: "local-model",
+        });
+        const result = await translator.translate("[[1]]\nA very long paragraph.", "en", "ko", {
+            translationProfile: "page",
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.mainMeaning).toBe("[[1]]\n완성된 번역입니다.");
+    });
+
+    test("charges failed in-flight page usage only to the request owner", async () => {
+        let releaseFetch: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+            releaseFetch = resolve;
+        });
+        const fetchMock = jest.fn(async () => {
+            await gate;
+            return {
+                ok: false,
+                status: 401,
+                json: async () => ({ error: { message: "invalid API key" } }),
+            };
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleModel: "local-model",
+        });
+        const options = { translationProfile: "page" as const };
+        const owner = translator.translate("[[1]]\nShared page text.", "en", "ko", options);
+        const joiner = translator.translate("[[1]]\nShared page text.", "en", "ko", options);
+        releaseFetch();
+        const [ownerResult, joinerResult] = await Promise.allSettled([owner, joiner]);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(ownerResult.status).toBe("rejected");
+        expect(joinerResult.status).toBe("rejected");
+        if (ownerResult.status !== "rejected" || joinerResult.status !== "rejected") return;
+        expect(ownerResult.reason).not.toBe(joinerResult.reason);
+        expect(ownerResult.reason.tokenUsage).toMatchObject({ estimated: true });
+        expect(joinerResult.reason.tokenUsage).toBeUndefined();
+        expect(joinerResult.reason).toMatchObject({
+            errorCode: "OPENAI_COMPATIBLE_API_ERROR",
+            httpStatus: 401,
+        });
     });
 
     test("uses the shortest page prompt for raw HTML sections", async () => {
@@ -715,7 +1138,7 @@ describe("LocalTranslator", () => {
         expect(retryBody.generationConfig).toBeUndefined();
     });
 
-    test("falls back to bare Google AI Studio requests when output is truncated", async () => {
+    test("returns only complete Google page markers when output is truncated", async () => {
         const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
@@ -725,7 +1148,13 @@ describe("LocalTranslator", () => {
                     candidates: [
                         {
                             finishReason: "MAX_TOKENS",
-                            content: { parts: [{ text: "Online -> 포켓몬센터 온라인." }] },
+                            content: {
+                                parts: [
+                                    {
+                                        text: "[[1:p]]\n첫 번째 문장.\n[[2:p]]\n두 번",
+                                    },
+                                ],
+                            },
                         },
                     ],
                 }),
@@ -756,17 +1185,222 @@ describe("LocalTranslator", () => {
             model: "gemini-2.5-flash",
         });
         const result = await translator.translate(
-            "[[1:p]]\n平素よりポケモンセンターオンラインをご利用いただき、ありがとうございます。",
-            "auto",
-            "ko"
+            "[[1:p]]\nFirst sentence.\n[[2:p]]\nSecond sentence.",
+            "en",
+            "ko",
+            { translationProfile: "page" }
         );
 
-        expect(result.mainMeaning).toBe(
-            "[[1:p]]평소 포켓몬센터 온라인을 이용해 주셔서 감사합니다."
-        );
+        expect(result.mainMeaning).toBe("[[1:p]]\n첫 번째 문장.");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("retries a single Google page marker with a larger budget when no prefix is complete", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [
+                        {
+                            finishReason: "MAX_TOKENS",
+                            content: { parts: [{ text: "[[1]]\n미완성" }] },
+                        },
+                    ],
+                    usageMetadata: {
+                        promptTokenCount: 40,
+                        candidatesTokenCount: 8,
+                        totalTokenCount: 48,
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [
+                        {
+                            finishReason: "STOP",
+                            content: { parts: [{ text: "[[1]]\n완성된 번역입니다." }] },
+                        },
+                    ],
+                    usageMetadata: {
+                        promptTokenCount: 40,
+                        candidatesTokenCount: 12,
+                        totalTokenCount: 52,
+                    },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const result = await translator.translate("[[1]]\nA very long paragraph.", "en", "ko", {
+            translationProfile: "page",
+        });
+
+        expect(result.mainMeaning).toBe("[[1]]\n완성된 번역입니다.");
         expect(fetchMock).toHaveBeenCalledTimes(2);
-        const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-        expect(retryBody.generationConfig).toBeUndefined();
+        const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(secondBody.generationConfig.maxOutputTokens).toBe(
+            firstBody.generationConfig.maxOutputTokens * 2
+        );
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 80,
+            outputTokens: 20,
+            totalTokens: 100,
+        });
+    });
+
+    test("does not invent a larger Google retry after page translation falls back to bare mode", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                json: async () => ({
+                    error: {
+                        message: "GenerationConfig.maxOutputTokens is not supported by this model.",
+                    },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    candidates: [
+                        {
+                            finishReason: "MAX_TOKENS",
+                            content: { parts: [{ text: "[[1]]\n미완성" }] },
+                        },
+                    ],
+                    usageMetadata: {
+                        promptTokenCount: 40,
+                        candidatesTokenCount: 8,
+                        totalTokenCount: 48,
+                    },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemma-4-31b-it",
+        });
+        const failure = await translator
+            .translate("[[1]]\nA very long paragraph.", "en", "ko", {
+                translationProfile: "page",
+            })
+            .catch((error) => error);
+
+        expect(failure).toMatchObject({
+            errorCode: "PAGE_OUTPUT_INCOMPLETE",
+            retryable: false,
+            partialOutput: "[[1]]\n미완성",
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const bareBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+        expect(firstBody.generationConfig).toBeDefined();
+        expect(bareBody.generationConfig).toBeUndefined();
+    });
+
+    test("reports Google SAFETY page stops as blocked instead of truncated", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ finishReason: "SAFETY", content: { parts: [] } }],
+                usageMetadata: {
+                    promptTokenCount: 32,
+                    candidatesTokenCount: 2,
+                    totalTokenCount: 34,
+                },
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+
+        await expect(
+            translator.translate("[[1]]\nBlocked page text.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "PAGE_OUTPUT_BLOCKED",
+            errorMsg: "Google AI Studio stopped page translation with SAFETY.",
+            retryable: false,
+            tokenUsage: { inputTokens: 32, outputTokens: 2, totalTokens: 34 },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("returns only the complete Google SSE page prefix when EOF has no finish reason", async () => {
+        const encoder = new TextEncoder();
+        const rawPrefix = "[[1]]\n첫 번째 문장.\n[[2]]\n두 번";
+        const chunks = [
+            encoder.encode(
+                `data: ${JSON.stringify({
+                    candidates: [{ content: { parts: [{ text: rawPrefix }] } }],
+                    usageMetadata: {
+                        promptTokenCount: 41,
+                        candidatesTokenCount: 9,
+                        totalTokenCount: 50,
+                    },
+                })}\n\n`
+            ),
+        ];
+        let readIndex = 0;
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            body: {
+                getReader: () => ({
+                    read: async () =>
+                        readIndex < chunks.length
+                            ? { done: false, value: chunks[readIndex++] }
+                            : { done: true, value: undefined },
+                    releaseLock: () => undefined,
+                }),
+            },
+        });
+        global.fetch = fetchMock as any;
+
+        const onProgress = jest.fn();
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const result = await translator.translate(
+            "[[1]]\nFirst sentence.\n[[2]]\nSecond sentence.",
+            "en",
+            "ko",
+            { translationProfile: "page", onProgress }
+        );
+
+        expect(result.mainMeaning).toBe("[[1]]\n첫 번째 문장.");
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 41,
+            outputTokens: 9,
+            totalTokens: 50,
+        });
+        expect(onProgress).toHaveBeenCalledWith(rawPrefix);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     test("falls back to bare Google AI Studio requests when compatible config is rejected", async () => {
@@ -1277,7 +1911,7 @@ describe("LocalTranslator", () => {
         });
     });
 
-    test("retries OpenAI page translations with a larger budget on true truncation", async () => {
+    test("returns only the complete page prefix on true truncation without a full re-roll", async () => {
         const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
@@ -1331,16 +1965,199 @@ describe("LocalTranslator", () => {
             "ko"
         );
 
-        expect(result.mainMeaning).toContain("[[2:p]]");
+        expect(result.mainMeaning).toBe("[[1:p]]\n첫 번째 문장.");
         expect(result.tokenUsage).toMatchObject({
-            inputTokens: 200,
-            outputTokens: 60,
-            totalTokens: 260,
+            inputTokens: 100,
+            outputTokens: 20,
+            totalTokens: 120,
         });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("uses one larger-budget retry for a truncated single-marker OpenAI page", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            finish_reason: "length",
+                            message: { content: "[[1]]\n미완성" },
+                        },
+                    ],
+                    usage: { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 },
+                }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            finish_reason: "stop",
+                            message: { content: "[[1]]\n완성된 번역입니다." },
+                        },
+                    ],
+                    usage: { prompt_tokens: 50, completion_tokens: 14, total_tokens: 64 },
+                }),
+            });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+        const result = await translator.translate("[[1]]\nA very long paragraph.", "en", "ko", {
+            translationProfile: "page",
+        });
+
         expect(fetchMock).toHaveBeenCalledTimes(2);
         const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
         const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
         expect(secondBody.max_completion_tokens).toBeGreaterThan(firstBody.max_completion_tokens);
+        expect(result.mainMeaning).toBe("[[1]]\n완성된 번역입니다.");
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 100,
+            outputTokens: 24,
+            totalTokens: 124,
+        });
+    });
+
+    test.each([
+        {
+            status: 401,
+            message: "invalid API key",
+            providerRetryExhausted: false,
+        },
+        {
+            status: 503,
+            message: "temporarily unavailable",
+            providerRetryExhausted: true,
+        },
+    ])(
+        "preserves a $status recovery failure and stops after two OpenAI page requests",
+        async ({ status, message, providerRetryExhausted }) => {
+            const fetchMock = jest
+                .fn()
+                .mockResolvedValueOnce({
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        choices: [
+                            {
+                                finish_reason: "length",
+                                message: { content: "[[1]]\n미완성" },
+                            },
+                        ],
+                        usage: { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 },
+                    }),
+                })
+                .mockResolvedValueOnce({
+                    ok: false,
+                    status,
+                    json: async () => ({
+                        error: { message },
+                        usage: { prompt_tokens: 20, completion_tokens: 0, total_tokens: 20 },
+                    }),
+                });
+            global.fetch = fetchMock as any;
+
+            const translator = new LocalTranslator({
+                enabled: true,
+                mode: "openai",
+                openaiApiKey: "openai-test-key",
+                openaiModel: "gpt-5.4-mini",
+            });
+            const failure = await translator
+                .translate("[[1]]\nA very long paragraph.", "en", "ko", {
+                    translationProfile: "page",
+                })
+                .catch((error) => error);
+
+            expect(failure).toMatchObject({
+                errorCode: "OPENAI_API_ERROR",
+                errorMsg: message,
+                httpStatus: status,
+                retryable: false,
+                providerRetryExhausted,
+                tokenUsage: {
+                    inputTokens: 70,
+                    outputTokens: 10,
+                    totalTokens: 80,
+                },
+            });
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        }
+    );
+
+    test("reports OpenAI content_filter page stops as blocked instead of truncated", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [{ finish_reason: "content_filter", message: { content: "" } }],
+                usage: { prompt_tokens: 33, completion_tokens: 1, total_tokens: 34 },
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+
+        await expect(
+            translator.translate("[[1]]\nBlocked page text.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "PAGE_OUTPUT_BLOCKED",
+            errorMsg: "OpenAI API stopped page translation with content_filter.",
+            retryable: false,
+            tokenUsage: { inputTokens: 33, outputTokens: 1, totalTokens: 34 },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("reports a multi-marker zero-prefix truncation for structural splitting", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                choices: [
+                    {
+                        finish_reason: "length",
+                        message: { content: "[[1]]\n미완성" },
+                    },
+                ],
+                usage: { prompt_tokens: 70, completion_tokens: 9, total_tokens: 79 },
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openai",
+            openaiApiKey: "openai-test-key",
+            openaiModel: "gpt-5.4-mini",
+        });
+        await expect(
+            translator.translate("[[1]]\nFirst.\n[[2]]\nSecond.", "en", "ko", {
+                translationProfile: "page",
+            })
+        ).rejects.toMatchObject({
+            errorCode: "PAGE_OUTPUT_INCOMPLETE",
+            retryable: false,
+            partialOutput: "[[1]]\n미완성",
+            tokenUsage: { inputTokens: 70, outputTokens: 9, totalTokens: 79 },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     test("gates the OpenAI page first-attempt completion ceiling on the model family", async () => {
@@ -1644,10 +2461,9 @@ describe("LocalTranslator", () => {
         expect(translator.supportedLanguages().size).toBe(0);
     });
 
-    test("retries a streamed page reply that ended without finish_reason with a larger budget", async () => {
-        // An SSE stream cut mid-generation (proxy drop, server error event) ends with
-        // content but NO finish_reason — passing it off as success would hand the page
-        // pipeline a truncated reply. The engine must retry once at the larger budget.
+    test("returns the complete streamed page prefix when finish_reason is missing", async () => {
+        // An SSE stream cut mid-generation ends without finish_reason. Keep only complete
+        // markers so the page controller can apply/cache them and request the missing tail.
         const encoder = new TextEncoder();
         const makeSseResponse = (events: string[]) => {
             const chunks = events.map((event) => encoder.encode(`data: ${event}\n\n`));
@@ -1675,6 +2491,10 @@ describe("LocalTranslator", () => {
                     JSON.stringify({
                         choices: [{ delta: { content: "[[1:p]]\n첫 번째 문장.\n[[2:p]]\n두 번" } }],
                     }),
+                    JSON.stringify({
+                        choices: [],
+                        usage: { prompt_tokens: 91, completion_tokens: 11, total_tokens: 102 },
+                    }),
                 ])
             )
             // Retry: the full reply completes with finish_reason "stop".
@@ -1690,6 +2510,10 @@ describe("LocalTranslator", () => {
                         ],
                     }),
                     JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+                    JSON.stringify({
+                        choices: [],
+                        usage: { prompt_tokens: 91, completion_tokens: 23, total_tokens: 114 },
+                    }),
                 ])
             );
         global.fetch = fetchMock as any;
@@ -1708,17 +2532,127 @@ describe("LocalTranslator", () => {
             { onProgress }
         );
 
-        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
         const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-        const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
         expect(firstBody.stream).toBe(true);
-        expect(secondBody.stream).toBe(true);
-        // The retry runs at the larger token multiplier: a strictly larger budget.
-        expect(secondBody.max_completion_tokens).toBeGreaterThan(
-            firstBody.max_completion_tokens
-        );
-        expect(result.mainMeaning).toContain("두 번째 문장.");
+        expect(firstBody.stream_options).toEqual({ include_usage: true });
+        expect(result.mainMeaning).toBe("[[1:p]]\n첫 번째 문장.");
+        expect(result.tokenUsage).toMatchObject({
+            inputTokens: 91,
+            outputTokens: 11,
+            totalTokens: 102,
+        });
         expect(onProgress).toHaveBeenCalled();
+    });
+
+    test("keeps exact Google usage metadata when the following stream read aborts", async () => {
+        const encoder = new TextEncoder();
+        const rawPrefix = "[[1]]\n첫 번째 문장.\n[[2]]\n두 번";
+        const chunk = encoder.encode(
+            `data: ${JSON.stringify({
+                candidates: [{ content: { parts: [{ text: rawPrefix }] } }],
+                usageMetadata: {
+                    promptTokenCount: 91,
+                    candidatesTokenCount: 11,
+                    totalTokenCount: 102,
+                },
+            })}\n\n`
+        );
+        let reads = 0;
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            body: {
+                getReader: () => ({
+                    read: async () => {
+                        reads += 1;
+                        if (reads === 1) return { done: false, value: chunk };
+                        const error = new Error("stream timeout");
+                        error.name = "AbortError";
+                        throw error;
+                    },
+                    releaseLock: () => undefined,
+                }),
+            },
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const failure = await translator
+            .translate("[[1]]\nFirst sentence.\n[[2]]\nSecond sentence.", "en", "ko", {
+                translationProfile: "page",
+                onProgress: jest.fn(),
+            })
+            .catch((error) => error);
+        expect(failure).toMatchObject({
+            errorCode: "TIMEOUT",
+            retryable: false,
+            partialOutput: rawPrefix,
+            tokenUsage: {
+                inputTokens: 91,
+                outputTokens: 11,
+                totalTokens: 102,
+            },
+        });
+        expect(failure.tokenUsage.estimated).toBeUndefined();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("preserves estimated usage and the raw page prefix when a stream read aborts", async () => {
+        const encoder = new TextEncoder();
+        const rawPrefix = "[[1]]\n첫 번째 문장.\n[[2]]\n두 번";
+        const chunk = encoder.encode(
+            `data: ${JSON.stringify({
+                choices: [{ delta: { content: rawPrefix } }],
+            })}\n\n`
+        );
+        let reads = 0;
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            body: {
+                getReader: () => ({
+                    read: async () => {
+                        reads += 1;
+                        if (reads === 1) return { done: false, value: chunk };
+                        const error = new Error("stream timeout");
+                        error.name = "AbortError";
+                        throw error;
+                    },
+                    releaseLock: () => undefined,
+                }),
+            },
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "openaiCompatible",
+            openaiCompatibleBaseUrl: "http://localhost:1234/v1",
+            openaiCompatibleModel: "local-model",
+        });
+        await expect(
+            translator.translate("[[1]]\nFirst sentence.\n[[2]]\nSecond sentence.", "en", "ko", {
+                translationProfile: "page",
+                onProgress: jest.fn(),
+            })
+        ).rejects.toMatchObject({
+            errorCode: "TIMEOUT",
+            retryable: false,
+            partialOutput: rawPrefix,
+            tokenUsage: expect.objectContaining({
+                estimated: true,
+                inputTokens: expect.any(Number),
+                outputTokens: expect.any(Number),
+                totalTokens: expect.any(Number),
+            }),
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     test("excludes gpt-4o from the large page completion budget but includes gpt-4.1-mini", async () => {

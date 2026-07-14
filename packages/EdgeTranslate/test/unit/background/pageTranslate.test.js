@@ -40,6 +40,9 @@ describe("pageTranslate module", () => {
         expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_page_translate", {
             translator: "google",
         });
+        expect(channel.emitToTabs.mock.invocationCallOrder[0]).toBeLessThan(
+            chrome.scripting.executeScript.mock.invocationCallOrder[0]
+        );
         expect(channel.emitToTabs).not.toHaveBeenCalledWith(
             42,
             "start_dom_page_translate",
@@ -96,6 +99,35 @@ describe("pageTranslate module", () => {
             sl: "en",
             tl: "ko",
             aiPageConfig: {},
+        });
+    });
+
+    it("does not let the retired hidden aiPageVNext flag override an explicit stable rollback", async () => {
+        getOrSetDefaultSettings.mockResolvedValue({
+            DefaultPageTranslator: "AIPageTranslate",
+            languageSetting: { sl: "en", tl: "ko" },
+            LocalTranslatorConfig: {
+                enabled: true,
+                mode: "openai",
+                openaiModel: "gpt-5.4-mini",
+                aiPageVNext: true,
+            },
+            AiPageTranslateConfig: { pipelineVersion: "stable" },
+        });
+        const channel = { emitToTabs: jest.fn() };
+        chrome.tabs.query.mockImplementation((query, callback) => callback([{ id: 42 }]));
+
+        translatePage(channel);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(channel.emitToTabs).toHaveBeenCalledWith(42, "start_dom_page_translate", {
+            engine: "openai",
+            model: "gpt-5.4-mini",
+            translatorId: "LocalTranslate",
+            sl: "en",
+            tl: "ko",
+            aiPageConfig: { pipelineVersion: "stable" },
         });
     });
 
