@@ -19,6 +19,15 @@
 const GLOSSARY_STORE_VERSION = 1;
 const MAX_GLOSS_ENTRIES = 24;
 const MIN_TERM_OCCURRENCES = 3;
+// The ctx.gloss block is repeated byte-for-byte in EVERY packet, so each entry is paid
+// per request (~6 tokens/entry × ~150 requests on a large page). A validated [source,
+// target] pair earns that cost by pinning a prior translation; a source-only [source]
+// entry (first visit / new entity) only hints "this is a proper noun", which temperature-0
+// decoding + exact-source dedupe already largely deliver. So keep ALL validated pairs but
+// cap the low-value source-only entries to the top few by frequency. Measured 福島県: 24
+// source-only entries cost ~146 tok/req ≈ 10% of the page total; capping to 8 removes most
+// of that at negligible consistency risk. (Revisits carry validated pairs and are unaffected.)
+const MAX_SOURCE_ONLY_GLOSS_ENTRIES = 8;
 const DEFAULT_STORE_READ_TIMEOUT_MS = 150;
 // Guard on the per-domain store so a pathological domain cannot grow it unboundedly;
 // oldest recorded pairs are evicted first.
@@ -167,10 +176,21 @@ class PageGlossary {
                 if (timeoutId !== null) this.clearTimeoutFn(timeoutId);
             }
         }
-        const gloss = terms.map((term) => {
+        // Validated [source, target] pairs are always worth their per-request cost; source-only
+        // [source] entries are capped to the top few by frequency (terms is count-desc ordered)
+        // since they are repeated in every packet for marginal benefit. Document order among the
+        // kept entries is preserved so the ctx stays deterministic/byte-identical per session.
+        let sourceOnlyBudget = MAX_SOURCE_ONLY_GLOSS_ENTRIES;
+        const gloss = [];
+        for (const term of terms) {
             const target = this.storedPairs.get(term);
-            return Object.freeze(target ? [term, target] : [term]);
-        });
+            if (target) {
+                gloss.push(Object.freeze([term, target]));
+            } else if (sourceOnlyBudget > 0) {
+                sourceOnlyBudget -= 1;
+                gloss.push(Object.freeze([term]));
+            }
+        }
         this.context = Object.freeze({
             title: String(title || ""),
             domain: String(domain || ""),

@@ -77,19 +77,33 @@ describe("AI page translation vNext glossary harvest", () => {
         expect(terms).not.toContain("駅");
     });
 
-    it("orders by count descending then first occurrence and caps at 24 entries", async () => {
+    it("harvests count-desc then first-occurrence and caps the harvest at 24 terms", () => {
         const kata = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホ";
         const terms = Array.from(kata, (char) => char.repeat(3));
         const blocks = [terms.map((term) => `${term}。${term}。${term}。`).join(" ")];
         // One extra occurrence pushes a late term to the front.
         blocks.push(`${terms[29]}。`);
 
+        const harvested = harvestGlossaryTerms(blocks);
+        expect(harvested).toHaveLength(24);
+        expect(harvested[0]).toBe(terms[29]);
+        expect(harvested.slice(1)).toEqual(terms.slice(0, 23));
+    });
+
+    it("caps source-only ctx entries at 8 (each is repeated per request for marginal value)", async () => {
+        const kata = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホ";
+        const terms = Array.from(kata, (char) => char.repeat(3));
+        const blocks = [terms.map((term) => `${term}。${term}。${term}。`).join(" ")];
+        blocks.push(`${terms[29]}。`);
+
         const gloss = (await createPageGlossary().buildSessionContext({ ...SESSION, blocks }))
             .gloss;
 
-        expect(gloss).toHaveLength(24);
+        // No stored pairs -> all entries are source-only, capped to the top 8 by frequency.
+        expect(gloss).toHaveLength(8);
         expect(gloss[0]).toEqual([terms[29]]);
-        expect(gloss.slice(1).map(([term]) => term)).toEqual(terms.slice(0, 23));
+        expect(gloss.slice(1).map(([term]) => term)).toEqual(terms.slice(0, 7));
+        expect(gloss.every((entry) => entry.length === 1)).toBe(true);
     });
 
     it("emits a source-side entity list only on first visit and freezes the context", async () => {
