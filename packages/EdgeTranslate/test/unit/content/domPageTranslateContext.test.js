@@ -1064,7 +1064,10 @@ describe("Sentence-level hover original (split + wrap + align)", () => {
         const link = document.getElementById("lnk");
         const spans = wrapLeafSentencesInSpans(leaf);
         expect(spans.length).toBe(3);
-        spans.forEach((s) => expect(s.hasAttribute("data-edge-translate-segment")).toBe(true));
+        spans.forEach((s) => {
+            expect(s.hasAttribute("data-edge-translate-segment")).toBe(true);
+            expect(s.hasAttribute("data-edge-translate-owned")).toBe(true);
+        });
         // The inline <a> (same node identity, href intact) stays inside its sentence span.
         expect(spans[1].contains(link)).toBe(true);
         expect(link.getAttribute("href")).toBe("/x");

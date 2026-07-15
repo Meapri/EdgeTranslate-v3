@@ -608,8 +608,9 @@ function fixtureHtml() {
     return `<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><title>Stable browser fixture</title></head>
         <body><main id="article" class="site-shell" data-owner="fixture">
+            <div id="wide-menu" style="min-height:120px">Sign in now <span>Follow</span></div>
             <h1 id="title" title="Railway guide">Intercity railway guide</h1>
-            <p id="lead">Read <a id="link" href="/release" data-track="preserve">release notes</a> before travel.</p>
+            <p id="lead">Read <a id="link" href="/release" data-track="preserve">release notes</a> before travel. Keep a local copy.</p>
             <button id="action" aria-label="Save changes">Save changes</button>
             <input id="editor" value="user draft" placeholder="Search stations">
             <table><tbody>${rows}</tbody></table><ul>${list}</ul>
@@ -691,6 +692,7 @@ function translateStubText(source) {
 
 async function startFixtureServer() {
     const providerRequests = [];
+    const providerStreamingRequests = [];
     const providerReceipts = [];
     const fixtureEvents = [];
     const startedAt = Date.now();
@@ -727,7 +729,9 @@ async function startFixtureServer() {
         const isOpenAiGeneration =
             requestUrl.pathname === "/v1/responses" && request.method === "POST";
         const isGeminiGeneration =
-            /^\/v1beta\/models\/[^/]+:generateContent$/.test(requestUrl.pathname) &&
+            /^\/v1beta\/models\/[^/]+:(?:generateContent|streamGenerateContent)$/.test(
+                requestUrl.pathname
+            ) &&
             request.method === "POST";
         if (isCompatibleGeneration || isOpenAiGeneration || isGeminiGeneration) {
             const body = await readRequestBody(request);
@@ -745,6 +749,12 @@ async function startFixtureServer() {
             const outputTokens = Math.max(1, Math.ceil(JSON.stringify(output).length / 4));
             const totalTokens = inputTokens + outputTokens;
             const requestId = `browser-stub-${providerRequests.length}`;
+            const isOpenAiStreaming = isOpenAiGeneration && body.stream === true;
+            const isGeminiStreaming =
+                isGeminiGeneration && requestUrl.pathname.endsWith(":streamGenerateContent");
+            if (isOpenAiStreaming || isGeminiStreaming) {
+                providerStreamingRequests.push(requestId);
+            }
             // Optional deterministic latency model for scheduler benchmarks. It is disabled by
             // default, so ordinary correctness smokes stay fast. When enabled, larger model
             // replies take proportionally longer and expose full-page tail scheduling effects
@@ -762,10 +772,42 @@ async function startFixtureServer() {
             });
             billedTokens += totalTokens;
             response.writeHead(200, {
-                "content-type": "application/json",
+                "content-type":
+                    isOpenAiStreaming || isGeminiStreaming
+                        ? "text/event-stream"
+                        : "application/json",
                 "x-request-id": requestId,
             });
-            if (isOpenAiGeneration) {
+            if (isOpenAiStreaming) {
+                const text = JSON.stringify(output);
+                const splitAt = Math.max(1, text.indexOf("},{") + 2);
+                const chunks = [text.slice(0, splitAt), text.slice(splitAt)].filter(Boolean);
+                for (const delta of chunks) {
+                    response.write(
+                        `data: ${JSON.stringify({
+                            type: "response.output_text.delta",
+                            delta,
+                        })}\n\n`
+                    );
+                    await wait(5);
+                }
+                response.write(
+                    `data: ${JSON.stringify({
+                        type: "response.completed",
+                        response: {
+                            id: requestId,
+                            status: "completed",
+                            output_text: text,
+                            usage: {
+                                input_tokens: inputTokens,
+                                output_tokens: outputTokens,
+                                total_tokens: totalTokens,
+                            },
+                        },
+                    })}\n\n`
+                );
+                response.end("data: [DONE]\n\n");
+            } else if (isOpenAiGeneration) {
                 response.end(
                     JSON.stringify({
                         id: requestId,
@@ -778,6 +820,38 @@ async function startFixtureServer() {
                         },
                     })
                 );
+            } else if (isGeminiStreaming) {
+                const text = JSON.stringify(output);
+                const splitAt = Math.max(1, text.indexOf("},{") + 2);
+                const chunks = [text.slice(0, splitAt), text.slice(splitAt)].filter(Boolean);
+                for (let index = 0; index < chunks.length; index += 1) {
+                    const last = index === chunks.length - 1;
+                    response.write(
+                        `data: ${JSON.stringify({
+                            responseId: requestId,
+                            candidates: [
+                                {
+                                    ...(last ? { finishReason: "STOP" } : {}),
+                                    content: {
+                                        role: "model",
+                                        parts: [{ text: chunks[index] }],
+                                    },
+                                },
+                            ],
+                            ...(last
+                                ? {
+                                      usageMetadata: {
+                                          promptTokenCount: inputTokens,
+                                          candidatesTokenCount: outputTokens,
+                                          totalTokenCount: totalTokens,
+                                      },
+                                  }
+                                : {}),
+                        })}\n\n`
+                    );
+                    await wait(5);
+                }
+                response.end();
             } else if (isGeminiGeneration) {
                 response.end(
                     JSON.stringify({
@@ -863,6 +937,7 @@ async function startFixtureServer() {
         server,
         baseUrl: `http://127.0.0.1:${address.port}`,
         providerRequests,
+        providerStreamingRequests,
         providerReceipts,
         fixtureEvents,
         billedTokens: () => billedTokens,
@@ -1555,6 +1630,115 @@ async function run() {
             },
             { timeoutMs: 3000, label: "final banner terminal status" }
         );
+        const originalTooltipState = await pageClient.evaluate(`new Promise((resolve) => {
+            const lead = document.querySelector("#lead");
+            const wideMenu = document.querySelector("#wide-menu");
+            if (!lead || !wideMenu) {
+                resolve({ visible: false, sentenceText: "", paragraphText: "",
+                    sentenceHighlighted: false, paragraphHighlighted: false, segmentCount: 0,
+                    emptyBackgroundVisible: true, exactContainerText: "" });
+                return;
+            }
+            wideMenu.dispatchEvent(new MouseEvent("mouseover", {
+                bubbles: true,
+                clientX: 700,
+                clientY: 500
+            }));
+            setTimeout(() => {
+                const tooltip = document.querySelector("#edge-translate-dom-original-tooltip");
+                const emptyBackgroundVisible = tooltip?.dataset.visible === "true";
+                const exactContainerTarget = wideMenu.querySelector(
+                    "[data-edge-translate-exact-original]"
+                );
+                (exactContainerTarget || wideMenu).dispatchEvent(new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 140,
+                    clientY: 180
+                }));
+                setTimeout(() => {
+                    const exactContainerText = document.querySelector(
+                        "#edge-translate-dom-original-tooltip .et-original-text"
+                    )?.textContent || "";
+                    const segments = lead.querySelectorAll("[data-edge-translate-segment]");
+                    const sentence = segments[0];
+                    (sentence || lead).dispatchEvent(new MouseEvent("mouseover", {
+                        bubbles: true,
+                        clientX: 120,
+                        clientY: 160
+                    }));
+                    setTimeout(() => {
+                        const liveTooltip = document.querySelector(
+                            "#edge-translate-dom-original-tooltip"
+                        );
+                        const sentenceText = liveTooltip?.querySelector(".et-original-text")?.textContent || "";
+                        const sentenceHighlighted = Boolean(
+                            sentence?.classList.contains("et-dom-original-source")
+                        );
+                        lead.dispatchEvent(new MouseEvent("mouseover", {
+                            bubbles: true,
+                            clientX: 180,
+                            clientY: 190
+                        }));
+                        setTimeout(() => resolve({
+                            visible: liveTooltip?.dataset.visible === "true",
+                            sentenceText,
+                            paragraphText: liveTooltip?.querySelector(".et-original-text")?.textContent || "",
+                            sentenceHighlighted,
+                            paragraphHighlighted: lead.classList.contains("et-dom-original-source"),
+                            segmentCount: segments.length,
+                            emptyBackgroundVisible,
+                            exactContainerText
+                        }), 350);
+                    }, 350);
+                }, 350);
+            }, 350);
+        })`);
+        const requestsBeforeViewToggle = fixture.providerRequests.length;
+        const viewToggleState = await pageClient.evaluate(`new Promise((resolve) => {
+            const host = document.querySelector("#edge-translate-dom-page-banner");
+            const button = host?.shadowRoot?.querySelector("[data-action='toggle-view']");
+            const label = button?.querySelector("[data-role='view-toggle-text']");
+            const lead = document.querySelector("#lead");
+            const wideMenu = document.querySelector("#wide-menu");
+            const action = document.querySelector("#action");
+            const editor = document.querySelector("#editor");
+            if (!button || !lead || !wideMenu || !action || !editor) {
+                resolve({ available: false });
+                return;
+            }
+            const translated = {
+                lead: lead.textContent,
+                menu: wideMenu.textContent,
+                aria: action.getAttribute("aria-label"),
+                placeholder: editor.getAttribute("placeholder")
+            };
+            button.click();
+            setTimeout(() => {
+                const tooltip = document.querySelector("#edge-translate-dom-original-tooltip");
+                const source = {
+                    lead: lead.textContent.replace(/\\s+/g, " ").trim(),
+                    menu: wideMenu.textContent.replace(/\\s+/g, " ").trim(),
+                    aria: action.getAttribute("aria-label"),
+                    placeholder: editor.getAttribute("placeholder"),
+                    label: label?.textContent || "",
+                    tooltipVisible: tooltip?.dataset.visible === "true"
+                };
+                button.click();
+                setTimeout(() => resolve({
+                    available: !button.hidden,
+                    source,
+                    translation: {
+                        lead: lead.textContent,
+                        menu: wideMenu.textContent,
+                        aria: action.getAttribute("aria-label"),
+                        placeholder: editor.getAttribute("placeholder"),
+                        label: label?.textContent || ""
+                    },
+                    translated,
+                    href: document.querySelector("#link")?.getAttribute("href") || ""
+                }), 50);
+            }, 50);
+        })`);
         const clicks = await pageClient.evaluate(`(() => {
             document.querySelector("#action").click();
             return window.fixtureClicks;
@@ -1581,6 +1765,60 @@ async function run() {
         assert(pageState.selection[0] === 2 && pageState.selection[1] === 6, "Selection changed");
         assert(clicks === 1, "Existing event listener was lost");
         assert(pageState.progress === "100%", "Banner did not reach 100%");
+        assert(viewToggleState.available, "Original/translation header toggle was unavailable");
+        assert(
+            viewToggleState.source.lead ===
+                "Read release notes before travel. Keep a local copy.",
+            `Source view paragraph mismatch: ${JSON.stringify(viewToggleState.source.lead)}`
+        );
+        assert(
+            viewToggleState.source.menu === "Sign in now Follow",
+            `Source view layout text mismatch: ${JSON.stringify(viewToggleState.source.menu)}`
+        );
+        assert(viewToggleState.source.aria === "Review changes", "Source aria-label mismatch");
+        assert(viewToggleState.source.placeholder === "Find stations", "Source placeholder mismatch");
+        assert(viewToggleState.source.label === "Translation", "Source-view button label mismatch");
+        assert(!viewToggleState.source.tooltipVisible, "Original tooltip stayed open in source view");
+        assert(
+            viewToggleState.translation.lead === viewToggleState.translated.lead &&
+                viewToggleState.translation.menu === viewToggleState.translated.menu &&
+                viewToggleState.translation.aria === viewToggleState.translated.aria &&
+                viewToggleState.translation.placeholder === viewToggleState.translated.placeholder,
+            "Translation view did not restore the exact committed values"
+        );
+        assert(viewToggleState.translation.label === "Original", "Translation-view button label mismatch");
+        assert(viewToggleState.href === "/release", "View toggle changed the inline link href");
+        assert(
+            fixture.providerRequests.length === requestsBeforeViewToggle,
+            "View toggle issued an unexpected provider request"
+        );
+        assert(
+            !originalTooltipState.emptyBackgroundVisible,
+            "Empty layout-container background incorrectly opened the original-text tooltip"
+        );
+        assert(
+            originalTooltipState.exactContainerText === "Sign in now",
+            `Exact layout-container text hover mismatch: ${JSON.stringify(
+                originalTooltipState.exactContainerText
+            )}`
+        );
+        assert(originalTooltipState.visible, "Original-text tooltip did not become visible");
+        assert(originalTooltipState.segmentCount === 2, "Translated paragraph was not sentence-wrapped");
+        assert(originalTooltipState.sentenceHighlighted, "Translated sentence was not marked on hover");
+        assert(originalTooltipState.paragraphHighlighted, "Translated paragraph was not marked on hover");
+        assert(
+            originalTooltipState.sentenceText === "Read release notes before travel.",
+            `Sentence original-text tooltip mismatch: ${JSON.stringify(
+                originalTooltipState.sentenceText
+            )}`
+        );
+        assert(
+            originalTooltipState.paragraphText ===
+                "Read release notes before travel. Keep a local copy.",
+            `Paragraph original-text tooltip mismatch: ${JSON.stringify(
+                originalTooltipState.paragraphText
+            )}`
+        );
         assert(
             fixture.providerRequests.length >= 1,
             "Provider stub received no generation request"
@@ -1594,6 +1832,14 @@ async function run() {
                 observedStubProviders.join(",") || "none"
             }`
         );
+        if (requiresVnextFeatures && (stubProvider === "openai" || stubProvider === "gemini")) {
+            assert(
+                fixture.providerStreamingRequests.length === fixture.providerRequests.length,
+                `${stubProvider} vNext requests did not all use streaming: ${
+                    fixture.providerStreamingRequests.length
+                }/${fixture.providerRequests.length}`
+            );
+        }
         const providerRequestSummary = summarizeProviderRequests(
             fixture.providerRequests,
             fixture.providerReceipts
@@ -1603,6 +1849,16 @@ async function run() {
         const providerRequests = providerRequestSequence(
             fixture.providerRequests,
             fixture.providerReceipts
+        );
+        const providerSources = fixture.providerRequests.flatMap((body) => {
+            const wire = parseProviderWire(body);
+            if (Array.isArray(wire?.x)) return wire.x.map((item) => String(item?.s || ""));
+            if (Array.isArray(wire?.s)) return wire.s.map((source) => String(source || ""));
+            return [];
+        });
+        assert(
+            providerSources.every((source) => !source.includes("번역 Read")),
+            "Sentence hover wrappers were re-collected as provider input"
         );
         const providerRequestPhases = summarizeFixtureRequestPhases(
             fixture.providerRequests,
@@ -1693,6 +1949,7 @@ async function run() {
             providerProtocol: stubProviderProtocol(stubProvider),
             observedStubProviders,
             generationRequests: fixture.providerRequests.length,
+            streamingRequests: fixture.providerStreamingRequests.length,
             translatedItems,
             sourceCharacters,
             averageItemsPerRequest: Number(
@@ -1709,6 +1966,7 @@ async function run() {
             bannerTokenText: pageState.tokens,
             status: pageState.status,
             progress: pageState.progress,
+            originalTooltip: originalTooltipState,
             spaLateContentTranslated: pageState.late.startsWith("번역 "),
             spaLateAttributesTranslated:
                 !requiresVnextFeatures ||

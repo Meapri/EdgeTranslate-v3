@@ -39,6 +39,37 @@ export async function readJson(response: Response): Promise<Record<string, any>>
     }
 }
 
+/** Consume a text/event-stream body without buffering the whole provider response. */
+export async function consumeSse(
+    response: Response,
+    onData: (data: string) => void
+): Promise<void> {
+    const reader = response.body?.getReader?.();
+    if (!reader) throw new Error("Provider streaming response had no readable body");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const consumeBlock = (block: string) => {
+        const data = block
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n");
+        if (data && data !== "[DONE]") onData(data);
+    };
+    for (;;) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, "\n");
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary >= 0) {
+            consumeBlock(buffer.slice(0, boundary));
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf("\n\n");
+        }
+        if (done) break;
+    }
+    if (buffer.trim()) consumeBlock(buffer);
+}
+
 export function providerRequestId(response: Response, payload: Record<string, any>) {
     return (
         response.headers.get("x-request-id") ||

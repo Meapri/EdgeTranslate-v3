@@ -12,6 +12,7 @@ import {
 } from "./types";
 import {
     attemptSummary,
+    consumeSse,
     defaultFetch,
     fallbackCapabilities,
     nextAttemptId,
@@ -23,7 +24,7 @@ import {
 } from "./adapter_utils";
 import { classifyHttpFailure, classifyThrownFailure, parseRetryAfterMs } from "./errors";
 import { normalizeOpenAIResponsesUsage } from "./usage";
-import { prepareTranslationWire } from "./wire";
+import { parsePageTranslationProgress, prepareTranslationWire } from "./wire";
 
 // Fallback capability floors, provenance "fallback-policy" — deliberately conservative
 // LOWER BOUNDS, not model metadata. OpenAI exposes no capability endpoint, so the real
@@ -240,14 +241,60 @@ export class OpenAIResponsesAdapter implements TranslationProviderAdapter {
         const attemptId = nextAttemptId(request.requestId);
         const base = normalizedBaseUrl(profile.baseUrl, "https://api.openai.com/v1");
         const { body, wire } = this.buildBody(profile, request);
+        const streaming = typeof request.onProgress === "function";
+        const requestBody = streaming ? { ...body, stream: true } : body;
+        let streamedText = "";
         try {
             const response = await this.fetchImpl(`${base}/responses`, {
                 method: "POST",
-                headers: requestHeaders(profile, { Authorization: `Bearer ${profile.apiKey}` }),
-                body: JSON.stringify(body),
+                headers: requestHeaders(profile, {
+                    Authorization: `Bearer ${profile.apiKey}`,
+                    ...(streaming ? { Accept: "text/event-stream" } : {}),
+                }),
+                body: JSON.stringify(requestBody),
                 signal,
             });
-            const payload = await readJson(response);
+            let payload: Record<string, any>;
+            if (!streaming || !response.ok) {
+                payload = await readJson(response);
+            } else {
+                let finalPayload: Record<string, any> = {};
+                await consumeSse(response, (data) => {
+                    let event: Record<string, any>;
+                    try {
+                        event = JSON.parse(data);
+                    } catch {
+                        return;
+                    }
+                    if (
+                        event.type === "response.output_text.delta" &&
+                        typeof event.delta === "string"
+                    ) {
+                        streamedText += event.delta;
+                    } else if (
+                        event.type === "response.output_text.done" &&
+                        typeof event.text === "string" &&
+                        event.text.length >= streamedText.length
+                    ) {
+                        streamedText = event.text;
+                    }
+                    if (event.response && typeof event.response === "object") {
+                        finalPayload = event.response;
+                    }
+                    const items = parsePageTranslationProgress(streamedText, wire);
+                    if (items.length) {
+                        try {
+                            request.onProgress?.(items);
+                        } catch {
+                            /* presentation progress is best-effort */
+                        }
+                    }
+                });
+                payload = {
+                    ...finalPayload,
+                    ...(extractResponseText(finalPayload) ? {} : { output_text: streamedText }),
+                };
+            }
             const providerId = providerRequestId(response, payload);
             const finishReason = payload.incomplete_details?.reason || payload.status;
             const attempt = attemptSummary(attemptId, startedAt, {
@@ -365,7 +412,7 @@ export class OpenAIResponsesAdapter implements TranslationProviderAdapter {
             return {
                 ok: false,
                 failure: classifyThrownFailure(error),
-                partialItems: [],
+                partialItems: parsePageTranslationProgress(streamedText, wire),
                 usageReceipts: [],
                 attempt: attemptSummary(attemptId, startedAt),
             };

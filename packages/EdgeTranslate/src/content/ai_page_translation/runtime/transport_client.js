@@ -12,6 +12,7 @@
  */
 
 import { fnv1a32 } from "./translation_cache.js";
+import { AI_PAGE_EVENT_PROGRESS } from "common/scripts/ai_page_translation_protocol.js";
 
 const AI_PAGE_SCHEMA_VERSION = "page-v3-1";
 
@@ -163,9 +164,37 @@ function createTransportClient({
         },
 
         async translatePacket(params) {
+            const onProgress = typeof params?.onProgress === "function" ? params.onProgress : null;
             const envelope = buildEnvelope(params);
-            const reply = await channel.request(SERVICE_TRANSLATE, envelope);
-            return normalizeReply(reply, envelope);
+            let progressHandler = null;
+            if (onProgress && typeof channel.on === "function") {
+                progressHandler = (detail = {}) => {
+                    if (
+                        detail.schemaVersion !== AI_PAGE_SCHEMA_VERSION ||
+                        detail.sessionId !== sessionId ||
+                        detail.packetId !== envelope.packetId ||
+                        detail.requestId !== envelope.requestId
+                    ) {
+                        return;
+                    }
+                    const units = Array.isArray(detail.units) ? detail.units : [];
+                    if (!units.length) return;
+                    try {
+                        onProgress(units);
+                    } catch {
+                        /* presentation progress is best-effort */
+                    }
+                };
+                channel.on(AI_PAGE_EVENT_PROGRESS, progressHandler);
+            }
+            try {
+                const reply = await channel.request(SERVICE_TRANSLATE, envelope);
+                return normalizeReply(reply, envelope);
+            } finally {
+                if (progressHandler && typeof channel.off === "function") {
+                    channel.off(AI_PAGE_EVENT_PROGRESS, progressHandler);
+                }
+            }
         },
 
         /** Session/packet-scoped abort mirroring the v2 cancel semantics. */
@@ -187,6 +216,7 @@ function createTransportClient({
 
 export {
     AI_PAGE_SCHEMA_VERSION,
+    AI_PAGE_EVENT_PROGRESS,
     HEDGE_PACKET_ID_SUFFIX,
     SERVICE_CANCEL,
     SERVICE_CAPABILITIES,

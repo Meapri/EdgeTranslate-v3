@@ -103,6 +103,33 @@ async function flushMicrotasks() {
 }
 
 describe("vNext AI page translation background transport", () => {
+    it("emits deduplicated provider progress to the owning tab with packet identity", async () => {
+        const emitProgress = jest.fn();
+        const executeOnce = jest.fn(async (_profile, request) => {
+            request.onProgress([
+                { id: "u1", translatedText: "안녕" },
+                { id: "u1", translatedText: "중복" },
+            ]);
+            return successResult();
+        });
+        const { transport } = setup({ executeOnce }, {}, { emitProgress });
+
+        await transport.translate(packet(), { tab: { id: 7 } });
+
+        expect(emitProgress).toHaveBeenCalledTimes(1);
+        expect(emitProgress).toHaveBeenCalledWith(
+            7,
+            "ai_page_translation_progress",
+            expect.objectContaining({
+                schemaVersion: AI_PAGE_SCHEMA_VERSION,
+                sessionId: "session-1",
+                packetId: "packet-1",
+                requestId: "packet-1:a0",
+                units: [{ id: "u1", status: "translated", translatedText: "안녕" }],
+            })
+        );
+    });
+
     it("owns exactly one adapter attempt and returns provider usage only to the owner", async () => {
         let resolveAttempt;
         const pending = new Promise((resolve) => {

@@ -27,7 +27,11 @@ import {
     OpenAIResponsesAdapter,
 } from "@edge_translate/translators";
 import { AI_PAGE_SHARED_CONCURRENCY_CAPS } from "common/scripts/ai_page_translation_limits.js";
-import { fnv1a32, validatePagePacketRequest } from "common/scripts/ai_page_translation_protocol.js";
+import {
+    AI_PAGE_EVENT_PROGRESS,
+    fnv1a32,
+    validatePagePacketRequest,
+} from "common/scripts/ai_page_translation_protocol.js";
 
 const COMPLETED_TTL_MS = 60 * 1000;
 const CAPABILITY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -278,7 +282,7 @@ function hasAuthoritativeDiscovery(discovered) {
 }
 
 class AiPageTranslationTransport {
-    constructor({ resolveProfile, adapters, concurrencyCaps, concurrencyGate } = {}) {
+    constructor({ resolveProfile, adapters, concurrencyCaps, concurrencyGate, emitProgress } = {}) {
         if (typeof resolveProfile !== "function") {
             throw new TypeError("AiPageTranslationTransport requires resolveProfile");
         }
@@ -300,6 +304,7 @@ class AiPageTranslationTransport {
             ...(concurrencyCaps || {}),
         };
         this.concurrencyGate = concurrencyGate || new SharedProviderConcurrencyGate();
+        this.emitProgress = typeof emitProgress === "function" ? emitProgress : null;
     }
 
     async resolve(params) {
@@ -407,7 +412,7 @@ class AiPageTranslationTransport {
         );
     }
 
-    toAdapterRequest(params) {
+    toAdapterRequest(params, onProgress) {
         const hint = providerDirectiveHint(params.hint);
         return {
             requestId: params.requestId,
@@ -423,6 +428,7 @@ class AiPageTranslationTransport {
                 text: unit.text,
                 ...(unit.role ? { role: unit.role } : {}),
             })),
+            ...(typeof onProgress === "function" ? { onProgress } : {}),
         };
     }
 
@@ -532,9 +538,33 @@ class AiPageTranslationTransport {
             }, Math.max(1000, Number(profile.timeoutMs) || 120000));
             try {
                 const attemptProfile = profileForPacketHint(profile, params.hint);
+                const emittedIds = new Set();
+                const onProgress =
+                    tabId !== -1 && this.emitProgress
+                        ? (items) => {
+                              const units = [];
+                              for (const item of Array.isArray(items) ? items : []) {
+                                  if (!item?.id || emittedIds.has(item.id)) continue;
+                                  emittedIds.add(item.id);
+                                  units.push(this.formatUnit(item));
+                              }
+                              if (!units.length || controller.signal.aborted) return;
+                              try {
+                                  this.emitProgress(tabId, AI_PAGE_EVENT_PROGRESS, {
+                                      schemaVersion: params.schemaVersion,
+                                      sessionId: params.sessionId,
+                                      packetId: params.packetId,
+                                      requestId: params.requestId,
+                                      units,
+                                  });
+                              } catch {
+                                  /* presentation progress is best-effort */
+                              }
+                          }
+                        : undefined;
                 let result = await adapter.executeOnce(
                     attemptProfile,
-                    this.toAdapterRequest(params),
+                    this.toAdapterRequest(params, onProgress),
                     controller.signal
                 );
                 if (timedOut && !result.ok && result.failure.kind === "cancelled") {

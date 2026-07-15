@@ -15,6 +15,7 @@ const AI_PAGE_SERVICE_CAPABILITIES = "get_page_translation_capabilities";
 const AI_PAGE_SERVICE_COUNT_TOKENS = "count_page_translation_tokens";
 const AI_PAGE_SERVICE_TRANSLATE = "translate_page_packet";
 const AI_PAGE_SERVICE_CANCEL = "cancel_page_translation";
+const AI_PAGE_EVENT_PROGRESS = "ai_page_translation_progress";
 
 const AI_PAGE_UNIT_STATUSES = Object.freeze(["translated", "unchanged", "failed"]);
 
@@ -231,6 +232,7 @@ function validatePagePacketReply(reply, expected = {}) {
 
 export {
     AI_PAGE_SCHEMA_VERSION,
+    AI_PAGE_EVENT_PROGRESS,
     AI_PAGE_SERVICE_CANCEL,
     AI_PAGE_SERVICE_CAPABILITIES,
     AI_PAGE_SERVICE_COUNT_TOKENS,

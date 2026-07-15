@@ -25,10 +25,16 @@ import { createAiPageTranslationSession } from "../../../src/content/ai_page_tra
 import { BannerController } from "../../../src/content/banner_controller.js";
 
 function makeVnextController(overrides = {}) {
+    let viewMode = "translation";
     return {
         start: jest.fn(() => Promise.resolve({ phase: "translating" })),
         stop: jest.fn((reason) => ({ phase: "cancelled", reason })),
         getStatusSnapshot: jest.fn(() => ({ phase: "idle" })),
+        setViewMode: jest.fn((mode) => {
+            viewMode = mode === "source" ? "source" : "translation";
+            return { mode: viewMode, changed: 1, preserved: 0 };
+        }),
+        getViewMode: jest.fn(() => viewMode),
         ...overrides,
     };
 }
@@ -154,12 +160,191 @@ describe("DOM page translation vNext banner wiring", () => {
             engine: "openai",
             modelId: "gpt-5.4-mini",
         });
+        expect(typeof options.onApplied).toBe("function");
         expect(typeof options.onStatus).toBe("function");
         const session = createAiPageTranslationSession.mock.results[0].value;
         expect(session.start).toHaveBeenCalledTimes(1);
         expect(controller._activePagePipeline).not.toBeNull();
         expect(document.getElementById("edge-translate-dom-page-banner")).not.toBeNull();
         controller.cancelDomPageTranslate();
+    });
+
+    it("toggles the header button between original and translated page views", () => {
+        const controller = new BannerController();
+        controller.startDomPageTranslate({
+            engine: "openai",
+            model: "gpt-5.6-luna",
+            sl: "en",
+            tl: "ko",
+            pipelineVersion: "vnext",
+        });
+        const session = createAiPageTranslationSession.mock.results[0].value;
+        const host = document.getElementById("edge-translate-dom-page-banner");
+        const button = host.shadowRoot.querySelector("[data-action='toggle-view']");
+        const label = button.querySelector("[data-role='view-toggle-text']");
+
+        expect(button.hidden).toBe(false);
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(label.textContent).toBe("Original");
+
+        button.click();
+        expect(session.setViewMode).toHaveBeenLastCalledWith("source");
+        expect(button.getAttribute("aria-pressed")).toBe("true");
+        expect(label.textContent).toBe("Translation");
+
+        button.click();
+        expect(session.setViewMode).toHaveBeenLastCalledWith("translation");
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(label.textContent).toBe("Original");
+        controller.cancelDomPageTranslate();
+    });
+
+    it("shows sentence original over text and paragraph original over its background", () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML =
+                '<p id="line">First original sentence. Second original sentence.</p>';
+            const controller = new BannerController();
+            controller.startDomPageTranslate({
+                engine: "openai",
+                model: "gpt-5.6-luna",
+                sl: "en",
+                tl: "ko",
+                pipelineVersion: "vnext",
+            });
+            const options = createAiPageTranslationSession.mock.calls[0][0];
+            const paragraph = document.getElementById("line");
+
+            // The vNext committer writes first, then reports the owning element/source pair.
+            paragraph.textContent = "첫 번째 번역 문장. 두 번째 번역 문장.";
+            options.onApplied({
+                element: paragraph,
+                kind: "block",
+                sourceText: "First original sentence. Second original sentence.",
+                translatedText: "첫 번째 번역 문장. 두 번째 번역 문장.",
+            });
+
+            const sentenceSpans = paragraph.querySelectorAll(
+                "[data-edge-translate-segment]"
+            );
+            expect(sentenceSpans).toHaveLength(2);
+            sentenceSpans.forEach((span) => {
+                expect(span.hasAttribute("data-edge-translate-owned")).toBe(true);
+            });
+            expect(controller._domOriginalTextByElement.get(sentenceSpans[0])).toBe(
+                "First original sentence."
+            );
+            expect(controller._domOriginalTextByElement.get(paragraph)).toBe(
+                "First original sentence. Second original sentence."
+            );
+
+            // Pointer over rendered sentence text resolves to the innermost sentence span.
+            sentenceSpans[0].dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 120,
+                    clientY: 160,
+                })
+            );
+            expect(document.getElementById("edge-translate-dom-original-tooltip")).toBeNull();
+            jest.advanceTimersByTime(260);
+
+            const tooltip = document.getElementById("edge-translate-dom-original-tooltip");
+            expect(tooltip).not.toBeNull();
+            expect(tooltip.dataset.visible).toBe("true");
+            expect(tooltip.querySelector(".et-original-text").textContent).toBe(
+                "First original sentence."
+            );
+            expect(sentenceSpans[0].classList.contains("et-dom-original-source")).toBe(true);
+
+            // Pointer over the paragraph box itself resolves to the paragraph fallback.
+            paragraph.dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 180,
+                    clientY: 190,
+                })
+            );
+            jest.advanceTimersByTime(260);
+            expect(tooltip.querySelector(".et-original-text").textContent).toBe(
+                "First original sentence. Second original sentence."
+            );
+            expect(paragraph.classList.contains("et-dom-original-source")).toBe(true);
+            expect(sentenceSpans[0].classList.contains("et-dom-original-source")).toBe(false);
+
+            controller.cancelDomPageTranslate();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("does not show a tooltip over empty background in a large layout container", () => {
+        jest.useFakeTimers();
+        try {
+            document.body.innerHTML = '<div id="menu">Sign in now<span>Follow</span></div>';
+            const controller = new BannerController();
+            controller.startDomPageTranslate({
+                engine: "openai",
+                model: "gpt-5.6-luna",
+                sl: "en",
+                tl: "ko",
+                pipelineVersion: "vnext",
+            });
+            const options = createAiPageTranslationSession.mock.calls[0][0];
+            const menu = document.getElementById("menu");
+            const directNode = menu.firstChild;
+            const nestedNode = menu.querySelector("span").firstChild;
+            directNode.data = "지금 로그인";
+            nestedNode.data = "팔로우";
+
+            options.onApplied({
+                element: menu,
+                kind: "block",
+                sourceText: "Sign in nowFollow",
+                translatedText: "지금 로그인팔로우",
+                target: {
+                    kind: "block",
+                    textNodes: [
+                        { nodeRef: { deref: () => directNode }, source: "Sign in now" },
+                        { nodeRef: { deref: () => nestedNode }, source: "Follow" },
+                    ],
+                },
+            });
+
+            const exactTargets = menu.querySelectorAll(
+                "[data-edge-translate-exact-original]"
+            );
+            expect(exactTargets).toHaveLength(2);
+            expect(controller._domOriginalTextByElement.get(menu)).toBeUndefined();
+
+            // The event target is the viewport-sized layout container, not either text span.
+            menu.dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 700,
+                    clientY: 500,
+                })
+            );
+            jest.advanceTimersByTime(260);
+            expect(document.getElementById("edge-translate-dom-original-tooltip")).toBeNull();
+
+            // The same translated content still exposes its original directly over the text.
+            exactTargets[0].dispatchEvent(
+                new MouseEvent("mouseover", {
+                    bubbles: true,
+                    clientX: 120,
+                    clientY: 160,
+                })
+            );
+            jest.advanceTimersByTime(260);
+            const tooltip = document.getElementById("edge-translate-dom-original-tooltip");
+            expect(tooltip?.dataset.visible).toBe("true");
+            expect(tooltip?.querySelector(".et-original-text")?.textContent).toBe("Sign in now");
+
+            controller.cancelDomPageTranslate();
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     it("stops the vNext session on banner close and on supersede", () => {

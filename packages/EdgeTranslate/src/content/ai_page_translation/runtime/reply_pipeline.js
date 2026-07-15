@@ -83,6 +83,10 @@ function applyAliasNow(session, rep, alias) {
     session.advance(alias.target.id, ["queued", "in_flight", "validated", "applied"], {
         appliedTranslation: rep.keptSource ? alias.target.source : rep.translation,
     });
+    session.notifyApplied?.(alias, rep.translation, {
+        keepSource: rep.keptSource,
+        via: "dedupe",
+    });
 }
 
 function applyCacheHits(session, entries, hits) {
@@ -127,6 +131,7 @@ function finishEntry(
     session.advance(entry.target.id, states, {
         appliedTranslation: keepSource ? entry.target.source : text,
     });
+    session.notifyApplied?.(entry, text, { keepSource, via, degraded });
     if (!skipCache) {
         // Validated-only writes; "=" resolutions stay session-only (cache enforces it).
         session.cache.set(entry.target, keepSource ? KEEP_SOURCE_SENTINEL : text);
@@ -142,6 +147,11 @@ function finishEntry(
                 session.counters.translated += 1;
                 session.advance(alias.target.id, ["queued", "in_flight", "validated", "applied"], {
                     appliedTranslation: text,
+                });
+                session.notifyApplied?.(alias, text, {
+                    keepSource: false,
+                    via: "dedupe",
+                    degraded: true,
                 });
             }
             continue;
@@ -569,11 +579,33 @@ function handleSettledOutcome(session, packet, outcome) {
     session.emitStatus();
 }
 
+/**
+ * Apply only fully closed, ID-mapped stream items. Invalid partial items deliberately stay
+ * pending until the authoritative final reply can validate them or route bounded recovery.
+ */
+function handleStreamingUnits(session, packet, units) {
+    if (session.finalized || session.stopped || !Array.isArray(units) || !units.length) return 0;
+    const translatedBefore = session.counters.translated;
+    const resolved = new Set();
+    const buckets = { placeholder: [], semantic: [] };
+    session.watcher.pause(() => {
+        for (const unit of units) consumeUnit(session, packet, unit, resolved, buckets);
+    });
+    const applied = Math.max(0, session.counters.translated - translatedBefore);
+    if (applied > 0) {
+        session.bumpTelemetry("stream_items_applied", applied);
+        session.maybeComplete();
+        session.emitStatus();
+    }
+    return applied;
+}
+
 export {
     applyAliasNow,
     applyCacheHits,
     finishEntry,
     handleSettledOutcome,
+    handleStreamingUnits,
     linkDedupeEntry,
     markIncomplete,
     relinkChangedEntry,

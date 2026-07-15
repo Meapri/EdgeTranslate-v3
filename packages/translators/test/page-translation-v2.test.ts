@@ -16,6 +16,7 @@ import {
     extractPlaceholderTags,
     normalizeGeminiUsage,
     parsePageTranslationReply,
+    parsePageTranslationProgress,
     parseTranslationWire,
     placeholderInventoryMatches,
 } from "../src/page_translation_v2";
@@ -29,6 +30,29 @@ function mockResponse(payload: Record<string, unknown>, status = 200, headers = 
         status,
         headers: { get: (name: string) => normalized.get(name.toLowerCase()) || null },
         json: async () => payload,
+    } as unknown as Response;
+}
+
+function mockSseResponse(events: Record<string, unknown>[], headers = {}) {
+    const normalized = new Map(
+        Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)])
+    );
+    const chunks = events.map((event) =>
+        new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)
+    );
+    let index = 0;
+    return {
+        ok: true,
+        status: 200,
+        headers: { get: (name: string) => normalized.get(name.toLowerCase()) || null },
+        body: {
+            getReader: () => ({
+                read: async () =>
+                    index < chunks.length
+                        ? { done: false, value: chunks[index++] }
+                        : { done: true, value: undefined },
+            }),
+        },
     } as unknown as Response;
 }
 
@@ -70,6 +94,22 @@ function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
 }
 
 describe("stable/V2 and pt3 wire isolation", () => {
+    test("recovers only the fully closed, ordered prefix from streamed pt3 JSON", () => {
+        const prepared = wire();
+        const partial =
+            '{"x":[{"i":"0","t":"안녕 } \\"친구\\""},{"i":"1","t":"저장';
+
+        expect(parsePageTranslationProgress(partial, prepared)).toEqual([
+            { id: "target-a", translatedText: '안녕 } "친구"' },
+        ]);
+        expect(
+            parsePageTranslationProgress(
+                '{"x":[{"i":"1","t":"순서가 다름"}]}',
+                prepared
+            )
+        ).toEqual([]);
+    });
+
     test("preserves the stable-1 prompt identity and original id-object envelope", () => {
         const prepared = prepareTranslationWire(
             request({
@@ -538,6 +578,45 @@ describe("page translation provider adapters", () => {
         }
     });
 
+    test("OpenAI Responses streams fully closed pt3 items before the final reply", async () => {
+        const output = JSON.stringify({
+            x: [
+                { i: "0", t: "안녕하세요" },
+                { i: "1", t: "변경 사항 저장" },
+            ],
+        });
+        const splitAt = output.indexOf("},{") + 2;
+        const fetchMock = jest.fn().mockResolvedValue(
+            mockSseResponse(
+                [
+                    { type: "response.output_text.delta", delta: output.slice(0, splitAt) },
+                    { type: "response.output_text.delta", delta: output.slice(splitAt) },
+                    {
+                        type: "response.completed",
+                        response: {
+                            id: "resp-stream",
+                            status: "completed",
+                            output_text: output,
+                            usage: { input_tokens: 90, output_tokens: 22, total_tokens: 112 },
+                        },
+                    },
+                ],
+                { "x-request-id": "resp-stream" }
+            )
+        );
+        const onProgress = jest.fn();
+        const result = await new OpenAIResponsesAdapter(fetchMock as any).executeOnce(
+            profile(),
+            request({ onProgress }),
+            new AbortController().signal
+        );
+
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).stream).toBe(true);
+        expect(onProgress.mock.calls.some(([items]) => items.length === 1)).toBe(true);
+        expect(onProgress.mock.calls.at(-1)?.[0]).toHaveLength(2);
+        expect(result.ok).toBe(true);
+    });
+
     test("OpenAI Responses pins gpt-5 reasoning effort to the suppression floor", async () => {
         const fetchMock = jest
             .fn()
@@ -809,6 +888,52 @@ describe("page translation provider adapters", () => {
             temperature: 0,
             thinkingConfig: { thinkingBudget: 0 },
         });
+        expect(result.ok).toBe(true);
+    });
+
+    test("Gemini uses streamGenerateContent and emits the same pt3 item progress", async () => {
+        const output = JSON.stringify({
+            x: [
+                { i: "0", t: "안녕하세요" },
+                { i: "1", t: "변경 사항 저장" },
+            ],
+        });
+        const splitAt = output.indexOf("},{") + 2;
+        const fetchMock = jest.fn().mockResolvedValue(
+            mockSseResponse(
+                [
+                    {
+                        responseId: "gemini-stream",
+                        candidates: [{ content: { parts: [{ text: output.slice(0, splitAt) }] } }],
+                    },
+                    {
+                        responseId: "gemini-stream",
+                        candidates: [
+                            {
+                                finishReason: "STOP",
+                                content: { parts: [{ text: output.slice(splitAt) }] },
+                            },
+                        ],
+                        usageMetadata: {
+                            promptTokenCount: 80,
+                            candidatesTokenCount: 20,
+                            totalTokenCount: 100,
+                        },
+                    },
+                ],
+                { "x-goog-request-id": "gemini-stream" }
+            )
+        );
+        const onProgress = jest.fn();
+        const result = await new GeminiGenerateContentAdapter(fetchMock as any).executeOnce(
+            profile({ protocol: "gemini-generate-content", modelId: "gemini-2.5-flash" }),
+            request({ onProgress }),
+            new AbortController().signal
+        );
+
+        expect(fetchMock.mock.calls[0][0]).toContain(":streamGenerateContent?alt=sse");
+        expect(onProgress.mock.calls.some(([items]) => items.length === 1)).toBe(true);
+        expect(onProgress.mock.calls.at(-1)?.[0]).toHaveLength(2);
         expect(result.ok).toBe(true);
     });
 

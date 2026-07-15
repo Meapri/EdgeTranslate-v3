@@ -189,6 +189,7 @@ class TranslatorManager {
                 await this.config_loader;
                 return this.getAiPageV2ProviderProfile(profileId);
             },
+            emitProgress: (tabId, event, detail) => this.channel.emitToTabs(tabId, event, detail),
         });
 
         /**

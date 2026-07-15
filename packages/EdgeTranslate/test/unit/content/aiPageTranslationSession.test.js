@@ -84,6 +84,7 @@ function makeHarness({
     document.body.innerHTML = html;
     const root = document.getElementById("main") || document.body;
     const calls = { translate: [], count: [], cancel: [], saves: [], order: [] };
+    const listeners = new Map();
     const channel = {
         request: async (service, payload) => {
             calls.order.push(service);
@@ -99,7 +100,7 @@ function makeHarness({
             }
             if (service === "translate_page_packet") {
                 calls.translate.push(payload);
-                return translate(payload, calls.translate.length);
+                return translate(payload, calls.translate.length, channel);
             }
             if (service === "cancel_page_translation") {
                 calls.cancel.push(payload);
@@ -110,6 +111,11 @@ function makeHarness({
         emit: (service, payload) => {
             if (service === "persistent_segment_save") calls.saves.push(payload);
         },
+        on: (event, listener) => listeners.set(event, listener),
+        off: (event, listener) => {
+            if (listeners.get(event) === listener) listeners.delete(event);
+        },
+        dispatchEvent: (event, detail) => listeners.get(event)?.(detail),
     };
     const queue = createQueueDouble();
     const controller = createAiPageTranslationSession({
@@ -164,6 +170,141 @@ describe("AI page translation vNext session", () => {
         expect(() =>
             createAiPageTranslationSession({ engine: "googleAiStudio", channel: {} })
         ).not.toThrow();
+    });
+
+    it("notifies the presentation layer after a successful DOM commit", async () => {
+        const onApplied = jest.fn();
+        const h = makeHarness({
+            html: "<div id='main'><p id='line'>One source sentence</p></div>",
+            options: { onApplied },
+        });
+
+        await h.controller.start();
+        await drainAll();
+
+        const paragraph = document.getElementById("line");
+        expect(paragraph.textContent).toBe("번역 One source sentence");
+        expect(onApplied).toHaveBeenCalledTimes(1);
+        expect(onApplied).toHaveBeenCalledWith(
+            expect.objectContaining({
+                element: paragraph,
+                kind: "block",
+                sourceText: "One source sentence",
+                translatedText: "번역 One source sentence",
+                via: "wire",
+                degraded: false,
+            })
+        );
+    });
+
+    it("applies a streamed provider item before the packet's final reply settles", async () => {
+        let resolveFinal;
+        let pendingPayload;
+        const finalReply = new Promise((resolve) => {
+            resolveFinal = resolve;
+        });
+        const h = makeHarness({
+            html: "<div id='main'><p id='first'>First sentence</p><p id='second'>Second sentence</p></div>",
+            translate: (payload, _count, activeChannel) => {
+                pendingPayload = payload;
+                activeChannel.dispatchEvent("ai_page_translation_progress", {
+                    schemaVersion: payload.schemaVersion,
+                    sessionId: payload.sessionId,
+                    packetId: payload.packetId,
+                    requestId: payload.requestId,
+                    units: [goodUnit(payload.units[0])],
+                });
+                return finalReply;
+            },
+        });
+
+        await h.controller.start();
+        await flushMicrotasks(20);
+
+        expect(document.getElementById("first").textContent).toBe("번역 First sentence");
+        expect(document.getElementById("second").textContent).toBe("Second sentence");
+        expect(h.controller.getStatusSnapshot().telemetry.stream_items_applied).toBe(1);
+
+        resolveFinal(defaultTranslate(pendingPayload));
+        await drainAll();
+        expect(document.getElementById("second").textContent).toBe("번역 Second sentence");
+        expect(h.controller.getStatusSnapshot().translatedStrings).toBe(2);
+    });
+
+    it("switches source and translation views with zero additional provider requests", async () => {
+        const h = makeHarness({
+            html: "<div id='main'><p id='line'>One source sentence</p><input id='search' placeholder='Search stations'></div>",
+        });
+
+        await h.controller.start();
+        await drainAll();
+        const requestsAfterTranslation = h.calls.translate.length;
+        const paragraph = document.getElementById("line");
+        const input = document.getElementById("search");
+        expect(paragraph.textContent).toBe("번역 One source sentence");
+        expect(input.getAttribute("placeholder")).toBe("번역 Search stations");
+
+        const sourceResult = h.controller.setViewMode("source");
+        expect(sourceResult.mode).toBe("source");
+        expect(paragraph.textContent).toBe("One source sentence");
+        expect(input.getAttribute("placeholder")).toBe("Search stations");
+
+        const translatedResult = h.controller.setViewMode("translation");
+        expect(translatedResult.mode).toBe("translation");
+        expect(paragraph.textContent).toBe("번역 One source sentence");
+        expect(input.getAttribute("placeholder")).toBe("번역 Search stations");
+        expect(h.calls.translate).toHaveLength(requestsAfterTranslation);
+    });
+
+    it("preserves a site-authored DOM change instead of overwriting it during view toggle", async () => {
+        const h = makeHarness({
+            html: "<div id='main'><p id='line'>Original article sentence</p></div>",
+        });
+
+        await h.controller.start();
+        await drainAll();
+        h.controller.setViewMode("source");
+        const node = document.getElementById("line").firstChild;
+        node.data = "Site changed this sentence";
+
+        const result = h.controller.setViewMode("translation");
+        expect(result.preserved).toBeGreaterThan(0);
+        expect(node.data).toBe("Site changed this sentence");
+    });
+
+    it("notifies once for every DOM element reached through source dedupe", async () => {
+        const onApplied = jest.fn();
+        const h = makeHarness({
+            html: "<div id='main'><p id='a'>Same source sentence</p><p id='b'>Same source sentence</p></div>",
+            options: { onApplied },
+        });
+
+        await h.controller.start();
+        await drainAll();
+
+        expect(h.calls.translate).toHaveLength(1);
+        expect(onApplied).toHaveBeenCalledTimes(2);
+        expect(new Set(onApplied.mock.calls.map(([event]) => event.element))).toEqual(
+            new Set([document.getElementById("a"), document.getElementById("b")])
+        );
+        expect(onApplied.mock.calls.map(([event]) => event.via).sort()).toEqual(["dedupe", "wire"]);
+    });
+
+    it("reports readable original DOM text instead of inline boundary placeholders", async () => {
+        const onApplied = jest.fn();
+        const h = makeHarness({
+            html: "<div id='main'><p id='line'>Read <a href='/release'>release notes</a> before travel.</p></div>",
+            options: { onApplied },
+        });
+
+        await h.controller.start();
+        await drainAll();
+
+        expect(onApplied).toHaveBeenCalledTimes(1);
+        const event = onApplied.mock.calls[0][0];
+        expect(event.element).toBe(document.getElementById("line"));
+        expect(event.sourceText).toBe("Read release notes before travel.");
+        expect(event.sourceText).not.toMatch(/<\/?g\d+>|<v\d+\/>/);
     });
 
     it("finalizes observed capability fields without exceeding the safe combined window", () => {
@@ -988,6 +1129,7 @@ describe("AI page translation vNext session", () => {
 
     it("serves a fully cached page with ZERO provider requests", async () => {
         const sources = ["First cached sentence", "Second cached sentence"];
+        const onApplied = jest.fn();
         const values = new Map();
         for (const source of sources) {
             const identity = cacheIdentity(
@@ -1006,6 +1148,7 @@ describe("AI page translation vNext session", () => {
         }
         const h = makeHarness({
             html: `<div id='main'><p>${sources[0]}</p><p>${sources[1]}</p></div>`,
+            options: { onApplied },
             persistent: ({ keys }) =>
                 keys
                     .map((key) => (values.has(key) ? { key, value: values.get(key) } : null))
@@ -1019,6 +1162,8 @@ describe("AI page translation vNext session", () => {
         expect(snapshot.phase).toBe("complete");
         expect(snapshot.translatedStrings).toBe(2);
         expect(h.root.querySelectorAll("p")[0].textContent).toBe(`캐시 ${sources[0]}`);
+        expect(onApplied).toHaveBeenCalledTimes(2);
+        expect(onApplied.mock.calls.every(([event]) => event.via === "cache")).toBe(true);
     });
 
     it("never fans a revised representative's translation onto aliases still showing the old text", async () => {

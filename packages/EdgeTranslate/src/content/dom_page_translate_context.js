@@ -461,6 +461,10 @@ function wrapLeafLineSegmentsInSpans(element) {
         }
         const span = ownerDocument.createElement("span");
         span.setAttribute("data-edge-translate-segment", "");
+        // This wrapper is presentation-only extension DOM. Marking ownership prevents the
+        // vNext mutation collector from treating already-translated segment text as new page
+        // content during a later SPA mutation scan.
+        span.setAttribute("data-edge-translate-owned", "");
         for (let i = seg.startIndex; i < seg.endIndex; i += 1) {
             const node = originalChildren[i];
             if (node) span.appendChild(node);
@@ -519,7 +523,7 @@ function splitTextIntoSentences(text) {
  * event listeners survive. Returns the created spans in document order, or [] (leaving the DOM
  * untouched) when the leaf is a single sentence or has no splittable text.
  */
-function wrapLeafSentencesInSpans(element) {
+function wrapLeafSentencesInSpans(element, options = {}) {
     if (!element || !element.ownerDocument || !element.childNodes) return [];
     // Parent leaves (own line + a nested sub-list) must not be sentence-wrapped: the
     // wrap moves whole child elements into spans, which would sweep the nested sub-list
@@ -557,7 +561,20 @@ function wrapLeafSentencesInSpans(element) {
     }
     const ownerDocument = element.ownerDocument;
     const originalChildren = Array.from(host.childNodes);
+    // If none of the direct Text nodes contains a boundary, the grouping pass below cannot
+    // produce multiple spans (inline elements are intentionally moved whole). Bail out before
+    // touching node identity.
+    if (
+        !originalChildren.some(
+            (node) =>
+                node.nodeType === Node.TEXT_NODE &&
+                markSentenceBoundaries(node.nodeValue || "").includes(SENTENCE_BOUNDARY_MARK)
+        )
+    ) {
+        return [];
+    }
     const groups = [];
+    const splitRecords = [];
     let current = [];
     const flush = () => {
         if (current.length) {
@@ -570,12 +587,23 @@ function wrapLeafSentencesInSpans(element) {
             const pieces = markSentenceBoundaries(child.nodeValue || "").split(
                 SENTENCE_BOUNDARY_MARK
             );
+            const pieceNodes = [];
             for (let i = 0; i < pieces.length; i += 1) {
-                if (pieces[i]) current.push(ownerDocument.createTextNode(pieces[i]));
+                if (pieces[i]) {
+                    // Preserve the original tracked Text node as the first piece. vNext's source
+                    // ↔ translation toggle can then keep its registry identity and separately
+                    // account for only the extra sentence pieces created here.
+                    const pieceNode =
+                        pieceNodes.length === 0 ? child : ownerDocument.createTextNode(pieces[i]);
+                    pieceNode.nodeValue = pieces[i];
+                    pieceNodes.push(pieceNode);
+                    current.push(pieceNode);
+                }
                 // A boundary mark followed this piece (i.e. it is not the last piece of the node)
                 // → close the current sentence span here.
                 if (i < pieces.length - 1) flush();
             }
+            if (pieceNodes.length) splitRecords.push({ originalNode: child, pieceNodes });
         } else {
             // Inline element / <br> / etc.: keep it whole inside the current sentence. We MOVE the
             // original node (no clone) so its attributes + event listeners survive.
@@ -590,9 +618,18 @@ function wrapLeafSentencesInSpans(element) {
     for (const group of groups) {
         const span = ownerDocument.createElement("span");
         span.setAttribute("data-edge-translate-segment", "");
+        // Sentence wrappers are our hover hit targets, not site-authored translatable content.
+        // The ownership marker keeps subsequent whole-subtree scans from re-sending their
+        // translated text to the provider.
+        span.setAttribute("data-edge-translate-owned", "");
         for (const node of group) span.appendChild(node);
         host.appendChild(span);
         spans.push(span);
+    }
+    if (typeof options.onSplitTextNode === "function") {
+        for (const record of splitRecords) {
+            options.onSplitTextNode(record.originalNode, record.pieceNodes);
+        }
     }
     return spans;
 }

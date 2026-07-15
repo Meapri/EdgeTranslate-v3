@@ -1,5 +1,6 @@
 import {
     AI_PAGE_SCHEMA_VERSION,
+    AI_PAGE_EVENT_PROGRESS,
     SERVICE_CANCEL,
     SERVICE_CAPABILITIES,
     SERVICE_COUNT_TOKENS,
@@ -10,13 +11,20 @@ import {
 
 function makeChannel(handler) {
     const calls = [];
-    return {
+    const listeners = new Map();
+    const channel = {
         calls,
         request: jest.fn(async (service, payload) => {
             calls.push({ service, payload });
-            return handler(service, payload);
+            return handler(service, payload, channel);
         }),
+        on: jest.fn((event, listener) => listeners.set(event, listener)),
+        off: jest.fn((event, listener) => {
+            if (listeners.get(event) === listener) listeners.delete(event);
+        }),
+        emit: (event, detail) => listeners.get(event)?.(detail),
     };
+    return channel;
 }
 
 function makeClient(channel, overrides = {}) {
@@ -154,6 +162,43 @@ describe("vNext transport client (page-v3-1 envelope)", () => {
             failure: null,
             costAttribution: "owner",
         });
+    });
+
+    it("forwards only matching packet progress and removes the listener after settlement", async () => {
+        const onProgress = jest.fn();
+        const channel = makeChannel((service, payload, activeChannel) => {
+            if (service !== SERVICE_TRANSLATE) return null;
+            activeChannel.emit(AI_PAGE_EVENT_PROGRESS, {
+                schemaVersion: AI_PAGE_SCHEMA_VERSION,
+                sessionId: "another-session",
+                packetId: payload.packetId,
+                requestId: payload.requestId,
+                units: [{ id: "wrong", status: "translated", translatedText: "무시" }],
+            });
+            activeChannel.emit(AI_PAGE_EVENT_PROGRESS, {
+                schemaVersion: AI_PAGE_SCHEMA_VERSION,
+                sessionId: "s1",
+                packetId: payload.packetId,
+                requestId: payload.requestId,
+                units: [{ id: "b1", status: "translated", translatedText: "번역" }],
+            });
+            return { ok: true, units: [], usageReceipts: [] };
+        });
+        const client = makeClient(channel);
+
+        await client.translatePacket({
+            packetId: "pkt-stream",
+            items: [{ id: "b1", text: "source" }],
+            maxOutputTokens: 128,
+            onProgress,
+        });
+
+        expect(onProgress).toHaveBeenCalledTimes(1);
+        expect(onProgress).toHaveBeenCalledWith([
+            { id: "b1", status: "translated", translatedText: "번역" },
+        ]);
+        expect(channel.on).toHaveBeenCalledWith(AI_PAGE_EVENT_PROGRESS, expect.any(Function));
+        expect(channel.off).toHaveBeenCalledWith(AI_PAGE_EVENT_PROGRESS, expect.any(Function));
     });
 
     it("counts tokens through count_page_translation_tokens", async () => {

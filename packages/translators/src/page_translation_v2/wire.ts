@@ -429,6 +429,84 @@ export function parsePageTranslationReply(
     return { ok: errors.length === 0 && missingIds.length === 0, items, missingIds, errors };
 }
 
+/**
+ * Recover the strictly ordered, fully closed prefix of pt3 reply items from an incomplete JSON
+ * stream. String escapes and braces inside translated text are handled by the scanner; a gap,
+ * duplicate, unknown alias or out-of-order item stops the prefix before it can reach the DOM.
+ */
+export function parsePageTranslationProgress(
+    rawText: string,
+    wire: PreparedTranslationWire
+): TranslatedBatchItem[] {
+    if (wire.wireProtocol !== "pt3") return [];
+    const raw = String(rawText || "");
+    const keyIndex = raw.indexOf('"x"');
+    const arrayStart = keyIndex >= 0 ? raw.indexOf("[", keyIndex + 3) : -1;
+    if (arrayStart < 0) return [];
+
+    const objects: Record<string, unknown>[] = [];
+    let objectStart = -1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = arrayStart + 1; index < raw.length; index += 1) {
+        const char = raw[index];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (char === "\\") escaped = true;
+            else if (char === '"') inString = false;
+            continue;
+        }
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+        if (char === "{") {
+            if (depth === 0) objectStart = index;
+            depth += 1;
+            continue;
+        }
+        if (char !== "}" || depth <= 0) continue;
+        depth -= 1;
+        if (depth !== 0 || objectStart < 0) continue;
+        try {
+            const value = JSON.parse(raw.slice(objectStart, index + 1));
+            if (!value || typeof value !== "object" || Array.isArray(value)) break;
+            objects.push(value as Record<string, unknown>);
+        } catch {
+            break;
+        }
+        objectStart = -1;
+    }
+
+    const expectedAliases = Array.from(wire.aliasToId.keys());
+    const items: TranslatedBatchItem[] = [];
+    for (let index = 0; index < objects.length; index += 1) {
+        const alias = objects[index].i;
+        const translatedText = objects[index].t;
+        if (
+            typeof alias !== "string" ||
+            alias !== expectedAliases[index] ||
+            typeof translatedText !== "string" ||
+            !translatedText.trim()
+        ) {
+            break;
+        }
+        const id = wire.aliasToId.get(alias);
+        if (!id) break;
+        if (translatedText === PAGE_TRANSLATION_KEEP_SOURCE_SENTINEL) {
+            items.push({
+                id,
+                translatedText: wire.sourceByAlias.get(alias) ?? "",
+                keepSource: true,
+            });
+        } else {
+            items.push({ id, translatedText });
+        }
+    }
+    return items;
+}
+
 /** Parses the original V2 array/id-object replies without applying pt3-only sentinel rules. */
 export function parseLegacyPageTranslationReply(
     rawText: string,

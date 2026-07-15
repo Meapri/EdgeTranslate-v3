@@ -50,6 +50,7 @@ function createAiPageTranslationSession(options = {}) {
     let session = null;
     let authFailures = 0;
     let refusedSnapshot = null;
+    let viewMode = options.viewMode === "source" ? "source" : "translation";
 
     const onStatus = (snapshot) => {
         if (typeof options.onStatus === "function") options.onStatus(snapshot);
@@ -77,6 +78,7 @@ function createAiPageTranslationSession(options = {}) {
             session = new AiPageTranslationSession({
                 ...options,
                 deps,
+                viewMode,
                 onStatus: (snapshot) => {
                     if (snapshot.phase === "error" && isAuthClassFailure(snapshot.failure)) {
                         if (!session?._authCounted) {
@@ -96,7 +98,22 @@ function createAiPageTranslationSession(options = {}) {
 
         getStatusSnapshot() {
             if (session) return session.getStatusSnapshot();
-            return refusedSnapshot || { phase: "idle" };
+            return refusedSnapshot || { phase: "idle", viewMode };
+        },
+
+        setViewMode(mode) {
+            viewMode = mode === "source" ? "source" : "translation";
+            return session
+                ? session.setViewMode(viewMode)
+                : { mode: viewMode, changed: 0, preserved: 0 };
+        },
+
+        toggleViewMode() {
+            return this.setViewMode(viewMode === "source" ? "translation" : "source");
+        },
+
+        getViewMode() {
+            return session ? session.getViewMode() : viewMode;
         },
     };
 }

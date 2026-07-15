@@ -141,6 +141,12 @@ export type TranslationBatchRequest = {
     hint?: string;
     maxOutputTokens: number;
     items: TranslationBatchItem[];
+    /**
+     * Valid, fully closed reply items recovered from a provider stream. The callback is
+     * presentation-only: the final ProviderAttemptResult remains the accounting and recovery
+     * authority, and callers must keep their normal CAS/validation guards when applying items.
+     */
+    onProgress?: (items: TranslatedBatchItem[]) => void;
 };
 
 export type UsageSource = "provider-reported" | "provider-counted" | "client-estimated";

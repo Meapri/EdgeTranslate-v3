@@ -32,6 +32,7 @@ import {
     wrapLeafSentencesInSpans,
 } from "./dom_page_translate_context.js";
 import { createAiPageTranslationSession } from "./ai_page_translation/index.js";
+import { makeNodeReference } from "./ai_page_translation/dom/target_registry.js";
 
 // Page-segment protocol/cache schema. Bump this whenever marker semantics,
 // role hints, or the page prompt contract changes. It deliberately lives in
@@ -174,6 +175,32 @@ const CONTENT_VISIBILITY_BLOCK_TAGS = new Set([
     "FIGURE",
 ]);
 
+// Only genuine text-leaf elements own a meaningful "paragraph background" hover area. Generic
+// layout containers such as div/nav/article can span most of the viewport while merely owning a
+// handful of direct Text nodes; registering the whole container makes empty page chrome summon a
+// huge original-text tooltip. Those containers use exact Text-node wrappers instead.
+const AI_PAGE_ORIGINAL_HOVER_LEAF_TAGS = new Set([
+    "P",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "LI",
+    "BLOCKQUOTE",
+    "FIGCAPTION",
+    "CAPTION",
+    "TH",
+    "TD",
+    "LABEL",
+    "BUTTON",
+    "SUMMARY",
+    "DD",
+    "DT",
+    "PRE",
+]);
+
 /**
  * Apply `content-visibility: auto` inline to translated block-level elements
  * so off-screen regions skip layout + paint until scrolled into view. We set
@@ -285,6 +312,7 @@ class BannerController {
         this._domPageTranslateOptions = { engine: "googleAiStudio", sl: "auto", tl: "en" };
         this._aiPageConfig = this.normalizeAiPageConfig();
         this._activePagePipeline = null;
+        this._domPageViewMode = "translation";
         this._domResolvedSourceLanguage = null;
         this._domTranslationCache = new Map();
         this._domTranslationCacheMax = 2000;
@@ -751,6 +779,8 @@ class BannerController {
 
     startDomPageTranslateVnext() {
         this._activePagePipeline?.cancel("superseded");
+        this._activePagePipeline = null;
+        this._domPageViewMode = "translation";
         this.currentTranslator = "dom";
         this.resetDomPageRuntimeState();
         this._domResolvedSourceLanguage = this.resolveDomPageSourceLanguage(
@@ -771,6 +801,11 @@ class BannerController {
             providerProfileId: "local-ai-page",
             engine: this._domPageTranslateOptions.engine,
             modelId: this._domPageTranslateOptions.model,
+            // vNext commits through its own CAS-safe DOM layer, so it must explicitly hand the
+            // owning element/source pair back to the shared original-text tooltip registry.
+            // The callback runs only after a successful non-identity commit; cache, wire,
+            // recovery and dedupe applies all converge on the same session notification.
+            onApplied: (applied) => this.registerAiPageVnextOriginalText(applied),
             onStatus: (snapshot) => this.applyAiPageVnextSessionSnapshot(pipeline, snapshot),
         });
         // Adapter: every shared banner/cancel surface speaks the pipeline contract
@@ -780,12 +815,16 @@ class BannerController {
         const pipeline = {
             cancel: (reason) => controller.stop(reason),
             getSnapshot: () => this.mapAiPageVnextSnapshot(controller.getStatusSnapshot()),
+            setViewMode: (mode) => controller.setViewMode(mode),
+            getViewMode: () => controller.getViewMode(),
             // Preserve the shared legacy pipeline contract above while exposing the raw
             // vNext snapshot for diagnostics and browser release gates. This is deliberately
             // pull-only: normal banner updates still use onStatus and pay no extra work.
             getStatusSnapshot: () => controller.getStatusSnapshot(),
         };
         this._activePagePipeline = pipeline;
+        this._domPageViewMode = pipeline.getViewMode();
+        this.updateDomPageViewToggle();
         controller.start().catch((error) => {
             if (this._activePagePipeline !== pipeline) return;
             this.updateDomPageBannerStatus("error", error?.message || String(error));
@@ -7276,7 +7315,7 @@ class BannerController {
     // sentence's source instead of the whole paragraph. The full original is also registered on
     // the leaf so a hover that lands between sentence spans still shows something. Falls back to
     // whole-leaf registration when the leaf is a single sentence or can't be cleanly wrapped.
-    registerAiPageLeafOriginalBySentence(leaf, fullOriginal) {
+    registerAiPageLeafOriginalBySentence(leaf, fullOriginal, options = {}) {
         if (!leaf || !fullOriginal) return;
         // Idempotency: a leaf filled from the per-string cache is wrapped + registered during the
         // build loop, then section registration can revisit the SAME leaf. Re-running
@@ -7300,7 +7339,7 @@ class BannerController {
         }
         const originalSentences = splitTextIntoSentences(fullOriginal);
         if (originalSentences.length > 1) {
-            const spans = wrapLeafSentencesInSpans(leaf);
+            const spans = wrapLeafSentencesInSpans(leaf, options);
             if (spans.length > 1) {
                 const aligned = alignSentencesProportional(spans.length, originalSentences);
                 for (let i = 0; i < spans.length; i += 1) {
@@ -7313,6 +7352,92 @@ class BannerController {
             }
         }
         this.registerDomOriginalTextOnce(leaf, fullOriginal);
+    }
+
+    // vNext hover registration has two deliberately different hit areas:
+    //   1. semantic leaf blocks (p/h*/li/td/...) keep sentence spans + a whole-block fallback;
+    //   2. generic layout containers register only exact translated Text-node wrappers.
+    // The second rule prevents a viewport-sized div/nav/article background from behaving like
+    // translated prose merely because it owns a few direct strings.
+    registerAiPageVnextOriginalText({ element, sourceText, kind, target, degraded } = {}) {
+        if (!element || !sourceText) return;
+        if (kind === "block" && AI_PAGE_ORIGINAL_HOVER_LEAF_TAGS.has(element.tagName)) {
+            const entries = Array.isArray(target?.textNodes) ? target.textNodes : [];
+            const entryByNode = new Map(
+                entries
+                    .map((entry) => [entry?.nodeRef?.deref?.() || null, entry])
+                    .filter(([node]) => Boolean(node))
+            );
+            this.registerAiPageLeafOriginalBySentence(element, sourceText, {
+                onSplitTextNode: (originalNode, pieceNodes) => {
+                    const targetEntry = entryByNode.get(originalNode);
+                    if (!targetEntry || !Array.isArray(pieceNodes) || !pieceNodes.length) return;
+                    targetEntry.viewPieces = pieceNodes.map((node) => ({
+                        nodeRef: makeNodeReference(node),
+                        translated: String(node.data || ""),
+                    }));
+                },
+            });
+            return;
+        }
+
+        if (kind === "block" || kind === "atomic") {
+            const entries =
+                target?.kind === "block" && Array.isArray(target.textNodes)
+                    ? target.textNodes
+                    : target?.nodeRef
+                    ? [target]
+                    : [];
+            const liveEntries = entries
+                .map((entry) => ({
+                    node: entry?.nodeRef?.deref?.() || null,
+                    original: String(entry?.source || ""),
+                }))
+                .filter(
+                    ({ node }) =>
+                        node?.nodeType === Node.TEXT_NODE &&
+                        node.isConnected !== false &&
+                        String(node.data || "").trim()
+                );
+
+            // A flatten recovery moves the complete translation into one surviving node, so its
+            // exact hit target must carry the complete block original rather than one old node's
+            // fragment. Normal placeholder/atomic commits retain their per-node source mapping.
+            if (degraded && liveEntries.length) {
+                this.registerAiPageVnextTextNodeOriginal(liveEntries[0].node, sourceText);
+                return;
+            }
+            for (const { node, original } of liveEntries) {
+                this.registerAiPageVnextTextNodeOriginal(node, original);
+            }
+            return;
+        }
+
+        // Attribute translations have no descendant text hit target. Their owning control/media
+        // element is itself the visible surface, so whole-element hover remains appropriate.
+        if (kind === "attribute") this.registerDomOriginalText(element, sourceText);
+    }
+
+    registerAiPageVnextTextNodeOriginal(node, originalText) {
+        if (
+            !node ||
+            node.nodeType !== Node.TEXT_NODE ||
+            !node.parentNode ||
+            !String(node.data || "").trim()
+        ) {
+            return null;
+        }
+        let span = node.parentElement;
+        if (!span?.hasAttribute("data-edge-translate-exact-original")) {
+            span = node.ownerDocument.createElement("span");
+            span.setAttribute("data-edge-translate-segment", "");
+            span.setAttribute("data-edge-translate-owned", "");
+            span.setAttribute("data-edge-translate-exact-original", "");
+            node.parentNode.insertBefore(span, node);
+            span.appendChild(node);
+        }
+        this.registerDomOriginalTextOnce(span, originalText);
+        return span;
     }
 
     // True once actual output spend has run well past the page's own committed estimate —
@@ -9942,6 +10067,7 @@ class BannerController {
     }
 
     getDomOriginalTooltipTarget(target) {
+        if (this._domPageViewMode === "source") return null;
         let element =
             target && target.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
         while (element && element !== document.documentElement) {
@@ -10311,6 +10437,7 @@ class BannerController {
     showDomPageBanner() {
         this.ensureDomPageBanner();
         this.updateDomPageBannerStatus();
+        this.updateDomPageViewToggle();
         this.setDomPageBannerVisible(true);
     }
 
@@ -10710,6 +10837,11 @@ class BannerController {
                         opacity: 0.55;
                         transform: none;
                     }
+                    .view-toggle[hidden] { display: none !important; }
+                    .view-toggle[aria-pressed="true"] {
+                        color: var(--et-primary);
+                        background: var(--et-primary-container);
+                    }
                     .close {
                         color: var(--et-muted);
                         padding: 0;
@@ -10949,6 +11081,13 @@ class BannerController {
                     </div>
                     <div class="actions">
                         <span class="progress-meta" data-role="progress-meta"></span>
+                        <button type="button" class="view-toggle" data-action="toggle-view"
+                                aria-label="Show original page" aria-pressed="false" hidden>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M7.5 5h10v3l4-4-4-4v3h-12v7h2V5Zm9 14h-10v-3l-4 4 4 4v-3h12v-7h-2v5Z" />
+                            </svg>
+                            <span class="button-text" data-role="view-toggle-text">Original</span>
+                        </button>
                         <button type="button" class="hide" data-action="hide" aria-label="Hide translation bar">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M2.1 3.51 3.51 2.1 21.9 20.49l-1.41 1.41-3.08-3.08A11.46 11.46 0 0 1 12 20C7 20 2.73 16.89 1 12.5a11.82 11.82 0 0 1 4.2-5.34L2.1 3.51Zm5.66 6.25A4.68 4.68 0 0 0 7.5 12a4.5 4.5 0 0 0 4.5 4.5c.78 0 1.51-.2 2.15-.55l-1.69-1.69a2.48 2.48 0 0 1-2.72-2.72L7.76 9.76ZM12 5c5 0 9.27 3.11 11 7.5a11.7 11.7 0 0 1-3.18 4.35l-2.84-2.84c.33-.61.52-1.29.52-2.01A4.5 4.5 0 0 0 12 7.5c-.72 0-1.4.19-2.01.52L7.82 5.85A11.57 11.57 0 0 1 12 5Zm0 4.5A2.5 2.5 0 1 1 14.5 12c0 .16-.02.32-.05.47L11.53 9.55c.15-.03.31-.05.47-.05Z" />
@@ -10977,6 +11116,9 @@ class BannerController {
             });
             root.querySelector("[data-action='show']").addEventListener("click", () => {
                 this.setDomPageBannerVisible(true);
+            });
+            root.querySelector("[data-action='toggle-view']").addEventListener("click", () => {
+                this.toggleDomPageTranslationView();
             });
             root.querySelector("[data-action='close']").addEventListener("click", () => {
                 this.cancelDomPageTranslate();
@@ -11159,6 +11301,40 @@ class BannerController {
         this.movePage("top", visible ? this._domPageBannerHeight : 0, true);
     }
 
+    toggleDomPageTranslationView() {
+        const pipeline = this._activePagePipeline;
+        if (!pipeline || typeof pipeline.setViewMode !== "function") return null;
+        const current = pipeline.getViewMode?.() || this._domPageViewMode || "translation";
+        const next = current === "source" ? "translation" : "source";
+        const result = pipeline.setViewMode(next) || { mode: next };
+        this._domPageViewMode = result.mode === "source" ? "source" : "translation";
+        if (this._domPageViewMode === "source") this.hideDomOriginalTooltip();
+        this.updateDomPageViewToggle();
+        return result;
+    }
+
+    updateDomPageViewToggle() {
+        const host =
+            this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
+        const root = host?.shadowRoot;
+        const button = root?.querySelector?.("[data-action='toggle-view']");
+        if (!button) return;
+        const supported = typeof this._activePagePipeline?.setViewMode === "function";
+        button.hidden = !supported;
+        if (!supported) return;
+        const mode = this._activePagePipeline.getViewMode?.() || this._domPageViewMode;
+        this._domPageViewMode = mode === "source" ? "source" : "translation";
+        const showingSource = this._domPageViewMode === "source";
+        button.setAttribute("aria-pressed", showingSource ? "true" : "false");
+        button.setAttribute(
+            "aria-label",
+            showingSource ? "Show translated page" : "Show original page"
+        );
+        button.title = showingSource ? "Show translation" : "Show original";
+        const label = button.querySelector("[data-role='view-toggle-text']");
+        if (label) label.textContent = showingSource ? "Translation" : "Original";
+    }
+
     /**
      * Schedule a banner repaint. Called from many spots (every entry completion);
      * coalesces multiple updates in the same JS turn into a single rAF flush.
@@ -11209,6 +11385,7 @@ class BannerController {
             progressFill: root.querySelector("[data-role='progress-fill']"),
             progressMeta: root.querySelector("[data-role='progress-meta']"),
             tokenMeta: root.querySelector("[data-role='token-meta']"),
+            viewToggle: root.querySelector("[data-action='toggle-view']"),
         };
         if (!refs.bar || !refs.status) return null;
         this._domBannerRefs = refs;
@@ -11414,6 +11591,8 @@ class BannerController {
             this._activePagePipeline.cancel("user-cancelled");
             this._activePagePipeline = null;
         }
+        this._domPageViewMode = "translation";
+        this.updateDomPageViewToggle();
         if (this._domTranslationQueue) this._domTranslationQueue.length = 0;
         this._pendingNodes.clear();
         if (this._scheduleBatch) {

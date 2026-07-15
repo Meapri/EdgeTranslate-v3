@@ -27,6 +27,7 @@ import { RETRY_TABLE, TERMINAL_FAILURE_KINDS, createRecoveryController } from ".
 import {
     applyCacheHits,
     handleSettledOutcome,
+    handleStreamingUnits,
     linkDedupeEntry,
     markIncomplete,
     relinkChangedEntry,
@@ -80,6 +81,8 @@ class AiPageTranslationSession {
         this.domain =
             options.domain ?? (typeof location !== "undefined" ? location.hostname || "" : "");
         this.onStatus = typeof options.onStatus === "function" ? options.onStatus : null;
+        this.onApplied = typeof options.onApplied === "function" ? options.onApplied : null;
+        this.viewMode = options.viewMode === "source" ? "source" : "translation";
         this.collectorOptions = { ...(options.collector || {}) };
         this.skipAlreadyTargetLanguage = options.skipAlreadyTargetLanguage !== false;
         this.sessionId = options.sessionId || createSessionId();
@@ -142,6 +145,126 @@ class AiPageTranslationSession {
 
     bumpTelemetry(name, count = 1) {
         this.telemetry[name] = (this.telemetry[name] || 0) + (Number(count) || 1);
+    }
+
+    notifyApplied(entry, translation, metadata = {}) {
+        if (!entry || metadata.keepSource === true) return;
+        if (this.onApplied) {
+            try {
+                const sourceText =
+                    entry.target?.kind === "block" && Array.isArray(entry.target.textNodes)
+                        ? entry.target.textNodes.map((node) => String(node.source || "")).join("")
+                        : entry.text;
+                this.onApplied({
+                    element: entry.element || null,
+                    target: entry.target,
+                    kind: entry.kind,
+                    // Tooltip text is human-readable original DOM text, never the serialized
+                    // `<gN>`/`<vN/>` boundary IR sent to the model.
+                    sourceText,
+                    translatedText: translation,
+                    via: metadata.via || "wire",
+                    degraded: metadata.degraded === true,
+                });
+            } catch {
+                // DOM application is already committed. A presentation-only observer (such as
+                // the original-text hover registry) must never turn a valid translation into a
+                // retry or prevent the source/translation view toggle below.
+                this.bumpTelemetry("applied_observer_error");
+            }
+        }
+        // A reply may land while the reader is viewing the source page. Commit first so the
+        // validated translation remains stored on the registry target, let the presentation
+        // callback build its stable hover wrappers, then immediately return this target to
+        // source view. No provider replay is needed when the reader switches back.
+        if (this.viewMode === "source") this.setTargetViewMode(entry.target, "source");
+    }
+
+    setTargetViewMode(target, mode) {
+        if (!target || (mode !== "source" && mode !== "translation")) {
+            return { changed: 0, preserved: 0 };
+        }
+        if (target.kind === "block" && Array.isArray(target.textNodes)) {
+            const writes = [];
+            for (const entry of target.textNodes) {
+                if (Array.isArray(entry?.viewPieces) && entry.viewPieces.length) {
+                    const pieces = entry.viewPieces
+                        .map((piece) => ({
+                            node: piece?.nodeRef?.deref?.() || null,
+                            translated: String(piece?.translated || ""),
+                        }))
+                        .filter(({ node }) => node && node.isConnected !== false);
+                    if (!pieces.length) continue;
+                    for (let index = 0; index < pieces.length; index += 1) {
+                        const { node, translated } = pieces[index];
+                        const source = index === 0 ? String(entry.source) : "";
+                        const desired = mode === "source" ? source : translated;
+                        const expected = mode === "source" ? translated : source;
+                        const current = String(node.data);
+                        if (current === desired) continue;
+                        if (current !== expected) return { changed: 0, preserved: 1 };
+                        writes.push({ node, desired });
+                    }
+                    continue;
+                }
+                const node = entry?.nodeRef?.deref?.() || null;
+                const translated = entry?.appliedTranslation;
+                if (!node || node.isConnected === false || translated === null) continue;
+                const desired = mode === "source" ? String(entry.source) : String(translated);
+                const expected = mode === "source" ? String(translated) : String(entry.source);
+                const current = String(node.data);
+                if (current === desired) continue;
+                // Preserve framework/site writes. A block toggles atomically: if any surviving
+                // node is no longer one of our two known values, do not partially reshape it.
+                if (current !== expected) return { changed: 0, preserved: 1 };
+                writes.push({ node, desired });
+            }
+            for (const { node, desired } of writes) node.data = desired;
+            return { changed: writes.length, preserved: 0 };
+        }
+
+        if (target.kind !== "text" && target.kind !== "attribute") {
+            return { changed: 0, preserved: 0 };
+        }
+        const node = target.nodeRef?.deref?.() || null;
+        const translated = target.appliedTranslation;
+        if (!node || node.isConnected === false || translated === null) {
+            return { changed: 0, preserved: 0 };
+        }
+        const read = () =>
+            target.kind === "attribute"
+                ? node.getAttribute?.(target.attributeName)
+                : typeof node.data === "string"
+                ? node.data
+                : null;
+        const desired = mode === "source" ? String(target.source) : String(translated);
+        const expected = mode === "source" ? String(translated) : String(target.source);
+        const current = read();
+        if (current === desired) return { changed: 0, preserved: 0 };
+        if (current !== expected) return { changed: 0, preserved: 1 };
+        if (target.kind === "attribute") node.setAttribute(target.attributeName, desired);
+        else node.data = desired;
+        return { changed: 1, preserved: 0 };
+    }
+
+    setViewMode(mode) {
+        const next = mode === "source" ? "source" : "translation";
+        this.viewMode = next;
+        let changed = 0;
+        let preserved = 0;
+        this.watcher.pause(() => {
+            for (const target of this.registry.list()) {
+                const result = this.setTargetViewMode(target, next);
+                changed += result.changed;
+                preserved += result.preserved;
+            }
+        });
+        this.emitStatus();
+        return { mode: next, changed, preserved };
+    }
+
+    getViewMode() {
+        return this.viewMode;
     }
 
     advance(targetId, states, metadata = {}) {
@@ -526,6 +649,7 @@ class AiPageTranslationSession {
                 hint: packet.hint,
                 attempt: attemptMeta.attempt || 0,
                 hedge,
+                onProgress: (units) => handleStreamingUnits(this, packet, units),
             });
         } catch (error) {
             // The provider may have completed and the background may even hold a replayable
@@ -739,6 +863,7 @@ class AiPageTranslationSession {
         return {
             sessionId: this.sessionId,
             phase: this.phase,
+            viewMode: this.viewMode,
             totalStrings: this.counters.total,
             translatedStrings: this.counters.translated,
             failedStrings: this.counters.failed,

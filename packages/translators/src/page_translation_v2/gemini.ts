@@ -9,6 +9,7 @@ import {
 } from "./types";
 import {
     attemptSummary,
+    consumeSse,
     defaultFetch,
     fallbackCapabilities,
     nextAttemptId,
@@ -20,7 +21,7 @@ import {
 } from "./adapter_utils";
 import { classifyHttpFailure, classifyThrownFailure, parseRetryAfterMs } from "./errors";
 import { normalizeGeminiUsage } from "./usage";
-import { prepareTranslationWire } from "./wire";
+import { parsePageTranslationProgress, prepareTranslationWire } from "./wire";
 
 function normalizedModelId(modelId: string) {
     return modelId.replace(/^models\//, "");
@@ -197,17 +198,64 @@ export class GeminiGenerateContentAdapter implements TranslationProviderAdapter 
         );
         const model = normalizedModelId(profile.modelId);
         const { body, wire } = this.buildGenerateContentRequest(profile, request);
+        const streaming = typeof request.onProgress === "function";
+        let streamedText = "";
         try {
             const response = await this.fetchImpl(
-                `${base}/models/${encodeURIComponent(model)}:generateContent`,
+                `${base}/models/${encodeURIComponent(model)}:${
+                    streaming ? "streamGenerateContent?alt=sse" : "generateContent"
+                }`,
                 {
                     method: "POST",
-                    headers: requestHeaders(profile, { "x-goog-api-key": profile.apiKey }),
+                    headers: requestHeaders(profile, {
+                        "x-goog-api-key": profile.apiKey,
+                        ...(streaming ? { Accept: "text/event-stream" } : {}),
+                    }),
                     body: JSON.stringify(body),
                     signal,
                 }
             );
-            const payload = await readJson(response);
+            let payload: Record<string, any>;
+            if (!streaming || !response.ok) {
+                payload = await readJson(response);
+            } else {
+                let lastPayload: Record<string, any> = {};
+                let lastCandidate: Record<string, any> = {};
+                let usageMetadata: Record<string, any> | undefined;
+                await consumeSse(response, (data) => {
+                    let event: Record<string, any>;
+                    try {
+                        event = JSON.parse(data);
+                    } catch {
+                        return;
+                    }
+                    lastPayload = event;
+                    const candidate = event.candidates?.[0];
+                    if (candidate) {
+                        lastCandidate = candidate;
+                        streamedText += extractGeminiText(event);
+                    }
+                    if (event.usageMetadata) usageMetadata = event.usageMetadata;
+                    const items = parsePageTranslationProgress(streamedText, wire);
+                    if (items.length) {
+                        try {
+                            request.onProgress?.(items);
+                        } catch {
+                            /* presentation progress is best-effort */
+                        }
+                    }
+                });
+                payload = {
+                    ...lastPayload,
+                    candidates: [
+                        {
+                            ...lastCandidate,
+                            content: { role: "model", parts: [{ text: streamedText }] },
+                        },
+                    ],
+                    ...(usageMetadata ? { usageMetadata } : {}),
+                };
+            }
             const providerId = providerRequestId(response, payload);
             const finishReason =
                 payload.candidates?.[0]?.finishReason || payload.promptFeedback?.blockReason;
@@ -306,7 +354,7 @@ export class GeminiGenerateContentAdapter implements TranslationProviderAdapter 
             return {
                 ok: false,
                 failure: classifyThrownFailure(error),
-                partialItems: [],
+                partialItems: parsePageTranslationProgress(streamedText, wire),
                 usageReceipts: [],
                 attempt: attemptSummary(attemptId, startedAt),
             };

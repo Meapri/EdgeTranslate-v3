@@ -440,6 +440,7 @@ export {
     TARGET_TRANSITIONS,
     TargetRegistry,
     compareCapturedValue,
+    makeNodeReference,
     normalizeSource,
     reattachBoundaryWhitespace,
     reattachInlineBoundaryWhitespace,
