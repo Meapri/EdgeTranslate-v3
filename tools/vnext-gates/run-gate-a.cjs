@@ -478,6 +478,9 @@ async function runFixture({
                     pass: observed.found && observed.value === expectation.equals,
                 };
             });
+        const googleDrainCaps =
+            config.packetSizing.providerOverrides?.googleAiStudio?.drain ||
+            config.packetSizing.drain;
         addCheck(
             checks,
             `${fixture.id}:initial-expected-values`,
@@ -596,7 +599,7 @@ async function runFixture({
         addCheck(
             checks,
             `${fixture.id}:packet-item-cap`,
-            maxItemsPerRequest <= config.packetSizing.drain.maxBlocks &&
+            maxItemsPerRequest <= googleDrainCaps.maxBlocks &&
                 maxItemsPerRequest <= config.packetSizing.deliveryCeilingItems.googleAiStudio,
             { maxItemsPerRequest }
         );
@@ -936,6 +939,8 @@ function runRecoveryDirectiveAudit({ checks }) {
 }
 
 function runTokenPinAudit({ production, config, checks }) {
+    const googleDrainCaps =
+        config.packetSizing.providerOverrides?.googleAiStudio?.drain || config.packetSizing.drain;
     const items = Array.from({ length: 96 }, (_, index) => ({
         id: `pin-${index + 1}`,
         text: `複雑なページの意味単位を安定してまとめる検証文${String(index + 1).padStart(
@@ -950,6 +955,7 @@ function runTokenPinAudit({ production, config, checks }) {
         tl: "ko",
         provider: "googleAiStudio",
     });
+    const estimatorState = estimator.state();
     const result = production.buildPackets({
         items,
         tier: "drain",
@@ -970,7 +976,7 @@ function runTokenPinAudit({ production, config, checks }) {
                 config.estimator.fixedInTokens
         );
         const expectedOut = Math.ceil(
-            sourceTokens * config.estimator.outRatioSeed +
+            sourceTokens * estimatorState.outRatio +
                 packet.itemCount * config.estimator.perItemOutTokens
         );
         const inDelta = expectedIn ? Math.abs(packet.estIn - expectedIn) / expectedIn : 0;
@@ -987,9 +993,9 @@ function runTokenPinAudit({ production, config, checks }) {
         "packet-builder:drain-caps",
         result.packets.every(
             (packet) =>
-                packet.itemCount <= config.packetSizing.drain.maxBlocks &&
-                packet.srcChars <= config.packetSizing.drain.maxSrcChars &&
-                packet.estOut <= config.packetSizing.drain.maxEstOutTokens
+                packet.itemCount <= googleDrainCaps.maxBlocks &&
+                packet.srcChars <= googleDrainCaps.maxSrcChars &&
+                packet.estOut <= googleDrainCaps.maxEstOutTokens
         ),
         { packetCount: result.packets.length }
     );

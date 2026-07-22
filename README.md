@@ -303,6 +303,8 @@ See [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md) for the older project checkli
 For architecture, runtime flows, build and test commands, browser differences, safe-change
 checklists, and known integration gaps, start with the
 [Developer Guide](./docs/DEVELOPMENT_GUIDE.md).
+For the shared banner, language-menu, and translation-panel visual contracts, use the
+[UI design system](./docs/UI_DESIGN_SYSTEM.md).
 
 Cloud AI page translation uses the vNext `pt3` structured pipeline by default. It translates a
 compact semantic leaf-block IR, validates provider responses, commits with DOM revisions, and

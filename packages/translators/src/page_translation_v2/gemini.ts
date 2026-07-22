@@ -135,7 +135,10 @@ export class GeminiGenerateContentAdapter implements TranslationProviderAdapter 
             responseJsonSchema: wire.schema,
         };
         if (!omitsOutputLimit(model)) generationConfig.maxOutputTokens = request.maxOutputTokens;
-        if (profile.temperatureSupported === true) generationConfig.temperature = 0;
+        // Google recommends leaving Gemini 3.x sampling controls at their optimized defaults.
+        if (profile.temperatureSupported === true && !/^gemini-3(?:\.|-|$)/i.test(model)) {
+            generationConfig.temperature = 0;
+        }
         if (profile.reasoningControl === "thinking-config") {
             if (typeof profile.reasoningValue === "number") {
                 generationConfig.thinkingConfig = { thinkingBudget: profile.reasoningValue };
@@ -271,14 +274,32 @@ export class GeminiGenerateContentAdapter implements TranslationProviderAdapter 
             });
             const usageReceipts = usage ? [usage] : [];
             if (!response.ok) {
+                const failure = classifyHttpFailure(
+                    response.status,
+                    payload,
+                    parseRetryAfterMs(response.headers.get("retry-after")),
+                    { provider: "gemini" }
+                );
+                // Match the OpenAI capability downgrade contract: if a model rejects only the
+                // latency-saving thinking field, let the scheduler retry the unresolved items
+                // once without that field. The adapter itself still executes exactly once.
+                if (
+                    failure.kind === "unsupported-capability" &&
+                    body.generationConfig.thinkingConfig !== undefined &&
+                    /thinking/i.test(failure.message)
+                ) {
+                    failure.capabilityPatch = {
+                        reasoningControl: {
+                            value: "none",
+                            source: "runtime-observation",
+                            observedAt: Date.now(),
+                            evidence: failure.message,
+                        },
+                    };
+                }
                 return {
                     ok: false,
-                    failure: classifyHttpFailure(
-                        response.status,
-                        payload,
-                        parseRetryAfterMs(response.headers.get("retry-after")),
-                        { provider: "gemini" }
-                    ),
+                    failure,
                     partialItems: [],
                     usageReceipts,
                     attempt,

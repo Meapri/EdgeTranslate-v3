@@ -8,7 +8,11 @@
  */
 
 const AI_PAGE_PROVIDER_AIMD = Object.freeze({
-    googleAiStudio: Object.freeze({ start: 4, floor: 1, cap: 12, additivePerClean: 1 }),
+    // Match OpenAI's complete speed mode: the packet builder also shares the same 16-item /
+    // 2.4K-char / 1K-est-out drain caps. Fill 40 slots immediately instead of spending most of a
+    // page ramping up. Gemini quotas still vary by project/model, so any 429/5xx halves this width
+    // and applies the provider cooldown; current-epoch clean completions restore it four at a time.
+    googleAiStudio: Object.freeze({ start: 40, floor: 1, cap: 40, additivePerClean: 4 }),
     // OpenAI raised from the original unmeasured cap of 8. START == CAP (immediate full
     // concurrency, "speed mode"): a slow AIMD ramp from 8 (+1 per 4 clean needs ~96 completions
     // to reach cap) held a ~190-packet ja page at conc ~8-15 for most of its life -> 36.6s;

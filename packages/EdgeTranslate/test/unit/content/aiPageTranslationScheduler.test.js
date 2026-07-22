@@ -1,4 +1,5 @@
 import { createPriorityQueue } from "../../../src/content/ai_page_translation/runtime/priority_queue.js";
+import { AI_PAGE_PROVIDER_AIMD } from "../../../src/common/scripts/ai_page_translation_limits.js";
 import {
     buildRetryTable,
     createScheduler,
@@ -7,6 +8,18 @@ import {
 const flush = async () => {
     for (let i = 0; i < 25; i += 1) await Promise.resolve();
 };
+
+describe("provider speed profiles", () => {
+    it("runs Google AI Studio at the same immediate 40-way speed setting as OpenAI", () => {
+        expect(AI_PAGE_PROVIDER_AIMD.googleAiStudio).toEqual(AI_PAGE_PROVIDER_AIMD.openai);
+        expect(AI_PAGE_PROVIDER_AIMD.googleAiStudio).toEqual({
+            start: 40,
+            floor: 1,
+            cap: 40,
+            additivePerClean: 4,
+        });
+    });
+});
 
 function createClock() {
     let currentTime = 0;
@@ -188,6 +201,19 @@ describe("vNext AI page translation scheduler (spec §2.3 + §7)", () => {
             expect(h.scheduler.snapshot().keys["openai:key1"].limit).toBe(40);
         });
 
+        it("uses the Google production cap immediately and retains AIMD backoff", async () => {
+            const h = createHarness({ provider: "googleAiStudio" });
+            h.push(Array.from({ length: 80 }, (_, i) => makePacket(`g${i}`)));
+            await flush();
+
+            expect(h.dispatch).toHaveBeenCalledTimes(40);
+            expect(h.scheduler.snapshot().keys["openai:key1"].limit).toBe(40);
+
+            await h.resolveNext(rateLimit({ retryAfterMs: 100 }));
+            expect(h.scheduler.snapshot().keys["openai:key1"].limit).toBe(20);
+            expect(h.scheduler.cooldownUntil("openai:key1")).toBe(100);
+        });
+
         it("warms on short packets, then starts the longest tail packets at the cap", async () => {
             const h = createHarness({
                 aimd: { start: 1, floor: 1, cap: 3, additivePerClean: 1 },
@@ -251,7 +277,10 @@ describe("vNext AI page translation scheduler (spec §2.3 + §7)", () => {
 
     describe("AIMD decrease and recovery", () => {
         it("halves the limit on 429 and never drops below the floor", async () => {
-            const h = createHarness({ provider: "googleAiStudio" }); // start 4, floor 1
+            const h = createHarness({
+                provider: "googleAiStudio",
+                aimd: { start: 4, floor: 1, cap: 12, additivePerClean: 1 },
+            });
             h.push(Array.from({ length: 20 }, (_, i) => makePacket(`p${i}`)));
             await flush();
             expect(h.pending).toHaveLength(4);
@@ -265,7 +294,10 @@ describe("vNext AI page translation scheduler (spec §2.3 + §7)", () => {
         });
 
         it("also halves on 5xx transient failures", async () => {
-            const h = createHarness({ provider: "googleAiStudio" });
+            const h = createHarness({
+                provider: "googleAiStudio",
+                aimd: { start: 4, floor: 1, cap: 12, additivePerClean: 1 },
+            });
             h.push(Array.from({ length: 10 }, (_, i) => makePacket(`p${i}`)));
             await flush();
 
@@ -302,7 +334,10 @@ describe("vNext AI page translation scheduler (spec §2.3 + §7)", () => {
         });
 
         it("RECOVERS after cooldown — the stable permanent-halving regression", async () => {
-            const h = createHarness({ provider: "googleAiStudio" }); // start 4, cap 12, +1/clean
+            const h = createHarness({
+                provider: "googleAiStudio",
+                aimd: { start: 4, floor: 1, cap: 12, additivePerClean: 1 },
+            });
             h.push(Array.from({ length: 40 }, (_, i) => makePacket(`p${i}`)));
             await flush();
             expect(h.pending).toHaveLength(4);

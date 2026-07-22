@@ -49,36 +49,38 @@ function placeholderTagsBalanced(text) {
 
 describe("vNext AI page translation packet builder (spec §2.4)", () => {
     describe("tier caps on synthetic corpora", () => {
-        it("respects drain caps (≤16 blocks, ≤2,400 src chars, est out ≤900, floor 500)", () => {
-            // Under the ja-ko outRatio (1.9) each 470-char block is ~253 est-out, so the 900
-            // est-out budget binds before the 2,400 char cap: three blocks (759 est-out, 1,410
-            // chars) fit, a fourth (1,012 est-out) would not.
+        it("uses the same drain caps for Gemini and OpenAI", () => {
+            // Provider selection must not silently trade latency for fewer requests. Both official
+            // adapters use the measured 16-block / 2,400-char / 1,000-est-out speed profile.
             const items = makeItems(
                 100,
                 (index) => `${"x".repeat(465)}${String(index).padStart(5, "0")}`
             );
-            const result = buildPackets({
-                items,
-                tier: "drain",
-                provider: "googleAiStudio",
-                estimator: geminiEstimator(),
-                capabilities: { maxOutputTokens: observed(8000) },
-            });
+            const build = (provider) =>
+                buildPackets({
+                    items,
+                    tier: "drain",
+                    provider,
+                    estimator: createEstimator({ sl: "ja", tl: "ko", provider }),
+                    capabilities: { maxOutputTokens: observed(8000) },
+                });
+            const google = build("googleAiStudio");
+            const openai = build("openai");
 
-            expect(result.chunked).toEqual([]);
-            expect(result.packets).toHaveLength(34);
-            for (const packet of result.packets) {
+            expect(google.chunked).toEqual([]);
+            expect(google.packets.map((packet) => packet.items.map((item) => item.id))).toEqual(
+                openai.packets.map((packet) => packet.items.map((item) => item.id))
+            );
+            for (const packet of google.packets) {
                 expect(packet.itemCount).toBeLessThanOrEqual(TIER_CAPS.drain.maxBlocks);
                 expect(packet.srcChars).toBeLessThanOrEqual(TIER_CAPS.drain.maxSrcChars);
                 expect(sumItemEstOut(packet)).toBeLessThanOrEqual(TIER_CAPS.drain.maxEstOutTokens);
             }
-            // Floor: every estOut-bound packet reaches 500 except the single final remainder.
-            const underFloor = result.packets.filter(
+            const underFloor = google.packets.filter(
                 (packet) => sumItemEstOut(packet) < TIER_CAPS.drain.minEstOutTokens
             );
             expect(underFloor.length).toBeLessThanOrEqual(1);
-            // Zero dropped strings.
-            expect(packetItemIds(result).sort()).toEqual(items.map((item) => item.id).sort());
+            expect(packetItemIds(google).sort()).toEqual(items.map((item) => item.id).sort());
         });
 
         it("respects first-paint caps (≤12 blocks, ≤1,500 src chars, est out ≤600)", () => {
@@ -146,7 +148,7 @@ describe("vNext AI page translation packet builder (spec §2.4)", () => {
             expect(packetItemIds(result).sort()).toEqual(items.map((item) => item.id).sort());
         });
 
-        it("lets googleAiStudio packets reach the 16-block drain cap (ceiling 128 never binds)", () => {
+        it("keeps googleAiStudio on the shared 16-block drain cap", () => {
             const items = makeItems(200, "駅");
             const result = buildPackets({
                 items,
@@ -219,8 +221,8 @@ describe("vNext AI page translation packet builder (spec §2.4)", () => {
             const result = buildPackets({
                 items,
                 tier: "drain",
-                provider: "googleAiStudio",
-                estimator: geminiEstimator(),
+                provider: "openai",
+                estimator: createEstimator({ sl: "ja", tl: "ko", provider: "openai" }),
                 capabilities: { maxOutputTokens: observed(8000) },
             });
             // 60 equal-weight blocks fill sequential 16-block drain packets in reading order.
@@ -287,7 +289,7 @@ describe("vNext AI page translation packet builder (spec §2.4)", () => {
         const sentence = "この案内文は翻訳が必要です。駅と路線の歴史を説明します。";
 
         it("pre-splits an oversized block into virtual chunk ids and packs them within caps", () => {
-            const text = sentence.repeat(240); // exceeds both the 4K output and 8K char caps
+            const text = sentence.repeat(240); // exceeds both the 1K output and 2.4K char caps
             const result = buildPackets({
                 items: [{ id: "b1", text, role: "p", order: 0 }],
                 tier: "drain",
@@ -617,15 +619,13 @@ describe("vNext AI page translation packet builder (spec §2.4)", () => {
         });
     });
 
-    describe("re-pinned packet-count contract (5,282-string wiki fixture)", () => {
-        it("plans the 5,282-string fixture into the pinned drain packet count with zero dropped strings", () => {
+    describe("shared official-provider drain contract (5,282-string wiki fixture)", () => {
+        it("keeps both providers inside the shared speed caps with zero dropped strings", () => {
             // Same corpus generator as aiPageTranslationStableSession.test.js: one <main> of
             // 5,282 inline <span> strings. Under the vNext leaf-block model that is ONE semantic
             // leaf block, serialized with inline placeholders, oversized, and pre-split into
-            // virtual chunks. With the small-packet drain caps (16 blocks / 900 est-out tokens)
-            // and the ja-ko outRatio (1.9) sizing chunks from realistic output, this pathological
-            // single leaf now spreads across 96 drain packets, still with zero dropped strings —
-            // the exact count is pinned so a caps regression is caught.
+            // virtual chunks. Gemini and OpenAI must produce the same small-packet plan so a
+            // provider-specific latency regression is caught while every string still round-trips.
             const targetCount = 5282;
             document.body.innerHTML = `<main>${Array.from(
                 { length: targetCount },
@@ -652,25 +652,31 @@ describe("vNext AI page translation packet builder (spec §2.4)", () => {
             expect(target.kind).toBe("block");
             expect(target.role).toBe("p");
 
-            const result = buildPackets({
-                items: [{ id: target.id, text: target.source, role: target.role, order: 0 }],
-                tier: "drain",
-                provider: "googleAiStudio",
-                estimator: geminiEstimator(),
-                capabilities: { maxOutputTokens: observed(8000) },
-            });
+            const build = (provider) =>
+                buildPackets({
+                    items: [{ id: target.id, text: target.source, role: target.role, order: 0 }],
+                    tier: "drain",
+                    provider,
+                    estimator: createEstimator({ sl: "ja", tl: "ko", provider }),
+                    capabilities: { maxOutputTokens: observed(8000) },
+                });
+            const result = build("googleAiStudio");
+            const openai = build("openai");
 
-            // Caps pin: this deliberately pathological 5,282-string leaf splits into exactly 96
-            // small drain packets under the measured small-packet regime, without dropping any
-            // source string.
-            expect(result.packets.length).toBe(96);
             expect(result.chunked).toHaveLength(1);
             expect(result.chunked[0].chunkCount).toBeGreaterThan(1);
 
-            for (const packet of result.packets) {
-                expect(packet.itemCount).toBeLessThanOrEqual(TIER_CAPS.drain.maxBlocks);
-                expect(packet.srcChars).toBeLessThanOrEqual(TIER_CAPS.drain.maxSrcChars);
-                expect(sumItemEstOut(packet)).toBeLessThanOrEqual(TIER_CAPS.drain.maxEstOutTokens);
+            // OpenAI retains its provider-specific +60 output-token safety estimate, so an
+            // oversized single block can split into a few more chunks. The actual speed caps and
+            // scheduling profile remain identical.
+            for (const planned of [result, openai]) {
+                for (const packet of planned.packets) {
+                    expect(packet.itemCount).toBeLessThanOrEqual(TIER_CAPS.drain.maxBlocks);
+                    expect(packet.srcChars).toBeLessThanOrEqual(TIER_CAPS.drain.maxSrcChars);
+                    expect(sumItemEstOut(packet)).toBeLessThanOrEqual(
+                        TIER_CAPS.drain.maxEstOutTokens
+                    );
+                }
             }
 
             // Zero dropped strings: an identity round trip reproduces the serialized block

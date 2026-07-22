@@ -212,12 +212,26 @@ async function consumeSseStream(
     const decoder = new TextDecoder();
     let buffer = "";
     const flushBlock = (block: string) => {
-        for (const line of block.split("\n")) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data:")) continue;
-            const payload = trimmed.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            onEvent(payload);
+        // SSE permits LF, CRLF, or CR line endings and joins multiple data fields
+        // into one event. Gemini commonly uses CRLF; waiting only for `\n\n`
+        // buffered its whole response and made selection translation look non-streaming.
+        const payload = block
+            .split(/\r\n|\n|\r/)
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).replace(/^ /, ""))
+            .join("\n")
+            .trim();
+        if (!payload || payload === "[DONE]") return;
+        onEvent(payload);
+    };
+    const flushCompleteBlocks = () => {
+        // A separator may itself straddle two network chunks, so retain the
+        // unmatched suffix in `buffer` until the next read.
+        let separator = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
+        while (separator) {
+            flushBlock(buffer.slice(0, separator.index));
+            buffer = buffer.slice(separator.index + separator[0].length);
+            separator = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
         }
     };
     try {
@@ -226,12 +240,10 @@ async function consumeSseStream(
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            let sep;
-            while ((sep = buffer.indexOf("\n\n")) !== -1) {
-                flushBlock(buffer.slice(0, sep));
-                buffer = buffer.slice(sep + 2);
-            }
+            flushCompleteBlocks();
         }
+        buffer += decoder.decode();
+        flushCompleteBlocks();
         if (buffer.trim()) flushBlock(buffer);
     } finally {
         try {
@@ -1527,12 +1539,20 @@ class LocalTranslator {
         return /^gemini-2\.5/i.test(this.model);
     }
 
+    private isGemini25ProModel() {
+        return /^gemini-2\.5-pro(?:$|-)/i.test(this.model);
+    }
+
     private isGemini3FlashLiteModel() {
         return /^gemini-(?:3(?:\.\d+)?-flash-lite|flash-lite-latest)(?:$|-)/i.test(this.model);
     }
 
     private isGemini3FlashModel() {
         return /^gemini-(?:3(?:\.\d+)?-flash|flash-latest)(?:$|-)/i.test(this.model);
+    }
+
+    private isGemini3Model() {
+        return /^gemini-3(?:\.|-|$)/i.test(this.model);
     }
 
     private buildGoogleAiStudioThinkingConfig() {
@@ -1542,13 +1562,18 @@ class LocalTranslator {
             // Gemini 3 Pro mandates thinking — give it the minimum level.
             return { thinkingLevel: "low" };
         }
-        if (this.isGemini3FlashLiteModel() || this.isGemini25Model()) {
-            // Flash-Lite (3.x) and all Gemini 2.5 flash/flash-lite accept a zero budget,
-            // which disables thinking entirely (no reasoning tokens billed).
+        if (this.isGemini25ProModel()) {
+            // Gemini 2.5 Pro cannot disable thinking; 128 is its documented minimum.
+            return { thinkingBudget: 128 };
+        }
+        if (this.isGemini25Model()) {
+            // Gemini 2.5 flash/flash-lite accepts a zero budget, which disables thinking
+            // entirely (no reasoning tokens billed).
             return { thinkingBudget: 0 };
         }
-        if (this.isGemini3FlashModel()) {
-            // Gemini 3 Flash (non-lite) keeps thinking on but at the minimum level.
+        if (this.isGemini3FlashLiteModel() || this.isGemini3FlashModel()) {
+            // Gemini 3 Flash/Flash-Lite cannot be fully disabled. `minimal` is the official
+            // high-throughput floor and avoids the much slower dynamic default.
             return { thinkingLevel: "minimal" };
         }
         return undefined;
@@ -1561,7 +1586,9 @@ class LocalTranslator {
         isDictionary = false
     ) {
         if (compatibilityMode === "bare") return undefined;
-        const config: Record<string, any> = { temperature: 0 };
+        // Gemini 3.x is optimized for its default sampling parameters; Google recommends
+        // omitting temperature/top-p/top-k for this family. Older models retain temperature 0.
+        const config: Record<string, any> = this.isGemini3Model() ? {} : { temperature: 0 };
         const thinkingConfig = this.buildGoogleAiStudioThinkingConfig();
         if (thinkingConfig) config.thinkingConfig = thinkingConfig;
         // Dictionary entries are structured JSON: constrained decoding via the native JSON

@@ -1,4 +1,7 @@
-import { createLanguageMenu } from "../../../src/common/scripts/language_menu.js";
+import {
+    createLanguageMenu,
+    LANGUAGE_MENU_LAYER_Z_INDEX,
+} from "../../../src/common/scripts/language_menu.js";
 
 const LANGS = [
     { value: "auto", label: "Auto Detect" },
@@ -20,6 +23,13 @@ describe("createLanguageMenu", () => {
         const menu = createLanguageMenu({ languages: LANGS, value: "ko", onChange: jest.fn() });
         host.appendChild(menu.element);
         expect(menu.element.querySelector(".et-lang-trigger-label").textContent).toBe("Korean");
+        expect(menu.element.querySelector(".et-lang-trigger-icon").tagName.toLowerCase()).toBe(
+            "svg"
+        );
+        expect(menu.element.querySelector(".et-lang-trigger-chevron").tagName.toLowerCase()).toBe(
+            "svg"
+        );
+        expect(menu.element.textContent).not.toContain("▾");
         expect(menu.getValue()).toBe("ko");
         menu.destroy();
     });
@@ -34,12 +44,34 @@ describe("createLanguageMenu", () => {
         const menu = createLanguageMenu({ languages: LANGS, value: "en" });
         host.appendChild(menu.element);
         menu.open();
-        const popover = document.body.querySelector(".et-lang-popover");
+        const popover = document.querySelector(".et-lang-popover");
         expect(popover).not.toBeNull();
         expect(popover.hidden).toBe(false);
+        expect(popover.classList.contains("is-visible")).toBe(true);
         expect(popover.querySelectorAll(".et-lang-option").length).toBe(LANGS.length);
+        expect(popover.querySelector(".et-lang-search-icon").tagName.toLowerCase()).toBe("svg");
+        expect(popover.textContent).not.toContain("🔍");
         const selected = popover.querySelector(".et-lang-option.is-selected");
         expect(selected.dataset.value).toBe("en");
+        expect(selected.querySelector(".et-lang-option-check.is-visible svg")).not.toBeNull();
+        menu.destroy();
+    });
+
+    it("keeps the document-level popover above max-z-index translation surfaces", () => {
+        const translationSurface = document.createElement("div");
+        translationSurface.style.zIndex = String(LANGUAGE_MENU_LAYER_Z_INDEX);
+        document.body.appendChild(translationSurface);
+        const menu = createLanguageMenu({ languages: LANGS, value: "en" });
+        host.appendChild(menu.element);
+
+        menu.open();
+
+        const popover = document.querySelector(".et-lang-popover");
+        // jsdom has no Popover API, so this exercises the older-browser root fallback.
+        expect(popover.parentElement).toBe(document.documentElement);
+        expect(document.documentElement.lastElementChild).toBe(popover);
+        expect(popover.style.zIndex).toBe(String(LANGUAGE_MENU_LAYER_Z_INDEX));
+        expect(popover.style.getPropertyPriority("z-index")).toBe("important");
         menu.destroy();
     });
 
@@ -47,10 +79,10 @@ describe("createLanguageMenu", () => {
         const menu = createLanguageMenu({ languages: LANGS, value: "en" });
         host.appendChild(menu.element);
         menu.open();
-        const search = document.body.querySelector(".et-lang-search");
+        const search = document.querySelector(".et-lang-search");
         search.value = "franc"; // should match "Français"
         search.dispatchEvent(new Event("input", { bubbles: true }));
-        const options = document.body.querySelectorAll(".et-lang-option");
+        const options = document.querySelectorAll(".et-lang-option");
         expect(options.length).toBe(1);
         expect(options[0].dataset.value).toBe("fr");
         menu.destroy();
@@ -61,7 +93,7 @@ describe("createLanguageMenu", () => {
         const menu = createLanguageMenu({ languages: LANGS, value: "en", onChange });
         host.appendChild(menu.element);
         menu.open();
-        const option = [...document.body.querySelectorAll(".et-lang-option")].find(
+        const option = [...document.querySelectorAll(".et-lang-option")].find(
             (o) => o.dataset.value === "ja"
         );
         option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -88,7 +120,7 @@ describe("createLanguageMenu", () => {
         const menu = createLanguageMenu({ languages: LANGS, value: "auto", onChange });
         host.appendChild(menu.element);
         menu.open(); // active starts on the selected 'auto' (index 0)
-        const search = document.body.querySelector(".et-lang-search");
+        const search = document.querySelector(".et-lang-search");
         search.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
         search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         expect(onChange).toHaveBeenCalledWith("en");
@@ -103,7 +135,7 @@ describe("createLanguageMenu", () => {
         host.appendChild(menu.element);
         expect(menu.element.querySelector(".et-lang-trigger-label").textContent).toBe("Korean");
         menu.open();
-        expect(document.body.querySelectorAll(".et-lang-option").length).toBe(2);
+        expect(document.querySelectorAll(".et-lang-option").length).toBe(2);
         menu.destroy();
     });
 });

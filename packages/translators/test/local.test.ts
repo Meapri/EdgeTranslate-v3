@@ -161,6 +161,85 @@ describe("LocalTranslator", () => {
         expect(body.contents[0].parts[0].text).toContain("hello there.");
     });
 
+    test("streams Google AI Studio selection translation across CRLF SSE events", async () => {
+        const encoder = new TextEncoder();
+        const chunks = [
+            encoder.encode(
+                `data: ${JSON.stringify({
+                    candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+                })}\r\n\r\n`
+            ),
+            encoder.encode(
+                `data: ${JSON.stringify({
+                    candidates: [
+                        {
+                            content: { parts: [{ text: "하세요." }] },
+                            finishReason: "STOP",
+                        },
+                    ],
+                    usageMetadata: {
+                        promptTokenCount: 31,
+                        candidatesTokenCount: 7,
+                        totalTokenCount: 38,
+                    },
+                })}\r\n\r\n`
+            ),
+        ];
+        let readIndex = 0;
+        let releaseSecondRead!: () => void;
+        let notifySecondReadStarted!: () => void;
+        const secondReadGate = new Promise<void>((resolve) => {
+            releaseSecondRead = resolve;
+        });
+        const secondReadStarted = new Promise<void>((resolve) => {
+            notifySecondReadStarted = resolve;
+        });
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            body: {
+                getReader: () => ({
+                    read: async () => {
+                        if (readIndex === 1) {
+                            notifySecondReadStarted();
+                            await secondReadGate;
+                        }
+                        return readIndex < chunks.length
+                            ? { done: false, value: chunks[readIndex++] }
+                            : { done: true, value: undefined };
+                    },
+                    releaseLock: () => undefined,
+                }),
+            },
+        });
+        global.fetch = fetchMock as any;
+
+        const onProgress = jest.fn();
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-flash",
+        });
+        const translation = translator.translate("hello there.", "en", "ko", { onProgress });
+
+        // The first CRLF-delimited event must reach the panel before the provider
+        // finishes producing the second event.
+        await secondReadStarted;
+        expect(onProgress).toHaveBeenCalledWith("안녕");
+        releaseSecondRead();
+
+        const result = await translation;
+        expect(result.mainMeaning).toBe("안녕하세요.");
+        expect(onProgress).toHaveBeenLastCalledWith("안녕하세요.");
+        expect(String(fetchMock.mock.calls[0][0])).toContain(
+            ":streamGenerateContent?alt=sse&key=studio-test-key"
+        );
+        expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+            Accept: "text/event-stream",
+        });
+    });
+
     test("includes fenced selection context with a sentinel and a static anti-echo rule", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
@@ -494,11 +573,11 @@ describe("LocalTranslator", () => {
         expect(body.generationConfig.topK).toBeUndefined();
         expect(body.generationConfig.candidateCount).toBeUndefined();
         expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
-        expect(body.generationConfig.temperature).toBe(0);
+        expect(body.generationConfig.temperature).toBeUndefined();
         expect(body.generationConfig.maxOutputTokens).toBeUndefined();
     });
 
-    test("turns thinking fully off for Gemini 3 Flash-Lite models", async () => {
+    test("uses the supported minimal thinking level for Gemini 3 Flash-Lite models", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -517,8 +596,8 @@ describe("LocalTranslator", () => {
         await translator.translate("hello", "en", "ko");
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        // Flash-Lite accepts a zero budget — disable thinking entirely.
-        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
+        expect(body.generationConfig.temperature).toBeUndefined();
     });
 
     test("uses compact page-translation guidance for proper nouns and inline HTML", async () => {
@@ -1034,6 +1113,28 @@ describe("LocalTranslator", () => {
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
         expect(body.generationConfig.maxOutputTokens).toBeUndefined();
+    });
+
+    test("uses the documented Gemini 2.5 Pro thinking floor instead of a rejected zero", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                candidates: [{ content: { parts: [{ text: "안녕" }] } }],
+            }),
+        });
+        global.fetch = fetchMock as any;
+
+        const translator = new LocalTranslator({
+            enabled: true,
+            mode: "googleAiStudio",
+            apiKey: "studio-test-key",
+            model: "gemini-2.5-pro",
+        });
+        await translator.translate("hello", "en", "ko");
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 128 });
     });
 
     test("ignores configured Gemini 3 Flash reasoning and uses the minimum", async () => {

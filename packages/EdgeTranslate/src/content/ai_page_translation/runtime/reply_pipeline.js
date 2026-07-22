@@ -225,20 +225,20 @@ const CAPABILITY_DROP_REASONING_HINT = "capability-drop-reasoning";
 
 function canDropReasoningOnce(session, packet, failure) {
     return Boolean(
-        session.provider === "openai" &&
+        (session.provider === "openai" || session.provider === "googleAiStudio") &&
             !packet.recovery &&
             failure?.capabilityPatch?.reasoningControl?.value === "none"
     );
 }
 
 /**
- * OpenAI reasoning controls can be rejected by a model even when the model itself remains
- * usable. The provider adapter returns an explicit, validated capability patch for exactly
- * that case. Re-enter the normal scheduler with one visible recovery packet so usage,
+ * Provider reasoning/thinking controls can be rejected by a model even when the model itself
+ * remains usable. The official adapter returns an explicit, validated capability patch for
+ * exactly that case. Re-enter the normal scheduler with one visible recovery packet so usage,
  * request counts and the global attempt ceiling all observe the second HTTP request.
  *
  * A recovery packet is deliberately never nested inside another recovery ladder. A second
- * unsupported result, a missing patch, a non-OpenAI provider, or an unsupported result from
+ * unsupported result, a missing patch, an unsupported provider, or an unsupported result from
  * an existing schema/item recovery is a provider-configuration error and fails loudly.
  */
 function routeUnsupportedCapability(session, packet, failure, unresolved) {

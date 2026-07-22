@@ -50,23 +50,30 @@ export async function consumeSse(
     let buffer = "";
     const consumeBlock = (block: string) => {
         const data = block
-            .split("\n")
+            .split(/\r\n|\n|\r/)
             .filter((line) => line.startsWith("data:"))
             .map((line) => line.slice(5).trimStart())
             .join("\n");
         if (data && data !== "[DONE]") onData(data);
     };
+    const consumeCompleteBlocks = () => {
+        // SSE permits LF, CRLF, and CR. Keep an incomplete separator in the buffer so a
+        // `\r\n\r\n` boundary split between network chunks still dispatches immediately.
+        let boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
+        while (boundary) {
+            consumeBlock(buffer.slice(0, boundary.index));
+            buffer = buffer.slice(boundary.index + boundary[0].length);
+            boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
+        }
+    };
     for (;;) {
         const { done, value } = await reader.read();
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, "\n");
-        let boundary = buffer.indexOf("\n\n");
-        while (boundary >= 0) {
-            consumeBlock(buffer.slice(0, boundary));
-            buffer = buffer.slice(boundary + 2);
-            boundary = buffer.indexOf("\n\n");
-        }
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        consumeCompleteBlocks();
         if (done) break;
     }
+    buffer += decoder.decode();
+    consumeCompleteBlocks();
     if (buffer.trim()) consumeBlock(buffer);
 }
 

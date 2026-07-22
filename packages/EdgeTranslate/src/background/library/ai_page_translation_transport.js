@@ -200,12 +200,15 @@ function providerDirectiveHint(hint) {
 }
 
 function profileForPacketHint(profile, hint) {
-    if (hint !== CAPABILITY_DROP_REASONING_HINT || profile.protocol !== "openai-responses") {
+    if (
+        hint !== CAPABILITY_DROP_REASONING_HINT ||
+        (profile.protocol !== "openai-responses" && profile.protocol !== "gemini-generate-content")
+    ) {
         return profile;
     }
     // Request-scoped clone only: never mutate the cached/resolved provider profile. Removing
-    // reasoningValue as well as pinning `none` guarantees OpenAIResponsesAdapter omits the
-    // generation field even for a gpt-5/o-series model with a configured effort floor.
+    // reasoningValue as well as pinning `none` guarantees the official adapter omits its
+    // reasoning/thinking field even when the model family normally receives a default floor.
     const ephemeral = { ...profile, reasoningControl: "none" };
     delete ephemeral.reasoningValue;
     return ephemeral;

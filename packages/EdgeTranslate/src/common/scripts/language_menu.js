@@ -22,8 +22,15 @@
  *   menu.destroy();        // remove listeners + popover
  */
 
+import { EDGE_UI } from "common/scripts/ui_design_tokens.js";
+
 const STYLE_ID = "edge-translate-language-menu-styles";
 const EXTENSION_OWNED_ATTRIBUTE = "data-edge-translate-owned";
+// Content-script surfaces (the selection panel and page-translation banner) already occupy the
+// browser's highest z-index. Use the same maximum as a fallback and prefer the native popover top
+// layer below. Keep the inline important declaration as a shield against arbitrary host-page
+// author styles.
+export const LANGUAGE_MENU_LAYER_Z_INDEX = 2147483647;
 let instanceCounter = 0;
 
 function normalizeLanguages(languages) {
@@ -50,6 +57,48 @@ function foldText(text) {
         value = value.normalize("NFD").replace(/[̀-ͯ]/g, "");
     }
     return value;
+}
+
+function createIcon(doc, name, className) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = doc.createElementNS(ns, "svg");
+    svg.classList.add("et-lang-icon", className);
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.8");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+
+    const addPath = (d) => {
+        const path = doc.createElementNS(ns, "path");
+        path.setAttribute("d", d);
+        svg.appendChild(path);
+    };
+    if (name === "language") {
+        const circle = doc.createElementNS(ns, "circle");
+        circle.setAttribute("cx", "12");
+        circle.setAttribute("cy", "12");
+        circle.setAttribute("r", "9");
+        svg.appendChild(circle);
+        addPath(
+            "M3 12h18M12 3c2.3 2.45 3.5 5.45 3.5 9s-1.2 6.55-3.5 9c-2.3-2.45-3.5-5.45-3.5-9S9.7 5.45 12 3Z"
+        );
+    } else if (name === "search") {
+        const circle = doc.createElementNS(ns, "circle");
+        circle.setAttribute("cx", "10.8");
+        circle.setAttribute("cy", "10.8");
+        circle.setAttribute("r", "6.3");
+        svg.appendChild(circle);
+        addPath("m15.5 15.5 4 4");
+    } else if (name === "chevron") {
+        addPath("m7.5 9.5 4.5 4.5 4.5-4.5");
+    } else if (name === "check") {
+        addPath("m7.5 12.2 3 3 6-6.4");
+    }
+    return svg;
 }
 
 // Inject the menu's CSS into a styling root. `root` may be a Document (styles go in <head>), a
@@ -99,12 +148,11 @@ export function createLanguageMenu(options = {}) {
     trigger.setAttribute("aria-expanded", "false");
     if (options.ariaLabel) trigger.setAttribute("aria-label", options.ariaLabel);
 
+    const triggerIcon = createIcon(doc, "language", "et-lang-trigger-icon");
     const triggerLabel = doc.createElement("span");
     triggerLabel.className = "et-lang-trigger-label";
-    const chevron = doc.createElement("span");
-    chevron.className = "et-lang-trigger-chevron";
-    chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = "▾"; // ▾
+    const chevron = createIcon(doc, "chevron", "et-lang-trigger-chevron");
+    trigger.appendChild(triggerIcon);
     trigger.appendChild(triggerLabel);
     trigger.appendChild(chevron);
     wrapper.appendChild(trigger);
@@ -117,14 +165,17 @@ export function createLanguageMenu(options = {}) {
     popover.setAttribute("role", "listbox");
     popover.id = `${id}-popover`;
     popover.hidden = true;
+    popover.style.setProperty("z-index", String(LANGUAGE_MENU_LAYER_Z_INDEX), "important");
+    // The browser top layer is the only stacking plane guaranteed to sit above a max-z-index
+    // translation panel/banner. Older engines fall back to mounting as the last <html> child.
+    let usesTopLayer =
+        typeof popover.showPopover === "function" && typeof popover.hidePopover === "function";
+    if (usesTopLayer) popover.setAttribute("popover", "manual");
     if (options.ariaLabel) popover.setAttribute("aria-label", options.ariaLabel);
 
     const searchWrap = doc.createElement("div");
     searchWrap.className = "et-lang-search-wrap";
-    const searchIcon = doc.createElement("span");
-    searchIcon.className = "et-lang-search-icon";
-    searchIcon.setAttribute("aria-hidden", "true");
-    searchIcon.textContent = "🔍"; // 🔍
+    const searchIcon = createIcon(doc, "search", "et-lang-search-icon");
     const search = doc.createElement("input");
     search.type = "text";
     search.className = "et-lang-search";
@@ -176,7 +227,8 @@ export function createLanguageMenu(options = {}) {
             const check = doc.createElement("span");
             check.className = "et-lang-option-check";
             check.setAttribute("aria-hidden", "true");
-            check.textContent = selected ? "✓" : ""; // ✓
+            check.appendChild(createIcon(doc, "check", "et-lang-check-icon"));
+            if (selected) check.classList.add("is-visible");
             option.appendChild(text);
             option.appendChild(check);
             list.appendChild(option);
@@ -187,15 +239,10 @@ export function createLanguageMenu(options = {}) {
         const rect = trigger.getBoundingClientRect();
         const viewportH = doc.documentElement.clientHeight || window.innerHeight || 600;
         const gap = 6;
-        const desiredW = Math.max(rect.width, 220);
+        const viewportW = doc.documentElement.clientWidth || window.innerWidth || 800;
+        const desiredW = Math.min(Math.max(rect.width, 252), Math.max(200, viewportW - 16));
         popover.style.width = `${desiredW}px`;
-        popover.style.left = `${Math.max(
-            8,
-            Math.min(
-                rect.left,
-                (doc.documentElement.clientWidth || window.innerWidth || 800) - desiredW - 8
-            )
-        )}px`;
+        popover.style.left = `${Math.max(8, Math.min(rect.left, viewportW - desiredW - 8))}px`;
         // Flip above the trigger when there isn't room below.
         const spaceBelow = viewportH - rect.bottom;
         const popH = Math.min(popover.scrollHeight || 300, 320);
@@ -217,16 +264,27 @@ export function createLanguageMenu(options = {}) {
         );
         search.value = "";
         applyFilter("");
-        if (!popoverContainer.contains(popover)) popoverContainer.appendChild(popover);
+        const fallbackContainer = doc.documentElement || popoverContainer;
+        const mount = usesTopLayer ? popoverContainer : fallbackContainer;
+        if (!mount.contains(popover)) mount.appendChild(popover);
         popover.hidden = false;
+        if (usesTopLayer) {
+            try {
+                popover.showPopover();
+            } catch {
+                // A partially implemented Popover API must not leave the menu invisible.
+                usesTopLayer = false;
+                popover.removeAttribute("popover");
+                fallbackContainer.appendChild(popover);
+            }
+        }
         trigger.setAttribute("aria-expanded", "true");
         wrapper.classList.add("is-open");
         positionPopover();
-        // Animate in on the next frame so the transition runs from the initial state.
-        requestAnimationFrame(() => {
-            popover.classList.add("is-visible");
-            positionPopover();
-        });
+        // Flush the initial hidden style before enabling the transition. Unlike a deferred rAF,
+        // this remains reliable in background/throttled tabs and headless extension QA.
+        popover.getBoundingClientRect();
+        popover.classList.add("is-visible");
         scrollActiveIntoView();
         setTimeout(() => search.focus(), 0);
         doc.addEventListener("pointerdown", onDocPointerDown, true);
@@ -245,6 +303,13 @@ export function createLanguageMenu(options = {}) {
         window.removeEventListener("resize", onScrollOrResize, true);
         const finalize = () => {
             if (isOpen) return;
+            if (usesTopLayer) {
+                try {
+                    if (popover.matches(":popover-open")) popover.hidePopover();
+                } catch {
+                    /* a detached popover is already closed */
+                }
+            }
             popover.hidden = true;
             if (popover.parentNode) popover.parentNode.removeChild(popover);
         };
@@ -281,7 +346,7 @@ export function createLanguageMenu(options = {}) {
     function scrollActiveIntoView() {
         const node = list.querySelector(`.et-lang-option[data-index="${activeIndex}"]`);
         if (node && typeof node.scrollIntoView === "function") {
-            node.scrollIntoView({ block: "nearest" });
+            node.scrollIntoView({ block: "center" });
         }
     }
 
@@ -397,82 +462,114 @@ export function createLanguageMenu(options = {}) {
 
 const LANGUAGE_MENU_CSS = `
 .et-lang-menu, .et-lang-popover {
-    --et-lang-accent: #4a8cf7;
-    --et-lang-surface: #ffffff;
-    --et-lang-surface-2: #f4f6fb;
-    --et-lang-text: #1c1d21;
-    --et-lang-muted: #6b7280;
-    --et-lang-border: rgba(17, 24, 39, 0.12);
-    --et-lang-shadow: 0 12px 32px rgba(17, 24, 39, 0.18), 0 2px 8px rgba(17, 24, 39, 0.10);
+    --et-lang-accent: ${EDGE_UI.color.accentLight};
+    --et-lang-accent-soft: rgba(10, 132, 255, 0.12);
+    --et-lang-surface: rgba(248, 250, 253, 0.98);
+    --et-lang-surface-strong: rgba(255, 255, 255, 0.98);
+    --et-lang-surface-2: ${EDGE_UI.color.controlLight};
+    --et-lang-text: ${EDGE_UI.color.textLight};
+    --et-lang-muted: ${EDGE_UI.color.mutedLight};
+    --et-lang-border: rgba(255, 255, 255, 0.78);
+    --et-lang-separator: rgba(60, 60, 67, 0.12);
+    --et-lang-shadow: 0 24px 60px rgba(20, 35, 58, 0.20), 0 8px 24px rgba(20, 35, 58, 0.12), 0 0 0 0.5px rgba(60, 60, 67, 0.12);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     box-sizing: border-box;
 }
 .et-lang-menu { position: relative; display: inline-block; width: 100%; }
 .et-lang-menu *, .et-lang-popover * { box-sizing: border-box; }
+.et-lang-icon { display: block; flex: 0 0 auto; pointer-events: none; }
 
 .et-lang-trigger {
-    display: flex; align-items: center; gap: 8px; width: 100%;
+    display: flex; align-items: center; gap: 7px; width: 100%;
     padding: 8px 12px; min-height: 38px;
-    border: 1px solid var(--et-lang-border); border-radius: 12px;
-    background: var(--et-lang-surface); color: var(--et-lang-text);
-    font-size: 14px; font-weight: 500; line-height: 1.2; cursor: pointer;
+    border: 1px solid var(--et-lang-border); border-radius: ${EDGE_UI.radius.control};
+    background: var(--et-lang-surface-strong); color: var(--et-lang-text);
+    font-size: 14px; font-weight: 600; line-height: 1.2; cursor: pointer;
     text-align: left;
-    transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease, transform 120ms ease;
+    -webkit-backdrop-filter: saturate(180%) blur(18px); backdrop-filter: saturate(180%) blur(18px);
+    transition: border-color ${EDGE_UI.motion.fast}, box-shadow ${EDGE_UI.motion.fast}, background-color ${EDGE_UI.motion.fast}, transform ${EDGE_UI.motion.press};
 }
 .et-lang-trigger:hover { background: var(--et-lang-surface-2); border-color: rgba(74, 140, 247, 0.5); }
 .et-lang-trigger:active { transform: scale(0.985); }
 .et-lang-trigger:focus-visible { outline: none; border-color: var(--et-lang-accent); box-shadow: 0 0 0 3px rgba(74, 140, 247, 0.25); }
 .et-lang-menu.is-open .et-lang-trigger { border-color: var(--et-lang-accent); box-shadow: 0 0 0 3px rgba(74, 140, 247, 0.18); }
+.et-lang-trigger-icon { width: 16px; height: 16px; color: var(--et-lang-accent); stroke-width: 1.7; }
 .et-lang-trigger-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.et-lang-trigger-chevron { flex: 0 0 auto; color: var(--et-lang-muted); font-size: 12px; transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
+.et-lang-trigger-chevron { width: 14px; height: 14px; color: var(--et-lang-muted); transition: transform 180ms cubic-bezier(0.2, 0, 0, 1), color 140ms ease; }
 .et-lang-menu.is-open .et-lang-trigger-chevron { transform: rotate(180deg); color: var(--et-lang-accent); }
 
 .et-lang-popover {
-    position: fixed; z-index: 2147483646; max-height: 320px; min-width: 200px;
+    position: fixed; inset: auto; margin: 0; z-index: ${LANGUAGE_MENU_LAYER_Z_INDEX} !important; max-height: 320px; min-width: 200px;
     display: flex; flex-direction: column; overflow: hidden;
     background: var(--et-lang-surface); color: var(--et-lang-text);
-    border: 1px solid var(--et-lang-border); border-radius: 14px;
+    border: 1px solid var(--et-lang-border); border-radius: ${EDGE_UI.radius.surface};
     box-shadow: var(--et-lang-shadow);
-    opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: top center;
-    transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), transform 160ms cubic-bezier(0.2, 0, 0, 1);
-    -webkit-backdrop-filter: saturate(180%) blur(8px); backdrop-filter: saturate(180%) blur(8px);
+    opacity: 1; transform: translateY(-5px) scale(0.985); transform-origin: top center;
+    transition: transform ${EDGE_UI.motion.spotlightIn};
+    /* Chromium can intermittently produce black compositor tiles when a native top-layer popover
+       has any backdrop filter. The nearly opaque material, inset highlight and layered shadow keep
+       the Liquid Glass language without risking corruption of the page behind it. */
+    -webkit-backdrop-filter: none; backdrop-filter: none;
 }
 .et-lang-popover.is-visible { opacity: 1; transform: translateY(0) scale(1); }
 
-.et-lang-search-wrap { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--et-lang-border); flex: 0 0 auto; }
-.et-lang-search-icon { font-size: 13px; opacity: 0.6; }
-.et-lang-search { flex: 1 1 auto; border: none; outline: none; background: transparent; color: var(--et-lang-text); font-size: 14px; padding: 0; }
+.et-lang-search-wrap {
+    display: flex; align-items: center; gap: 8px; margin: 10px 10px 4px; padding: 9px 10px;
+    border: 1px solid transparent; border-radius: ${EDGE_UI.radius.control}; flex: 0 0 auto;
+    background: var(--et-lang-surface-2);
+    box-shadow: 0 0.5px 0 rgba(255, 255, 255, 0.75) inset;
+    transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.et-lang-search-wrap:focus-within { background: var(--et-lang-surface-strong); border-color: rgba(10, 132, 255, 0.38); box-shadow: 0 0 0 3px var(--et-lang-accent-soft); }
+.et-lang-search-icon { width: 16px; height: 16px; color: var(--et-lang-muted); stroke-width: 1.9; }
+.et-lang-search { flex: 1 1 auto; min-width: 0; border: none; outline: none; background: transparent; color: var(--et-lang-text); font: inherit; font-size: 13px; line-height: 18px; padding: 0; }
 .et-lang-search::placeholder { color: var(--et-lang-muted); }
 
-.et-lang-list { overflow-y: auto; padding: 6px; flex: 1 1 auto; scrollbar-width: thin; }
+.et-lang-list { overflow-y: auto; padding: 4px 8px 8px; flex: 1 1 auto; scrollbar-width: thin; scrollbar-color: rgba(60, 60, 67, 0.24) transparent; }
+.et-lang-list::-webkit-scrollbar { width: 8px; }
+.et-lang-list::-webkit-scrollbar-track { background: transparent; }
+.et-lang-list::-webkit-scrollbar-thumb { background: rgba(60, 60, 67, 0.22); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
 .et-lang-option {
     display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
-    padding: 9px 10px; border: none; border-radius: 9px; background: transparent;
-    color: var(--et-lang-text); font-size: 14px; line-height: 1.25; text-align: left; cursor: pointer;
-    transition: background-color 110ms ease, color 110ms ease;
+    min-height: 40px; padding: 9px 10px 9px 12px; border: none; border-radius: ${EDGE_UI.radius.control}; background: transparent;
+    color: var(--et-lang-text); font-size: 13px; font-weight: 500; line-height: 1.25; text-align: left; cursor: pointer;
+    transition: background-color 110ms ease, color 110ms ease, transform 110ms ease;
 }
+.et-lang-option:active { transform: scale(0.985); }
 .et-lang-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.et-lang-option-check { flex: 0 0 auto; color: var(--et-lang-accent); font-weight: 700; }
+.et-lang-option-check {
+    display: grid; place-items: center; flex: 0 0 auto; width: 20px; height: 20px;
+    border-radius: ${EDGE_UI.radius.pill}; background: var(--et-lang-accent); color: #fff;
+    opacity: 0; transform: scale(0.72);
+    transition: opacity 120ms ease, transform 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+.et-lang-option-check.is-visible { opacity: 1; transform: scale(1); }
+.et-lang-check-icon { width: 14px; height: 14px; stroke-width: 2.2; }
 .et-lang-option.is-active { background: var(--et-lang-surface-2); }
 .et-lang-option.is-selected { color: var(--et-lang-accent); font-weight: 600; }
-.et-lang-option.is-selected.is-active { background: rgba(74, 140, 247, 0.12); }
+.et-lang-option.is-selected.is-active { background: var(--et-lang-accent-soft); }
 .et-lang-empty { padding: 16px 12px; text-align: center; color: var(--et-lang-muted); font-size: 13px; }
 
 @media (prefers-color-scheme: dark) {
     .et-lang-menu, .et-lang-popover {
-        --et-lang-surface: #1f2126;
-        --et-lang-surface-2: #2a2d34;
-        --et-lang-text: #e8eaed;
-        --et-lang-muted: #9aa0a6;
-        --et-lang-border: rgba(255, 255, 255, 0.14);
-        --et-lang-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.4);
+        --et-lang-accent: ${EDGE_UI.color.accentDark};
+        --et-lang-accent-soft: rgba(64, 156, 255, 0.20);
+        --et-lang-surface: rgba(31, 32, 37, 0.97);
+        --et-lang-surface-strong: rgba(44, 45, 51, 0.98);
+        --et-lang-surface-2: ${EDGE_UI.color.controlDark};
+        --et-lang-text: ${EDGE_UI.color.textDark};
+        --et-lang-muted: ${EDGE_UI.color.mutedDark};
+        --et-lang-border: rgba(255, 255, 255, 0.16);
+        --et-lang-separator: rgba(255, 255, 255, 0.12);
+        --et-lang-shadow: 0 28px 64px rgba(0, 0, 0, 0.52), 0 8px 24px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.10);
     }
-    .et-lang-option.is-active { background: rgba(255, 255, 255, 0.07); }
-    .et-lang-option.is-selected.is-active { background: rgba(74, 140, 247, 0.22); }
+    .et-lang-search-wrap { box-shadow: 0 0.5px 0 rgba(255, 255, 255, 0.10) inset; }
+    .et-lang-option.is-active { background: rgba(255, 255, 255, 0.08); }
+    .et-lang-option.is-selected.is-active { background: var(--et-lang-accent-soft); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .et-lang-trigger, .et-lang-trigger-chevron, .et-lang-popover, .et-lang-option { transition: none !important; }
+    .et-lang-trigger, .et-lang-trigger-chevron, .et-lang-popover, .et-lang-option, .et-lang-option-check { transition: none !important; }
 }
 `;
 

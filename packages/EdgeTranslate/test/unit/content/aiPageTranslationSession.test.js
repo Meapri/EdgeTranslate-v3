@@ -582,6 +582,32 @@ describe("AI page translation vNext session", () => {
         expect(snapshot.telemetry.capability_drop_reasoning_retry).toBe(1);
     });
 
+    it("retries unresolved Gemini items once after a thinking-control downgrade", async () => {
+        const h = makeHarness({
+            html: "<div id='main'><p>First source sentence</p><p>Second source sentence</p></div>",
+            capabilities: {
+                provider: "googleAiStudio",
+                apiKeyHash: "g1",
+                profileRevision: "r1",
+                maxOutputTokens: 4096,
+            },
+            options: { engine: "googleAiStudio" },
+            translate: (payload, callNumber) =>
+                callNumber === 1 ? unsupportedReasoningFailure() : defaultTranslate(payload),
+        });
+
+        await h.controller.start();
+        await drainAll();
+
+        expect(h.calls.translate).toHaveLength(2);
+        expect(h.calls.translate[1].hint).toBe("capability-drop-reasoning");
+        const snapshot = h.controller.getStatusSnapshot();
+        expect(snapshot.phase).toBe("complete");
+        expect(snapshot.translatedStrings).toBe(2);
+        expect(snapshot.failedStrings).toBe(0);
+        expect(snapshot.telemetry.capability_drop_reasoning_retry).toBe(1);
+    });
+
     it("fails loudly when the one capability-drop-reasoning recovery is also unsupported", async () => {
         const h = makeHarness({
             html: "<div id='main'><p>One source sentence</p></div>",
@@ -948,7 +974,7 @@ describe("AI page translation vNext session", () => {
         });
     });
 
-    it("keeps the 5,282-inline production session within 106 balanced provider requests", async () => {
+    it("keeps the 5,282-inline production session within the shared small-packet speed caps", async () => {
         const targetCount = 5282;
         const h = makeHarness({
             html: `<main id="main">${Array.from(
@@ -984,8 +1010,8 @@ describe("AI page translation vNext session", () => {
 
         const sentUnits = h.calls.translate.flatMap((payload) => payload.units);
         expect(h.calls.translate.length).toBeGreaterThan(1);
-        // Small-packet drain caps + ja-ko outRatio (1.9) split this pathological 5,282-inline
-        // leaf into exactly 96 packets (drain est-out 1000, ja-ko outRatio 1.9).
+        // Google now shares OpenAI's 16/2.4K/1K speed profile. This pathological single leaf
+        // therefore becomes 96 balanced packets instead of using a provider-only consolidation.
         expect(h.calls.translate.length).toBe(96);
         expect(sentUnits.every((unit) => placeholderTagsBalanced(unit.text))).toBe(true);
         expect(sentUnits.some((unit) => /<g\d+>/.test(unit.text))).toBe(true);

@@ -23,9 +23,9 @@ import {
 } from "./estimator.js";
 
 // Tier caps: the active one-pass pipeline uses only `drain`. The smaller legacy names remain for
-// focused planner tests/rollback compatibility. Drain was sized for measured latency, not prompt
-// amortization: latency is decode-bound (∝ output tokens) and small packets win on both p90 tail
-// and parallelism, so drain now ships small (≤16 blocks / ≤900 est-out tokens). Basis:
+// focused planner tests/rollback compatibility. The default drain profile was sized from OpenAI
+// latency measurements, not prompt amortization: latency is decode-bound (∝ output tokens) and
+// small packets win on both p90 tail and parallelism. Basis:
 // .artifacts/vnext-gates/latency-gpt-5.6-luna-none.md (2026-07-14) — the old spec §2.4 "≤96/4000"
 // big-packet regime measured 31.6s/13.7s on the target pages and FAILED. The provider ceiling and
 // OUTPUT_TOKEN_HEADROOM_FACTOR still bound every actual generation.
@@ -411,8 +411,8 @@ function buildPackets({ items, tier, provider, estimator, capabilities, ctxToken
     ) {
         throw new TypeError("buildPackets requires a createEstimator instance");
     }
-    const { name: tierName, caps } = resolveTier(tier);
     const providerKey = String(provider || "");
+    const { name: tierName, caps } = resolveTier(tier);
     const entries = normalizeItems(Array.isArray(items) ? items : []);
     if (!entries.length) return { packets: [], chunked: [] };
 

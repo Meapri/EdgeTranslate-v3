@@ -131,6 +131,7 @@ Safari watch는 단순 파일 복사만 하지 않는다. build 결과를 Xcode 
 ├── tools/                             # benchmark, smoke, 분석 도구
 ├── docs/
 │   ├── DEVELOPMENT_GUIDE.md           # 현재 개발 기준 문서
+│   ├── UI_DESIGN_SYSTEM.md             # 번역 UI 시각·상태·접근성 계약
 │   ├── AI_PAGE_TRANSLATION_VNEXT.md        # 기본 cloud AI 페이지 번역 구현 계약
 │   ├── AI_PAGE_TRANSLATION_STABLE.md       # 명시적 rollback 계약
 │   ├── AI_PAGE_TRANSLATION_GOOGLE_STYLE.md # 과거 연속 번역 설계 기록
@@ -523,7 +524,7 @@ bridge로 분기한다. `DefaultPageTranslator`의 Google/AI 선택과 cloud 내
 flowchart LR
     A["layout-free whole-document walk 1회"] --> B["semantic leaf block / attribute"]
     B --> C["TargetRegistry + source/role dedupe"]
-    C --> D["pt3 packets: 96 items / 8K chars / 4K est-out"]
+    C --> D["provider packets: OpenAI/Gemini 16 items / 2.4K chars / 1K est-out"]
     D --> E["OpenAI Responses / Gemini / compatible"]
     E --> F["status + ID + placeholder + semantic validation"]
     F --> G["all-or-nothing CAS commit"]
@@ -533,7 +534,7 @@ flowchart LR
 -   inline wrapper는 `<gN>…</gN>`, opaque/synthetic Text-node boundary는 `<vN/>`로 표현한다.
 -   comment나 `splitText()`로 나뉜 인접 node는 synthetic void boundary로 parser의 segment
     collapse를 막는다.
--   현재 prompt identity는 `pt3-2`다. placeholder는 고정 DOM 경계라 source 순서와 nesting을
+-   현재 prompt identity는 `pt3-3`다. placeholder는 고정 DOM 경계라 source 순서와 nesting을
     유지하고, URL/email/code/identifier/number는 정확히 보존한다. packet별 response schema도
     `x.minItems/maxItems`를 요청 수로 고정하고 `i.enum`을 packet-local alias로 제한한다.
 -   표현 불가능한 interactive placeholder 어순은 `reinforced-order` 한 번 뒤 per-Text-node
@@ -550,9 +551,13 @@ flowchart LR
 -   packet builder는 deterministic LPT best-fit으로 bin을 구성한다. dispatch는 같은 queue
     tier/limiter key에서 cap 전에는 작은 estimated-output packet부터(SPT) 보내 clean feedback으로
     slot을 빨리 열고, cap 뒤에는 큰 packet부터(LPT) 보내 full-drain tail을 줄인다.
+-   OpenAI와 Google AI Studio drain은 모두 실측된 speed profile인 16 items / 2.4K chars /
+    1K est-out의 작은 packet과 40-way 병렬화를 사용한다. 두 경로 모두 동일한
+    context/output feasibility, tail hedging, bounded recovery를 거친다.
 -   provider AIMD row와 cap은 `common/scripts/ai_page_translation_limits.js`가 단일 source of
-    truth다. OpenAI/Gemini는 current-epoch clean success마다 한 slot씩 빠르게 올리되, 429/5xx가
-    epoch를 바꾸면 이전 in-flight의 stale success가 0.5배 감소를 즉시 되돌리지 못한다.
+    truth다. OpenAI와 Google AI Studio 모두 `(40,1,40)`으로 첫 wave부터 같은 speed cap을
+    채운다. 429/5xx가 epoch를 바꾸면 0.5배로 감소하고 이전 in-flight의 stale success가 감소를
+    즉시 되돌리지 못한다. 이후 current-epoch clean success로 provider별 증가폭만큼 복구한다.
 -   포화되거나 cooldown 중인 limiter key의 packet은 queue에 그대로 두고, 실행 가능한 다른 key를
     골라 multi-key head-of-line blocking을 막는다.
 -   MV3 background는 모든 tab의 provider/API-key hash를 공유 FIFO gate로 묶는다. content cap과
@@ -561,11 +566,16 @@ flowchart LR
     cache에 재삽입하지 않는다.
 -   OpenAI/Gemini는 production adapter의 실제 request/response shape를 그대로 구현한 local
     stub smoke로 무과금 검증할 수 있다.
+-   OpenAI/Gemini official adapter는 LF/CRLF/CR SSE 경계와 network-chunk 사이에서 잘린
+    separator를 동일하게 처리한다. Gemini 3 Flash 계열은 `thinkingLevel:minimal`, 3 Pro는
+    `low`, 2.5 Flash 계열은 `thinkingBudget:0`, 2.5 Pro는 `128`을 쓰고 Gemini 3 sampling
+    parameter는 생략한다. provider가 reasoning/thinking field만 거부하면 미해결 item을 필드
+    없이 정확히 한 번 capability downgrade한다.
 -   startup hydration root를 buffer하고, unsafe long inline placeholder block은 per-Text
     atomic으로 degrade하며, active provider cancel은 terminal이다.
 -   반복 inline wrapper는 placeholder stack depth 0 경계를 우선 사용한다. production session
-    5,282-inline 회귀는 현재 22 packets / 23 balanced chunks이며 `<=30`, atomic fallback 없음,
-    DOM identity 보존을 계약으로 고정한다.
+    5,282-inline 회귀는 공유 small-packet profile에서 Google 96 balanced packets, atomic
+    fallback 없음, DOM identity 보존을 계약으로 고정한다.
 -   same-packet backoff 실패는 idempotency completed cache에 남기지 않아 실제 재호출한다.
     success/delivery-unknown/recovery-class만 replay-safe cache 대상이다.
 -   no-output circuit은 개별 HTTP 실패 횟수가 아니라 bounded retry가 모두 소진된 packet
@@ -795,8 +805,8 @@ node tools/find-untranslated.mjs /path/to/page.html
 node tools/token-breakdown.mjs /path/to/page.html
 ```
 
-두 Wikipedia script의 30-request check는 京阪本線 fixture 전용 regression ceiling이다.
-임의의 페이지에 대한 global 30-request 보장이 아니다. 더 큰 문서는 provider output/input/item
+두 Wikipedia script는 같은 small-packet profile과 `260` request runaway ceiling을 사용한다.
+이는 목표 request 수가 아니라 fixture 전용 안전 상한이다. 더 큰 문서는 provider output/input/item
 경계를 지키기 위해 더 많은 request가 필요할 수 있다.
 
 주의:
@@ -852,19 +862,21 @@ npm test -w @edge_translate/translators -- --runInBand
 
 `npm test -- --runInBand`처럼 루트 Turbo 명령 뒤에 Jest flag를 붙이면 Turbo가 알 수 없는 flag로 처리할 수 있다. Jest flag가 필요하면 workspace 명령을 직접 사용한다.
 
-2026-07-13 현재 작업 트리에서는 Chrome build, EdgeTranslate 53 suites/972 tests,
-translators 11 suites/178 tests가 통과했다. default pipeline smoke는 observed vNext,
+2026-07-15 현재 작업 트리에서는 Chrome build, EdgeTranslate 44 suites/934 tests,
+translators 11 suites/185 tests가 통과했다. default pipeline smoke는 observed vNext,
 8 requests(initial 6 + late content 1 + late attribute 1), failed/recovery 0이었다. explicit
 stable smoke는 observed stable, 5 requests, failed 0이었다. test 개수 자체는 고정 gate가
 아니므로 변경 뒤에는 현재 명령 output과 CI artifact를 다시 증거로 남긴다.
 
 실제 京阪本線 DOM을 production collector/planner와 exact-adapter local stub로 실행한 최신
-구조 smoke는 OpenAI/Gemini 각각 baseline generation 27 requests, 2,004/2,004 targets,
-1,697 unique provider items, 116,501 source chars, failed/recovery 0, anchor 100개 보존,
-runtime exception 0이었다. stub usage 98,189/98,244는 회계 경로용 합성값이며 실제
-token/비용/품질이 아니다. 상세 해석과 남은 live Gates C-F는
+구조 smoke의 현재 shared-speed-profile baseline generation은 OpenAI/Gemini 각각 174/167
+requests였고, 둘 다 2,004/2,004 targets, failed/recovery 0, anchor 100개 보존, runtime exception
+0이었다. 같은 16-item / 2.4K-char / 1K-est-out hard cap 안에서 OpenAI estimator의 60-token
+incidental reserve 때문에 일부 packet이 더 보수적으로 나뉜다. stub usage 165,707/162,224는
+회계 경로용 합성값이며 실제 token/비용/품질이 아니다.
+상세 해석과 남은 live Gates C-F는
 [`AI_PAGE_TRANSLATION_VNEXT.md`](./AI_PAGE_TRANSLATION_VNEXT.md)를 따른다.
-여기서 30 requests는 같은 fixture의 회귀 상한일 뿐 arbitrary page cap이 아니다.
+두 smoke의 260 requests는 목표치가 아니라 runaway 방지용 fixture 안전 상한이다.
 
 같은 OpenAI-shaped local deterministic latency smoke를 scheduler 최적화 전후 한 번씩 실행한
 결과는 full-page elapsed `4,421 ms → 3,914 ms`(-507 ms, -11.5%)였다. 두 실행 모두
@@ -898,19 +910,19 @@ CI는 E2E를 실행하지 않는다. 현재 범위는 `npm ci`, unit tests, Chro
 
 ### 17.3 변경 유형별 최소 검증
 
-| 변경                  | 최소 테스트                                    | 추가 검증                        |
-| --------------------- | ---------------------------------------------- | -------------------------------- |
-| 선택 감지/context     | selectionContext, translateManager, select E2E | 일반 페이지, iframe, PDF         |
-| Panel/Result UI       | 관련 unit + panel E2E                          | floating/pinned, resize, RTL     |
-| settings/options      | settings, pageTranslate, translateManager      | 기존 storage migration           |
-| translator provider   | 해당 provider + local/hybrid                   | stream, 429, timeout, dictionary |
-| vNext page DOM/IR     | aiPageTranslationCollector/BlockIr/Registry    | inline order, comment split, CAS |
-| vNext session/runtime | Session/Scheduler/Recovery/UsageLedger         | 긴 SPA, cancel, revisit cache    |
-| page router/rollback  | bannerController + stable focused tests        | default vNext, explicit stable   |
-| realtime caption      | bannerController focused tests                 | YouTube playback, seek, toggle   |
-| PDF                   | pdfDetection, PDF viewer tests                 | web/file/blob PDF, native bypass |
-| manifest/build        | manifestPermissions + 타깃 build               | 생성 manifest 직접 검사          |
-| release               | 전체 test/build/lint                           | clean profile 핵심 journey smoke |
+| 변경                  | 최소 테스트                                    | 추가 검증                                           |
+| --------------------- | ---------------------------------------------- | --------------------------------------------------- |
+| 선택 감지/context     | selectionContext, translateManager, select E2E | 일반 페이지, iframe, PDF                            |
+| Panel/Result UI       | 관련 unit + panel E2E                          | `UI_DESIGN_SYSTEM.md`, floating/pinned, resize, RTL |
+| settings/options      | settings, pageTranslate, translateManager      | 기존 storage migration                              |
+| translator provider   | 해당 provider + local/hybrid                   | stream, 429, timeout, dictionary                    |
+| vNext page DOM/IR     | aiPageTranslationCollector/BlockIr/Registry    | inline order, comment split, CAS                    |
+| vNext session/runtime | Session/Scheduler/Recovery/UsageLedger         | 긴 SPA, cancel, revisit cache                       |
+| page router/rollback  | bannerController + stable focused tests        | default vNext, explicit stable                      |
+| realtime caption      | bannerController focused tests                 | YouTube playback, seek, toggle                      |
+| PDF                   | pdfDetection, PDF viewer tests                 | web/file/blob PDF, native bypass                    |
+| manifest/build        | manifestPermissions + 타깃 build               | 생성 manifest 직접 검사                             |
+| release               | 전체 test/build/lint                           | clean profile 핵심 journey smoke                    |
 
 ## 18. 안전한 변경 절차
 
@@ -939,7 +951,7 @@ CI는 E2E를 실행하지 않는다. 현재 범위는 `npm ci`, unit tests, Chro
 
 -   layout-free whole-document 1-pass collector와 사이트 비종속 eligibility
 -   semantic leaf block, placeholder armor/inventory, synthetic void Text-node boundary
--   `pt3-2` fixed-order placeholder/protected-value prompt와 packet별 exact-count/alias schema
+-   `pt3-3` fixed-order placeholder/protected-value prompt와 packet별 exact-count/alias schema
 -   session ID, revision, live-source와 block all-or-nothing CAS
 -   provider terminal status, ID/schema, semantic validator
 -   unresolved-only shrinking recovery와 global attempt ceiling

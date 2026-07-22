@@ -96,17 +96,13 @@ function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
 describe("stable/V2 and pt3 wire isolation", () => {
     test("recovers only the fully closed, ordered prefix from streamed pt3 JSON", () => {
         const prepared = wire();
-        const partial =
-            '{"x":[{"i":"0","t":"안녕 } \\"친구\\""},{"i":"1","t":"저장';
+        const partial = '{"x":[{"i":"0","t":"안녕 } \\"친구\\""},{"i":"1","t":"저장';
 
         expect(parsePageTranslationProgress(partial, prepared)).toEqual([
             { id: "target-a", translatedText: '안녕 } "친구"' },
         ]);
         expect(
-            parsePageTranslationProgress(
-                '{"x":[{"i":"1","t":"순서가 다름"}]}',
-                prepared
-            )
+            parsePageTranslationProgress('{"x":[{"i":"1","t":"순서가 다름"}]}', prepared)
         ).toEqual([]);
     });
 
@@ -937,6 +933,70 @@ describe("page translation provider adapters", () => {
         expect(result.ok).toBe(true);
     });
 
+    test("Gemini streams CRLF events when the separator crosses network chunks", async () => {
+        const output = JSON.stringify({
+            x: [
+                { i: "0", t: "안녕하세요" },
+                { i: "1", t: "변경 사항 저장" },
+            ],
+        });
+        const splitAt = output.indexOf("},{") + 2;
+        const first = `data: ${JSON.stringify({
+            candidates: [{ content: { parts: [{ text: output.slice(0, splitAt) }] } }],
+        })}\r\n\r`;
+        const second = `\ndata: ${JSON.stringify({
+            candidates: [
+                {
+                    finishReason: "STOP",
+                    content: { parts: [{ text: output.slice(splitAt) }] },
+                },
+            ],
+        })}\r\n\r\n`;
+        const chunks = [first, second].map((value) => new TextEncoder().encode(value));
+        let readIndex = 0;
+        let releaseDoneRead!: () => void;
+        let notifyDoneReadStarted!: () => void;
+        const doneReadGate = new Promise<void>((resolve) => {
+            releaseDoneRead = resolve;
+        });
+        const doneReadStarted = new Promise<void>((resolve) => {
+            notifyDoneReadStarted = resolve;
+        });
+        const response = {
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            body: {
+                getReader: () => ({
+                    read: async () => {
+                        if (readIndex >= chunks.length) {
+                            notifyDoneReadStarted();
+                            await doneReadGate;
+                            return { done: true, value: undefined };
+                        }
+                        return { done: false, value: chunks[readIndex++] };
+                    },
+                }),
+            },
+        } as unknown as Response;
+        const fetchMock = jest.fn().mockResolvedValue(response);
+        const onProgress = jest.fn();
+        const translation = new GeminiGenerateContentAdapter(fetchMock as any).executeOnce(
+            profile({ protocol: "gemini-generate-content", modelId: "gemini-2.5-flash" }),
+            request({ onProgress }),
+            new AbortController().signal
+        );
+
+        await doneReadStarted;
+        try {
+            expect(onProgress.mock.calls.some(([items]) => items.length === 1)).toBe(true);
+            expect(onProgress.mock.calls.at(-1)?.[0]).toHaveLength(2);
+        } finally {
+            releaseDoneRead();
+        }
+        await expect(translation).resolves.toMatchObject({ ok: true });
+    });
+
     test("Gemini honors an explicit thinking-config profile over the pinned default", async () => {
         const fetchMock = jest
             .fn()
@@ -969,6 +1029,7 @@ describe("page translation provider adapters", () => {
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.maxOutputTokens).toBeUndefined();
         expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
+        expect(body.generationConfig.temperature).toBeUndefined();
     });
 
     test.each([
@@ -990,6 +1051,35 @@ describe("page translation provider adapters", () => {
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.generationConfig.thinkingConfig).toEqual(expected);
+    });
+
+    test("Gemini hands the scheduler a reasoning drop patch when thinkingConfig is rejected", async () => {
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValue(
+                mockResponse(
+                    { error: { message: "Unknown field generationConfig.thinkingConfig" } },
+                    400
+                )
+            );
+        const result = await new GeminiGenerateContentAdapter(fetchMock as any).executeOnce(
+            profile({ protocol: "gemini-generate-content", modelId: "gemini-2.5-flash" }),
+            request(),
+            new AbortController().signal
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.failure).toMatchObject({
+                kind: "unsupported-capability",
+                retryDirective: "downgrade",
+            });
+            expect(result.failure.capabilityPatch?.reasoningControl).toMatchObject({
+                value: "none",
+                source: "runtime-observation",
+            });
+        }
     });
 
     test("Gemini preserves a validated ID tail when MAX_TOKENS stops output", async () => {

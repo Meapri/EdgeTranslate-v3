@@ -169,7 +169,7 @@ describe("DOM page translation vNext banner wiring", () => {
         controller.cancelDomPageTranslate();
     });
 
-    it("toggles the header button between original and translated page views", () => {
+    it("switches explicitly between original and translated page views", () => {
         const controller = new BannerController();
         controller.startDomPageTranslate({
             engine: "openai",
@@ -180,22 +180,23 @@ describe("DOM page translation vNext banner wiring", () => {
         });
         const session = createAiPageTranslationSession.mock.results[0].value;
         const host = document.getElementById("edge-translate-dom-page-banner");
-        const button = host.shadowRoot.querySelector("[data-action='toggle-view']");
-        const label = button.querySelector("[data-role='view-toggle-text']");
+        const viewSwitch = host.shadowRoot.querySelector("[data-role='view-switch']");
+        const sourceButton = viewSwitch.querySelector("[data-action='show-source']");
+        const translationButton = viewSwitch.querySelector("[data-action='show-translation']");
 
-        expect(button.hidden).toBe(false);
-        expect(button.getAttribute("aria-pressed")).toBe("false");
-        expect(label.textContent).toBe("Original");
+        expect(viewSwitch.hidden).toBe(false);
+        expect(sourceButton.getAttribute("aria-pressed")).toBe("false");
+        expect(translationButton.getAttribute("aria-pressed")).toBe("true");
 
-        button.click();
+        sourceButton.click();
         expect(session.setViewMode).toHaveBeenLastCalledWith("source");
-        expect(button.getAttribute("aria-pressed")).toBe("true");
-        expect(label.textContent).toBe("Translation");
+        expect(sourceButton.getAttribute("aria-pressed")).toBe("true");
+        expect(translationButton.getAttribute("aria-pressed")).toBe("false");
 
-        button.click();
+        translationButton.click();
         expect(session.setViewMode).toHaveBeenLastCalledWith("translation");
-        expect(button.getAttribute("aria-pressed")).toBe("false");
-        expect(label.textContent).toBe("Original");
+        expect(sourceButton.getAttribute("aria-pressed")).toBe("false");
+        expect(translationButton.getAttribute("aria-pressed")).toBe("true");
         controller.cancelDomPageTranslate();
     });
 
@@ -402,7 +403,7 @@ describe("DOM page translation vNext banner wiring", () => {
 
         const root = document.getElementById("edge-translate-dom-page-banner").shadowRoot;
         expect(root.querySelector("[data-role='status']").textContent).toBe(
-            "4 of 10 strings translated"
+            "4 / 10 translated"
         );
         // Token/request telemetry is tracked internally (for accounting) but no longer shown in
         // the decluttered header — there is no token-meta node to render it into.
@@ -496,7 +497,7 @@ describe("DOM page translation vNext banner wiring", () => {
         expect(controller._activePagePipeline.getStatusSnapshot()).toBe(finished);
         const root = document.getElementById("edge-translate-dom-page-banner").shadowRoot;
         expect(root.querySelector("[data-role='status']").textContent).toBe(
-            "Translation incomplete (2 strings failed)"
+            "Translation incomplete (2 items failed)"
         );
         expect(root.querySelector("[data-role='bar']").dataset.state).toBe("error");
         controller.cancelDomPageTranslate();

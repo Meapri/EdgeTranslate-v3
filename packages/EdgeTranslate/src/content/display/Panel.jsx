@@ -2,7 +2,7 @@
 import { h, Fragment } from "preact";
 import { useEffect, useState, useRef, useCallback } from "preact/hooks";
 import { useLatest, useEvent, useClickAway } from "react-use";
-import styled, { createGlobalStyle } from "styled-components";
+import styled, { createGlobalStyle, css } from "styled-components";
 import root from "react-shadow/styled-components";
 import SimpleBar from "simplebar-react";
 import SimpleBarStyle from "simplebar-react/dist/simplebar.min.css";
@@ -17,8 +17,10 @@ import Dropdown from "./Dropdown.jsx";
 import SettingIcon from "./icons/setting.svg";
 import PinIcon from "./icons/pin.svg";
 import CloseIcon from "./icons/close.svg";
+import MoreIcon from "./icons/more.svg";
 import { LANGUAGES } from "@edge_translate/translators";
 import createLanguageMenu from "common/scripts/language_menu.js";
+import { EDGE_UI } from "common/scripts/ui_design_tokens.js";
 
 function getI18nMessage(name, fallback = "") {
     const message = chrome.i18n.getMessage(name);
@@ -84,17 +86,17 @@ let documentBodyCSS = "";
 // The duration time of result panel's transition. unit: ms.
 const transitionDuration = 360;
 const transitionEasing = "cubic-bezier(0.25, 1, 0.5, 1)";
-const DarkPrimary = "#2997ff";
-const DarkOnSurface = "#f5f5f7";
+const DarkPrimary = EDGE_UI.color.accentDark;
+const DarkOnSurface = EDGE_UI.color.textDark;
 const DarkOnSurfaceVariant = "#aeaeb2";
 // const DarkOutline = "#48484a";
-const MotionFast = "180ms cubic-bezier(0.25, 1, 0.5, 1)";
-const MotionStandard = "280ms cubic-bezier(0.25, 1, 0.5, 1)";
-const MotionFloatingSpotlightIn = "210ms cubic-bezier(0.2, 0, 0, 1)";
-const MotionFloatingSpotlightOut = "170ms cubic-bezier(0.32, 0, 0.67, 0)";
-const MotionSnappy = "360ms cubic-bezier(0.16, 1, 0.3, 1)";
+const MotionFast = EDGE_UI.motion.fast;
+const MotionStandard = EDGE_UI.motion.standard;
+const MotionFloatingSpotlightIn = EDGE_UI.motion.spotlightIn;
+const MotionFloatingSpotlightOut = EDGE_UI.motion.spotlightOut;
+const MotionSnappy = EDGE_UI.motion.snappy;
 const DetachResizeMotion = "240ms cubic-bezier(0.2, 1, 0.2, 1)";
-const PanelRadius = "18px";
+const PanelRadius = EDGE_UI.radius.surface;
 const FloatingMargin = 16;
 const SlideOverMargin = 16;
 const SlideOverWidthMin = 320;
@@ -1480,37 +1482,83 @@ export default function ResultPanel() {
                                             onChange={changeTargetLanguage}
                                         />
                                         <HeadIcons data-no-panel-drag="true">
-                                            <HeadIcon
-                                                role="button"
-                                                title={chrome.i18n.getMessage("Settings")}
-                                                onClick={() => channel.emit("open_options_page")}
-                                                data-testid="SettingIcon"
-                                            >
-                                                <SettingIcon />
-                                            </HeadIcon>
-                                            <HeadIcon
-                                                role="button"
-                                                title={chrome.i18n.getMessage(
-                                                    panelFix ? "UnfixResultFrame" : "FixResultFrame"
+                                            <HeadOverflow data-testid="MoreActions">
+                                                <HeadOverflowSummary
+                                                    aria-label={getI18nMessage(
+                                                        "MoreActions",
+                                                        "More actions"
+                                                    )}
+                                                    title={getI18nMessage(
+                                                        "MoreActions",
+                                                        "More actions"
+                                                    )}
+                                                >
+                                                    <MoreIcon />
+                                                </HeadOverflowSummary>
+                                                <HeadOverflowActions>
+                                                    <HeadActionButton
+                                                        type="button"
+                                                        aria-label={getI18nMessage(
+                                                            "Settings",
+                                                            "Settings"
+                                                        )}
+                                                        title={getI18nMessage(
+                                                            "Settings",
+                                                            "Settings"
+                                                        )}
+                                                        onClick={(event) => {
+                                                            channel.emit("open_options_page");
+                                                            event.currentTarget.closest(
+                                                                "details"
+                                                            ).open = false;
+                                                        }}
+                                                        data-testid="SettingIcon"
+                                                    >
+                                                        <SettingIcon />
+                                                    </HeadActionButton>
+                                                    <HeadActionButton
+                                                        type="button"
+                                                        aria-label={getI18nMessage(
+                                                            panelFix
+                                                                ? "UnfixResultFrame"
+                                                                : "FixResultFrame"
+                                                        )}
+                                                        title={getI18nMessage(
+                                                            panelFix
+                                                                ? "UnfixResultFrame"
+                                                                : "FixResultFrame"
+                                                        )}
+                                                        aria-pressed={Boolean(panelFix)}
+                                                        onClick={(event) => {
+                                                            setPanelFix(!panelFix);
+                                                            chrome.storage.sync.set({
+                                                                fixSetting: !panelFix,
+                                                            });
+                                                            event.currentTarget.closest(
+                                                                "details"
+                                                            ).open = false;
+                                                        }}
+                                                        data-testid="PinIcon"
+                                                    >
+                                                        <StyledPinIcon fix={panelFix} />
+                                                    </HeadActionButton>
+                                                </HeadOverflowActions>
+                                            </HeadOverflow>
+                                            <HeadActionButton
+                                                type="button"
+                                                aria-label={getI18nMessage(
+                                                    "CloseResultFrame",
+                                                    "Close result"
                                                 )}
-                                                onClick={() => {
-                                                    setPanelFix(!panelFix);
-                                                    chrome.storage.sync.set({
-                                                        fixSetting: !panelFix,
-                                                    });
-                                                }}
-                                                data-testid="PinIcon"
-                                            >
-                                                <StyledPinIcon fix={panelFix} />
-                                            </HeadIcon>
-                                            <HeadIcon
-                                                role="button"
-                                                title={chrome.i18n.getMessage("CloseResultFrame")}
+                                                title={getI18nMessage(
+                                                    "CloseResultFrame",
+                                                    "Close result"
+                                                )}
                                                 onClick={closePanel}
                                                 data-testid="CloseIcon"
                                             >
                                                 <CloseIcon />
-                                            </HeadIcon>
+                                            </HeadActionButton>
                                         </HeadIcons>
                                     </Head>
                                     <Body ref={bodyElRef}>
@@ -1555,7 +1603,7 @@ export default function ResultPanel() {
  */
 
 export const MaxZIndex = 2147483647;
-const ColorPrimary = "#0066cc";
+const ColorPrimary = EDGE_UI.color.accentLight;
 export const ContentWrapperCenterClassName = "simplebar-content-wrapper-center";
 
 const GlobalStyle = createGlobalStyle`
@@ -1799,8 +1847,76 @@ const HeadIcons = styled.div`
     min-width: 0;
 `;
 
+const headActionControl = css`
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    margin: 0 2px;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    background-color: ${EDGE_UI.color.controlLight};
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    border-radius: ${EDGE_UI.radius.pill};
+    box-shadow: none;
+    cursor: pointer;
+    transition: transform ${MotionFast}, background-color ${MotionFast}, color ${MotionFast};
+    transform: scale(1);
+
+    svg {
+        fill: ${EDGE_UI.color.mutedLight};
+        width: 18px;
+        height: 18px;
+        display: block;
+        transition: fill ${MotionFast}, transform ${MotionFast};
+    }
+
+    &:hover {
+        background-color: ${EDGE_UI.color.controlLightHover};
+    }
+
+    &:hover svg,
+    &[aria-pressed="true"] svg {
+        fill: ${ColorPrimary};
+    }
+
+    &:active {
+        transform: scale(0.97);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.2);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        background-color: ${EDGE_UI.color.controlDark};
+
+        svg {
+            fill: ${EDGE_UI.color.mutedDark};
+        }
+
+        &:hover {
+            background-color: ${EDGE_UI.color.controlDarkHover};
+        }
+
+        &:hover svg,
+        &[aria-pressed="true"] svg {
+            fill: ${DarkPrimary};
+        }
+
+        &:focus-visible {
+            box-shadow: 0 0 0 3px rgba(41, 151, 255, 0.24);
+        }
+    }
+`;
+
 // Reshape the shared language menu's trigger so it reads as a sibling of the translator
-// pill (SourceOption). The popover keeps the menu's own Material card look (it renders in <body>).
+// pill (SourceOption). The popover keeps the shared Liquid Glass treatment (it renders in <body>).
 const LangMount = styled.div`
     display: inline-flex;
     align-items: center;
@@ -1819,72 +1935,84 @@ const LangMount = styled.div`
         max-width: 150px;
         padding: 4px 11px;
         gap: 6px;
-        border-radius: 999px;
+        border-radius: ${EDGE_UI.radius.pill};
         font-size: 13px;
         font-weight: normal;
-        background: rgba(118, 118, 128, 0.12);
+        background: ${EDGE_UI.color.controlLight};
         border-color: transparent;
     }
+    & .et-lang-trigger-icon {
+        display: none;
+    }
     & .et-lang-trigger-chevron {
-        font-size: 10px;
-    }
-`;
-
-const HeadIcon = styled.div`
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-style: normal;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    cursor: pointer;
-    font-size: 18px;
-    width: 34px;
-    height: 34px;
-    margin: 0 3px;
-    background-color: rgba(118, 118, 128, 0.12);
-    backdrop-filter: blur(12px) saturate(150%);
-    -webkit-backdrop-filter: blur(12px) saturate(150%);
-    border-radius: 999px;
-    box-shadow: none;
-    transition: transform ${MotionSnappy}, background-color 0.2s, color 0.2s;
-    transform: scale(1);
-
-    svg {
-        fill: rgba(60, 60, 67, 0.6);
-        width: 18px;
-        height: 18px;
-        display: block;
-        transition: fill 0.2s ease, transform 0.2s ease;
-    }
-
-    &:hover {
-        background-color: rgba(118, 118, 128, 0.2);
-    }
-
-    &:hover svg {
-        fill: ${ColorPrimary};
-    }
-
-    /* Apple system press: a subtle scale-down, no bounce, no shadow. */
-    &:active {
-        transform: scale(0.95);
+        width: 12px;
+        height: 12px;
     }
 
     @media (prefers-color-scheme: dark) {
-        background-color: rgba(118, 118, 128, 0.24);
-
-        svg {
-            fill: rgba(235, 235, 245, 0.6);
+        & .et-lang-trigger {
+            background: ${EDGE_UI.color.controlDark};
         }
+    }
+`;
 
-        &:hover {
-            background-color: rgba(118, 118, 128, 0.36);
-        }
+const HeadActionButton = styled.button`
+    ${headActionControl}
+`;
 
-        &:hover svg {
-            fill: ${DarkPrimary};
+const HeadOverflow = styled.details`
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    position: relative;
+
+    &[open] > summary svg {
+        fill: ${ColorPrimary};
+        transform: rotate(90deg);
+    }
+`;
+
+const HeadOverflowSummary = styled.summary`
+    ${headActionControl}
+    list-style: none;
+
+    &::-webkit-details-marker {
+        display: none;
+    }
+`;
+
+const HeadOverflowActions = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    position: absolute;
+    z-index: 4;
+    top: calc(100% + 6px);
+    right: 0;
+    padding: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: ${EDGE_UI.radius.pill};
+    background: rgba(248, 250, 253, 0.94);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    box-shadow: 0 10px 26px rgba(60, 64, 67, 0.18), 0 2px 8px rgba(60, 64, 67, 0.12);
+    animation: et-head-actions-in ${MotionFast} both;
+
+    @keyframes et-head-actions-in {
+        from {
+            opacity: 0;
+            transform: translateY(-4px) scale(0.96);
         }
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(31, 32, 37, 0.95);
+        box-shadow: 0 14px 30px rgba(0, 0, 0, 0.46), 0 3px 10px rgba(0, 0, 0, 0.3);
     }
 `;
 
@@ -1921,29 +2049,29 @@ const SourceOption = styled(Dropdown)`
     cursor: pointer;
     // To center the text in select box
     text-align-last: center;
-    color: #1d1d1f;
-    background-color: rgba(118, 118, 128, 0.12);
+    color: ${EDGE_UI.color.textLight};
+    background-color: ${EDGE_UI.color.controlLight};
     border-color: transparent;
-    border-radius: 999px;
+    border-radius: ${EDGE_UI.radius.pill};
     min-height: 36px;
     padding: 0 11px;
     outline: none;
     transition: background-color ${MotionFast}, color ${MotionFast};
 
     &:hover {
-        background-color: rgba(118, 118, 128, 0.2);
+        background-color: ${EDGE_UI.color.controlLightHover};
     }
 
     @media (prefers-color-scheme: dark) {
         color: ${DarkOnSurface};
-        background-color: rgba(118, 118, 128, 0.24);
+        background-color: ${EDGE_UI.color.controlDark};
 
         &:hover {
-            background-color: rgba(118, 118, 128, 0.36);
+            background-color: ${EDGE_UI.color.controlDarkHover};
         }
     }
 
-    ul {
+    & [role="menu"] {
         min-width: 260px;
         max-width: min(320px, calc(100vw - 32px));
         text-align: left;

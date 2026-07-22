@@ -5,15 +5,8 @@
     "gate0_placeholderProbe": {
         "$comment": "Pre-freeze live probe: 3 providers x 2 pairs (ja->ko, ja->en) x n=5, fixture blocks with 2-6 placeholders in 64-block packets. Runs BEFORE the session layer is built; on fail, revise placeholder alphabet (candidate ⟦n⟧) and re-run.",
         "minIntactInventoryRate": 0.98,
-        "providers": [
-            "openai",
-            "googleAiStudio",
-            "openaiCompatible"
-        ],
-        "pairs": [
-            "ja-ko",
-            "ja-en"
-        ],
+        "providers": ["openai", "googleAiStudio", "openaiCompatible"],
+        "pairs": ["ja-ko", "ja-en"],
         "runsPerCell": 5
     },
     "gateA_offlineReplay": {
@@ -33,15 +26,8 @@
     "gateC_liveQuality": {
         "$comment": "n>=5 AB/BA, pre-ship + weekly. chrF refs generated once by strongest model, human spot-checked, committed.",
         "runs": 5,
-        "providers": [
-            "openai",
-            "googleAiStudio"
-        ],
-        "pairs": [
-            "ja-ko",
-            "en-ko",
-            "ja-en"
-        ],
+        "providers": ["openai", "googleAiStudio"],
+        "pairs": ["ja-ko", "en-ko", "ja-en"],
         "snapshots": 3,
         "chrfDeltaWordOrderPairs": 3.0,
         "chrfDeltaOtherPairs": -0.5,
@@ -83,7 +69,7 @@
         "blockScoreFloor": 2
     },
     "packetSizing": {
-        "$comment": "Output-token-derived caps. drain shrunk to small-packet regime (decode-bound latency, small packets win on tail + parallelism). Basis: .artifacts/vnext-gates/latency-gpt-5.6-luna-none.md (2026-07-14). outputTokenHeadroomFactor is the SIZING/feasibility reserve (1.25x est-out) and is DECOUPLED from the max_output actually sent — see maxOutputSend* below.",
+        "$comment": "Output-token-derived caps. OpenAI and Gemini use the same small-packet drain profile and 40-way speed mode so provider selection does not change the latency strategy. outputTokenHeadroomFactor is the SIZING/feasibility reserve (1.25x est-out) and is DECOUPLED from the max_output actually sent — see maxOutputSend* below.",
         "firstPaint": {
             "maxBlocks": 12,
             "maxSrcChars": 1500,
@@ -115,10 +101,11 @@
     "concurrencyAimd": {
         "$comment": "Spec §2.3 — per (provider, apiKeyHash); cooldowns scoped per key, always recovering.",
         "googleAiStudio": {
-            "start": 4,
+            "$comment": "Match OpenAI speed mode at 40 from the first wave; 429/5xx feedback halves the width and current-epoch clean completions restore it four at a time.",
+            "start": 40,
             "floor": 1,
-            "cap": 12,
-            "additivePerClean": 1
+            "cap": 40,
+            "additivePerClean": 4
         },
         "openai": {
             "$comment": "cap raised 8->32; a real key sustained conc32/128 packets, 0x429. Basis: .artifacts/vnext-gates/latency-gpt-5.6-luna-none.md (2026-07-14, gpt-5.6-luna, reasoning:none).",

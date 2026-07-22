@@ -21,6 +21,10 @@ const stubProvider = readArg("stub-provider", "compatible");
 const pipeline = readArg("pipeline", "vnext");
 const expectedPipeline = readArg("expect-pipeline");
 const screenshotArg = readArg("screenshot");
+const panelScreenshotArg = readArg("panel-screenshot");
+const viewportWidthArg = Number(readArg("viewport-width", "1280"));
+const viewportHeightArg = Number(readArg("viewport-height", "720"));
+const colorScheme = readArg("color-scheme", "light");
 const maxRequestsArg = Number(readArg("max-requests"));
 const timeoutMsArg = Number(readArg("timeout-ms"));
 const stubBaseLatencyMsArg = Number(readArg("stub-base-latency-ms"));
@@ -101,9 +105,9 @@ function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function captureScreenshot(client) {
-    if (!screenshotArg) return "";
-    const outputPath = path.resolve(screenshotArg);
+async function captureScreenshot(client, requestedPath = screenshotArg) {
+    if (!requestedPath) return "";
+    const outputPath = path.resolve(requestedPath);
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
     const result = await client.send("Page.captureScreenshot", {
         format: "png",
@@ -606,7 +610,7 @@ function fixtureHtml() {
         (_, index) => `<li>History event ${index + 1} with route information</li>`
     ).join("");
     return `<!doctype html>
-        <html lang="en"><head><meta charset="utf-8"><title>Stable browser fixture</title></head>
+        <html lang="en"><head><meta charset="utf-8"><title>Stable browser fixture</title><style>html,body{background:#fff;color:#111}</style></head>
         <body><main id="article" class="site-shell" data-owner="fixture">
             <div id="wide-menu" style="min-height:120px">Sign in now <span>Follow</span></div>
             <h1 id="title" title="Railway guide">Intercity railway guide</h1>
@@ -635,8 +639,10 @@ function fixtureHtml() {
             void (async () => {
                 const initialComplete = await waitForFixtureCondition(() => {
                     const banner = document.querySelector("#edge-translate-dom-page-banner");
-                    return banner?.shadowRoot?.querySelector("[data-role='status']")?.textContent ===
-                        "Translation complete";
+                    return (
+                        banner?.shadowRoot?.querySelector("[data-role='bar']")?.dataset.state ===
+                        "complete"
+                    );
                 });
                 if (!initialComplete) return;
                 await markFixturePhase("late-content");
@@ -731,8 +737,7 @@ async function startFixtureServer() {
         const isGeminiGeneration =
             /^\/v1beta\/models\/[^/]+:(?:generateContent|streamGenerateContent)$/.test(
                 requestUrl.pathname
-            ) &&
-            request.method === "POST";
+            ) && request.method === "POST";
         if (isCompatibleGeneration || isOpenAiGeneration || isGeminiGeneration) {
             const body = await readRequestBody(request);
             providerRequests.push(body);
@@ -960,6 +965,17 @@ async function run() {
     if (!["compatible", "openai", "gemini"].includes(stubProvider)) {
         throw new Error("--stub-provider must be compatible, openai, or gemini");
     }
+    if (!["light", "dark"].includes(colorScheme)) {
+        throw new Error("--color-scheme must be light or dark");
+    }
+    if (
+        !Number.isFinite(viewportWidthArg) ||
+        viewportWidthArg < 320 ||
+        !Number.isFinite(viewportHeightArg) ||
+        viewportHeightArg < 480
+    ) {
+        throw new Error("--viewport-width/--viewport-height must describe a usable viewport");
+    }
     if (liveMode && !process.argv.includes("--confirm-provider-cost")) {
         throw new Error("Live browser mode requires --confirm-provider-cost");
     }
@@ -1038,6 +1054,21 @@ async function run() {
         }
         pageClient = new CdpClient(pageTarget.webSocketDebuggerUrl);
         await Promise.all([pageClient.send("Runtime.enable"), pageClient.send("Page.enable")]);
+        await pageClient.send("Emulation.setDeviceMetricsOverride", {
+            width: viewportWidthArg,
+            height: viewportHeightArg,
+            screenWidth: viewportWidthArg,
+            screenHeight: viewportHeightArg,
+            deviceScaleFactor: 1,
+            // Edge Translate is a desktop browser extension. A narrow desktop viewport exercises
+            // responsive CSS without Chromium's mobile page-scale emulation shrinking pages that
+            // do not declare a mobile viewport meta tag.
+            mobile: false,
+        });
+        await pageClient.send("Emulation.setEmulatedMedia", {
+            media: "screen",
+            features: [{ name: "prefers-color-scheme", value: colorScheme }],
+        });
 
         const extensionId = await waitFor(
             () => discoverUnpackedExtensionId(profile, extensionPath),
@@ -1209,9 +1240,13 @@ async function run() {
                         const banner = document.querySelector("#edge-translate-dom-page-banner");
                         const shadow = banner?.shadowRoot;
                         return {
+                            bannerState: shadow?.querySelector("[data-role='bar']")?.dataset.state || "",
                             status: shadow?.querySelector("[data-role='status']")?.textContent || "",
                             tokens: shadow?.querySelector("[data-role='token-meta']")?.textContent || "",
-                            progress: shadow?.querySelector("[data-role='progress-meta']")?.textContent || "",
+                            progress:
+                                shadow?.querySelector("[data-role='progress-meta']")?.textContent ||
+                                shadow?.querySelector("[data-role='progress-fill']")?.style?.width ||
+                                "",
                             elementCount: document.querySelectorAll("*").length,
                             textLength: document.body?.innerText?.length || 0,
                             hrefs: Array.from(document.querySelectorAll("a[href]"), (anchor) => anchor.href).slice(0, 100)
@@ -1223,10 +1258,7 @@ async function run() {
                 state = await waitFor(
                     async () => {
                         const current = await readExternalState();
-                        const terminal =
-                            current.status === "Translation complete" ||
-                            current.status.startsWith("Translation incomplete") ||
-                            current.status.startsWith("Translation failed");
+                        const terminal = ["complete", "error"].includes(current.bannerState);
                         return terminal ? current : null;
                     },
                     {
@@ -1257,11 +1289,11 @@ async function run() {
             const pipelineMappedSnapshot = selectedProbe?.pipelineSnapshot || null;
             const pipelineStatusSnapshot = selectedProbe?.pipelineStatusSnapshot || null;
             const terminalKind =
-                state?.status === "Translation complete"
+                state?.bannerState === "complete"
                     ? "complete"
-                    : state?.status?.startsWith("Translation incomplete")
+                    : pipelineStatusSnapshot?.phase === "incomplete"
                     ? "incomplete"
-                    : state?.status?.startsWith("Translation failed")
+                    : state?.bannerState === "error"
                     ? "failed"
                     : "timeout";
             const requestCeiling =
@@ -1463,19 +1495,20 @@ async function run() {
                     const banner = document.querySelector("#edge-translate-dom-page-banner");
                     const shadow = banner?.shadowRoot;
                     return {
+                        bannerState: shadow?.querySelector("[data-role='bar']")?.dataset.state || "",
                         status: shadow?.querySelector("[data-role='status']")?.textContent || "",
                         tokens: shadow?.querySelector("[data-role='token-meta']")?.textContent || "",
-                        progress: shadow?.querySelector("[data-role='progress-meta']")?.textContent || "",
+                        progress:
+                            shadow?.querySelector("[data-role='progress-meta']")?.textContent ||
+                            shadow?.querySelector("[data-role='progress-fill']")?.style?.width ||
+                            "",
                         scrollY,
                         scrollHeight: document.documentElement.scrollHeight,
                         viewportHeight: innerHeight,
                         elementCount: document.querySelectorAll("*").length
                     };
                 })()`);
-                if (
-                    state.status === "Translation complete" ||
-                    state.status.startsWith("Translation incomplete")
-                ) {
+                if (["complete", "error"].includes(state.bannerState)) {
                     break;
                 }
                 if (state.status.startsWith("Current view translated")) {
@@ -1494,8 +1527,7 @@ async function run() {
                 await wait(1200);
             }
             assert(
-                state.status === "Translation complete" ||
-                    state.status.startsWith("Translation incomplete"),
+                ["complete", "error"].includes(state.bannerState),
                 `Live stable run did not reach a terminal state: ${JSON.stringify({
                     ...state,
                     completedSweeps,
@@ -1570,9 +1602,13 @@ async function run() {
                         shadowRoleCount: shadow?.querySelectorAll("[data-role]").length || 0,
                         shadowText: shadow?.textContent?.slice(0, 300) || "",
                         directChildren: Array.from(document.documentElement.children).map((element) => element.tagName + "#" + element.id),
+                        bannerState: shadow?.querySelector("[data-role='bar']")?.dataset.state || "",
                         status: shadow?.querySelector("[data-role='status']")?.textContent || "",
                         tokens: shadow?.querySelector("[data-role='token-meta']")?.textContent || "",
-                        progress: shadow?.querySelector("[data-role='progress-meta']")?.textContent || "",
+                        progress:
+                            shadow?.querySelector("[data-role='progress-meta']")?.textContent ||
+                            shadow?.querySelector("[data-role='progress-fill']")?.style?.width ||
+                            "",
                         href: document.querySelector("#link")?.getAttribute("href"),
                         track: document.querySelector("#link")?.getAttribute("data-track"),
                         inputValue: document.querySelector("#editor")?.value,
@@ -1594,7 +1630,7 @@ async function run() {
                             state.inputPlaceholder.includes("Find stations") &&
                             state.actionAriaLabel.startsWith("번역 ") &&
                             state.actionAriaLabel.includes("Review changes"));
-                    return state.status === "Translation complete" &&
+                    return state.bannerState === "complete" &&
                         state.late.startsWith("번역 ") &&
                         dynamicAttributesReady
                         ? state
@@ -1623,10 +1659,7 @@ async function run() {
                 const state = await readPageState();
                 // Token/request telemetry was removed from the banner header; wait on the
                 // terminal status text instead of the (now absent) usage repaint.
-                return state.status === "Translation complete" ||
-                    state.status.startsWith("Translation incomplete")
-                    ? state
-                    : null;
+                return ["complete", "error"].includes(state.bannerState) ? state : null;
             },
             { timeoutMs: 3000, label: "final banner terminal status" }
         );
@@ -1696,13 +1729,14 @@ async function run() {
         const requestsBeforeViewToggle = fixture.providerRequests.length;
         const viewToggleState = await pageClient.evaluate(`new Promise((resolve) => {
             const host = document.querySelector("#edge-translate-dom-page-banner");
-            const button = host?.shadowRoot?.querySelector("[data-action='toggle-view']");
-            const label = button?.querySelector("[data-role='view-toggle-text']");
+            const viewSwitch = host?.shadowRoot?.querySelector("[data-role='view-switch']");
+            const sourceButton = viewSwitch?.querySelector("[data-action='show-source']");
+            const translationButton = viewSwitch?.querySelector("[data-action='show-translation']");
             const lead = document.querySelector("#lead");
             const wideMenu = document.querySelector("#wide-menu");
             const action = document.querySelector("#action");
             const editor = document.querySelector("#editor");
-            if (!button || !lead || !wideMenu || !action || !editor) {
+            if (!viewSwitch || !sourceButton || !translationButton || !lead || !wideMenu || !action || !editor) {
                 resolve({ available: false });
                 return;
             }
@@ -1712,7 +1746,7 @@ async function run() {
                 aria: action.getAttribute("aria-label"),
                 placeholder: editor.getAttribute("placeholder")
             };
-            button.click();
+            sourceButton.click();
             setTimeout(() => {
                 const tooltip = document.querySelector("#edge-translate-dom-original-tooltip");
                 const source = {
@@ -1720,24 +1754,77 @@ async function run() {
                     menu: wideMenu.textContent.replace(/\\s+/g, " ").trim(),
                     aria: action.getAttribute("aria-label"),
                     placeholder: editor.getAttribute("placeholder"),
-                    label: label?.textContent || "",
+                    sourceSelected: sourceButton.getAttribute("aria-pressed") === "true",
+                    translationSelected: translationButton.getAttribute("aria-pressed") === "true",
                     tooltipVisible: tooltip?.dataset.visible === "true"
                 };
-                button.click();
+                translationButton.click();
                 setTimeout(() => resolve({
-                    available: !button.hidden,
+                    available: !viewSwitch.hidden,
                     source,
                     translation: {
                         lead: lead.textContent,
                         menu: wideMenu.textContent,
                         aria: action.getAttribute("aria-label"),
                         placeholder: editor.getAttribute("placeholder"),
-                        label: label?.textContent || ""
+                        sourceSelected: sourceButton.getAttribute("aria-pressed") === "true",
+                        translationSelected: translationButton.getAttribute("aria-pressed") === "true"
                     },
                     translated,
                     href: document.querySelector("#link")?.getAttribute("href") || ""
                 }), 50);
             }, 50);
+        })`);
+        const languageLayerState = await pageClient.evaluate(`new Promise((resolve) => {
+            const host = document.querySelector("#edge-translate-dom-page-banner");
+            const trigger = host?.shadowRoot?.querySelector(".et-lang-trigger");
+            if (!host || !trigger) {
+                resolve({ available: false });
+                return;
+            }
+            trigger.click();
+            setTimeout(() => {
+                const popover = document.querySelector(".et-lang-popover");
+                if (!popover) {
+                    resolve({ available: true, visible: false });
+                    return;
+                }
+                const rect = popover.getBoundingClientRect();
+                const point = {
+                    x: Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2)),
+                    y: Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2))
+                };
+                const topmost = document.elementFromPoint(point.x, point.y);
+                const popoverStyle = getComputedStyle(popover);
+                const ordinaryOption = popover.querySelector(".et-lang-option:not(.is-selected)");
+                resolve({
+                    available: true,
+                    visible: !popover.hidden && rect.width > 0 && rect.height > 0,
+                    nativeTopLayer: popover.matches(":popover-open"),
+                    zIndex: getComputedStyle(popover).zIndex,
+                    bannerZIndex: getComputedStyle(host).zIndex,
+                    topmost: topmost === popover || popover.contains(topmost),
+                    liquidMaterial:
+                        popoverStyle.borderRadius === "18px" &&
+                        popoverStyle.boxShadow !== "none" &&
+                        popoverStyle.backgroundColor !== "rgba(0, 0, 0, 0)",
+                    visualStyles: {
+                        opacity: popoverStyle.opacity,
+                        backgroundColor: popoverStyle.backgroundColor,
+                        optionColor: ordinaryOption ? getComputedStyle(ordinaryOption).color : "",
+                        borderRadius: popoverStyle.borderRadius,
+                        compactTriggerIcon: getComputedStyle(
+                            trigger.querySelector(".et-lang-trigger-icon")
+                        ).display
+                    },
+                    iconSystem: {
+                        trigger: Boolean(trigger.querySelector("svg.et-lang-trigger-icon")),
+                        search: Boolean(popover.querySelector("svg.et-lang-search-icon")),
+                        selected: Boolean(popover.querySelector(".et-lang-option-check.is-visible svg")),
+                        emojiFree: !popover.textContent.includes("🔍") && !trigger.textContent.includes("▾")
+                    }
+                });
+            }, 220);
         })`);
         const clicks = await pageClient.evaluate(`(() => {
             document.querySelector("#action").click();
@@ -1767,8 +1854,7 @@ async function run() {
         assert(pageState.progress === "100%", "Banner did not reach 100%");
         assert(viewToggleState.available, "Original/translation header toggle was unavailable");
         assert(
-            viewToggleState.source.lead ===
-                "Read release notes before travel. Keep a local copy.",
+            viewToggleState.source.lead === "Read release notes before travel. Keep a local copy.",
             `Source view paragraph mismatch: ${JSON.stringify(viewToggleState.source.lead)}`
         );
         assert(
@@ -1776,9 +1862,18 @@ async function run() {
             `Source view layout text mismatch: ${JSON.stringify(viewToggleState.source.menu)}`
         );
         assert(viewToggleState.source.aria === "Review changes", "Source aria-label mismatch");
-        assert(viewToggleState.source.placeholder === "Find stations", "Source placeholder mismatch");
-        assert(viewToggleState.source.label === "Translation", "Source-view button label mismatch");
-        assert(!viewToggleState.source.tooltipVisible, "Original tooltip stayed open in source view");
+        assert(
+            viewToggleState.source.placeholder === "Find stations",
+            "Source placeholder mismatch"
+        );
+        assert(
+            viewToggleState.source.sourceSelected && !viewToggleState.source.translationSelected,
+            "Source view segment selection mismatch"
+        );
+        assert(
+            !viewToggleState.source.tooltipVisible,
+            "Original tooltip stayed open in source view"
+        );
         assert(
             viewToggleState.translation.lead === viewToggleState.translated.lead &&
                 viewToggleState.translation.menu === viewToggleState.translated.menu &&
@@ -1786,8 +1881,37 @@ async function run() {
                 viewToggleState.translation.placeholder === viewToggleState.translated.placeholder,
             "Translation view did not restore the exact committed values"
         );
-        assert(viewToggleState.translation.label === "Original", "Translation-view button label mismatch");
+        assert(
+            !viewToggleState.translation.sourceSelected &&
+                viewToggleState.translation.translationSelected,
+            "Translation view segment selection mismatch"
+        );
         assert(viewToggleState.href === "/release", "View toggle changed the inline link href");
+        assert(languageLayerState.available, "Target-language picker was unavailable");
+        assert(languageLayerState.visible, "Target-language menu did not become visible");
+        assert(
+            languageLayerState.nativeTopLayer,
+            "Target-language menu did not enter the top layer"
+        );
+        assert(
+            languageLayerState.zIndex === "2147483647",
+            `Target-language menu z-index mismatch: ${languageLayerState.zIndex}`
+        );
+        assert(languageLayerState.topmost, "Target-language menu rendered behind the banner");
+        assert(languageLayerState.liquidMaterial, "Target-language menu lost its glass material");
+        assert(
+            languageLayerState.visualStyles.opacity === "1" &&
+                languageLayerState.visualStyles.optionColor ===
+                    (colorScheme === "dark" ? "rgb(245, 245, 247)" : "rgb(29, 29, 31)") &&
+                languageLayerState.visualStyles.compactTriggerIcon === "none",
+            `Target-language visual styles mismatch: ${JSON.stringify(
+                languageLayerState.visualStyles
+            )}`
+        );
+        assert(
+            Object.values(languageLayerState.iconSystem).every(Boolean),
+            `Target-language icon system mismatch: ${JSON.stringify(languageLayerState.iconSystem)}`
+        );
         assert(
             fixture.providerRequests.length === requestsBeforeViewToggle,
             "View toggle issued an unexpected provider request"
@@ -1803,9 +1927,18 @@ async function run() {
             )}`
         );
         assert(originalTooltipState.visible, "Original-text tooltip did not become visible");
-        assert(originalTooltipState.segmentCount === 2, "Translated paragraph was not sentence-wrapped");
-        assert(originalTooltipState.sentenceHighlighted, "Translated sentence was not marked on hover");
-        assert(originalTooltipState.paragraphHighlighted, "Translated paragraph was not marked on hover");
+        assert(
+            originalTooltipState.segmentCount === 2,
+            "Translated paragraph was not sentence-wrapped"
+        );
+        assert(
+            originalTooltipState.sentenceHighlighted,
+            "Translated sentence was not marked on hover"
+        );
+        assert(
+            originalTooltipState.paragraphHighlighted,
+            "Translated paragraph was not marked on hover"
+        );
         assert(
             originalTooltipState.sentenceText === "Read release notes before travel.",
             `Sentence original-text tooltip mismatch: ${JSON.stringify(
@@ -1835,9 +1968,7 @@ async function run() {
         if (requiresVnextFeatures && (stubProvider === "openai" || stubProvider === "gemini")) {
             assert(
                 fixture.providerStreamingRequests.length === fixture.providerRequests.length,
-                `${stubProvider} vNext requests did not all use streaming: ${
-                    fixture.providerStreamingRequests.length
-                }/${fixture.providerRequests.length}`
+                `${stubProvider} vNext requests did not all use streaming: ${fixture.providerStreamingRequests.length}/${fixture.providerRequests.length}`
             );
         }
         const providerRequestSummary = summarizeProviderRequests(
@@ -1945,6 +2076,10 @@ async function run() {
             observedPipeline,
             externalProviderCost: false,
             tokenAccounting: "deterministic-local-stub-estimate",
+            visualProfile: {
+                viewport: { width: viewportWidthArg, height: viewportHeightArg },
+                colorScheme,
+            },
             stubProvider,
             providerProtocol: stubProviderProtocol(stubProvider),
             observedStubProviders,
@@ -1966,6 +2101,7 @@ async function run() {
             bannerTokenText: pageState.tokens,
             status: pageState.status,
             progress: pageState.progress,
+            languageMenuLayer: languageLayerState,
             originalTooltip: originalTooltipState,
             spaLateContentTranslated: pageState.late.startsWith("번역 "),
             spaLateAttributesTranslated:
@@ -1989,6 +2125,119 @@ async function run() {
         assert(result.runtimeExceptions === 0, "Chrome reported runtime exceptions");
         const screenshot = await captureScreenshot(pageClient);
         if (screenshot) result.screenshot = screenshot;
+        if (panelScreenshotArg) {
+            await pageClient.send("Page.bringToFront");
+            await pageClient.evaluate(`(() => {
+                const roots = [document, ...Array.from(document.querySelectorAll("*")).map((host) => host.shadowRoot).filter(Boolean)];
+                for (const root of roots) {
+                    for (const trigger of root.querySelectorAll?.('.et-lang-trigger[aria-expanded="true"]') || []) {
+                        trigger.click();
+                    }
+                }
+                for (const popover of document.querySelectorAll(".et-lang-popover:popover-open")) {
+                    popover.hidePopover?.();
+                }
+            })()`);
+            await wait(350);
+            await workerClient.evaluate(`new Promise((resolve, reject) => {
+                chrome.tabs.query({}, (tabs) => {
+                    if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                    const tab = tabs.find((item) => item.url?.startsWith(${JSON.stringify(
+                        fixture.baseUrl
+                    )}));
+                    if (!tab) return reject(new Error("fixture tab not found for panel probe"));
+                    chrome.tabs.sendMessage(tab.id, JSON.stringify({
+                        type: "event",
+                        event: "translating_finished",
+                        detail: {
+                            timestamp: Date.now(),
+                            originalText: "Read release notes before travel.",
+                            mainMeaning: "여행 전에 릴리스 노트를 읽어 보세요.",
+                            sl: "en",
+                            tl: "ko",
+                            position: [96, 210]
+                        }
+                    }), () => {
+                        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                        else resolve(true);
+                    });
+                });
+            })`);
+            await wait(250);
+            await pageClient.evaluate(`dispatchEvent(new Event("resize"))`);
+            const panelFrame = await waitFor(
+                async () =>
+                    pageClient.evaluate(`(() => {
+                        const roots = Array.from(document.querySelectorAll("*")).map((host) => host.shadowRoot).filter(Boolean);
+                        const root = roots.find((candidate) => candidate.querySelector('[data-testid="Panel"]'));
+                        const panel = root?.querySelector('[data-testid="Panel"]');
+                        const more = root?.querySelector('[data-testid="MoreActions"]');
+                        const languageTrigger = root?.querySelector(".et-lang-trigger");
+                        if (!panel || !more || !languageTrigger) return null;
+                        if (!more.open) more.querySelector("summary")?.click();
+                        const rect = panel.getBoundingClientRect();
+                        return {
+                            panelVisible: rect.width > 0 && rect.height > 0,
+                            panelRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                            inlineOpacity: panel.style.opacity,
+                            inlineTransform: panel.style.transform,
+                            computedTransform: getComputedStyle(panel).transform,
+                            moreOpen: more.open,
+                            actionTags: ["SettingIcon", "PinIcon", "CloseIcon"].map(
+                                (id) => root.querySelector('[data-testid="' + id + '"]')?.tagName || ""
+                            ),
+                            pinPressed: root.querySelector('[data-testid="PinIcon"]')?.hasAttribute("aria-pressed") || false
+                        };
+                    })()`),
+                { timeoutMs: 5000, label: "translation panel frame probe" }
+            );
+            assert(panelFrame.panelVisible, "Translation result panel did not become visible");
+            assert(panelFrame.moreOpen, "Translation panel overflow actions did not open");
+            assert(
+                panelFrame.actionTags.every((tag) => tag === "BUTTON"),
+                `Translation panel actions are not native buttons: ${panelFrame.actionTags.join(
+                    ","
+                )}`
+            );
+            assert(
+                panelFrame.pinPressed,
+                "Translation panel pin action lost pressed-state semantics"
+            );
+            result.panelScreenshot = await captureScreenshot(pageClient, panelScreenshotArg);
+            const panelLayer = await pageClient.evaluate(`new Promise((resolve) => {
+                        const roots = Array.from(document.querySelectorAll("*")).map((host) => host.shadowRoot).filter(Boolean);
+                        const root = roots.find((candidate) => candidate.querySelector('[data-testid="Panel"]'));
+                        const languageTrigger = root?.querySelector(".et-lang-trigger");
+                        if (!languageTrigger) {
+                            resolve(null);
+                            return;
+                        }
+                        languageTrigger.click();
+                        setTimeout(() => {
+                            const popover = document.querySelector(".et-lang-popover:popover-open");
+                            const rect = popover?.getBoundingClientRect();
+                            const topmost = rect
+                                ? document.elementFromPoint(
+                                      Math.min(innerWidth - 1, rect.left + rect.width / 2),
+                                      Math.min(innerHeight - 1, rect.top + rect.height / 2)
+                                  )
+                                : null;
+                            resolve({
+                                languageMenuVisible: Boolean(popover && rect?.width > 0 && rect?.height > 0),
+                                languageMenuTopmost: Boolean(popover && (topmost === popover || popover.contains(topmost))),
+                                languageMenuNativeTopLayer: Boolean(popover?.matches(":popover-open"))
+                            });
+                        }, 220);
+                    })`);
+            const panelUi = { ...panelFrame, ...panelLayer };
+            assert(
+                panelUi.languageMenuVisible &&
+                    panelUi.languageMenuTopmost &&
+                    panelUi.languageMenuNativeTopLayer,
+                `Translation panel language menu layering failed: ${JSON.stringify(panelUi)}`
+            );
+            result.panelUi = panelUi;
+        }
         console.log(JSON.stringify(result, null, 2));
     } finally {
         pageClient?.close();

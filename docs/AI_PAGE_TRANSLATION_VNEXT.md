@@ -131,7 +131,7 @@ source와 같은 상대 순서와 nesting으로 정확히 한 번 나와야 하�
 그 atomic 결과까지 검증되지 않을 때만 `inline-order`/`atomic-invalid`로 원문을 유지한다. styling-only
 wrapper는 interactive 경로와 달리 안전한 flatten 대상이 될 수 있다.
 
-## 6. pt3 / pt3-2 provider 계약
+## 6. pt3 / pt3-3 provider 계약
 
 모든 provider가 동일한 ID-object payload를 사용한다.
 
@@ -149,7 +149,7 @@ wrapper는 interactive 경로와 달리 안전한 flatten 대상이 될 수 있�
 { "x": [{ "i": "0", "t": "요도야바시역에서 <g1>산조역</g1>까지를 잇는다." }] }
 ```
 
-wire version은 `pt3`, 현재 prompt/cache identity는 `pt3-2`다. `pt3-2` system prompt는 URL,
+wire version은 `pt3`, 현재 prompt/cache identity는 `pt3-3`다. `pt3-3` system prompt는 URL,
 email address, code span, identifier, numeric value를 byte-for-byte 보존하고 그 주변의 일반 문장과
 unit name만 자연스럽게 번역하도록 요구한다. 이 protected-value 계약은 prompt만 믿지 않고 client
 validator가 다시 검사한다.
@@ -170,29 +170,40 @@ Provider별 실제 adapter:
 
 -   OpenAI: Responses API, strict `text.format` JSON Schema, `truncation:"disabled"`;
     terminal `status==="completed"`와 refusal 부재를 확인한다.
--   Google AI Studio: Gemini `generateContent`, `responseJsonSchema`;
-    candidate의 terminal `finishReason==="STOP"`과 prompt block 부재를 확인한다.
+-   Google AI Studio: Gemini `streamGenerateContent?alt=sse`, `responseJsonSchema`;
+    완결 ID를 스트림에서 먼저 적용하고 candidate의 terminal `finishReason==="STOP"`과 prompt
+    block 부재를 확인한다. `countTokens`와 model metadata로 packet budget을 보정한다.
 -   OpenAI-compatible: `/chat/completions`, 가능한 structured-output mode를 사용하고
     code fence/완결된 `<think>` wrapper만 보수적으로 벗긴 뒤 같은 ID validator를 거친다.
 
-reasoning/thinking은 model family가 허용하는 최저값으로 줄인다. 지원하지 않는 parameter는
-검증된 capability downgrade 한 번만 허용하며, 그 밖의 unsupported capability는 session
-error다.
+reasoning/thinking은 model family가 허용하는 최저값으로 줄인다. Gemini 3 Flash/Flash-Lite는
+`thinkingLevel:"minimal"`, Gemini 3 Pro는 `"low"`, Gemini 2.5 Flash 계열은
+`thinkingBudget:0`, Gemini 2.5 Pro는 허용 최저값 `128`을 사용한다. Gemini 3에는 Google
+권고대로 temperature/top-p/top-k를 보내지 않는다. OpenAI reasoning 또는 Gemini thinking
+parameter가 거부되면 미해결 item만 해당 필드 없이 한 번 재시도하며, 그 밖의 unsupported
+capability는 session error다.
+
+Google 계약 근거는 [Gemini thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking),
+[streamGenerateContent](https://ai.google.dev/api/generate-content),
+[rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)다. Gemini quota는 API key가 아니라
+project 단위이며 model과 usage tier에 따라 달라진다. 현재 제품 설정은 speed 우선 선택에 따라
+OpenAI와 같은 40을 먼저 시도하되, 실제 한계가 더 낮으면 429/5xx 피드백으로 자동 감속한다.
 
 ## 7. Packet sizing과 capability 정책
 
-현재 active `drain` cap은 다음 네 조건을 **동시에** 만족한다.
+현재 active `drain`은 provider를 바꿔도 속도 전략이 달라지지 않도록 OpenAI와 Google AI
+Studio에 같은 packet/concurrency profile을 적용한다.
 
-| 경계                      |                      값 |
-| ------------------------- | ----------------------: |
-| semantic item             |                      96 |
-| source chars              |                   8,000 |
-| estimated output          |            4,000 tokens |
-| requested output headroom | estimated output × 1.25 |
+| provider                  | semantic items | source chars | estimated output | concurrency |
+| ------------------------- | -------------: | -----------: | ---------------: | ----------: |
+| OpenAI                    |             16 |        2,400 |     1,000 tokens |          40 |
+| Google AI Studio          |             16 |        2,400 |     1,000 tokens |          40 |
+| OpenAI-compatible/unknown |             16 |        2,400 |     1,000 tokens |         4/4 |
 
-OpenAI/Gemini delivery ceiling은 128 items, OpenAI-compatible은 32 items다. 따라서 active
-96-item cap은 official cloud provider에서 item ceiling보다 먼저 걸리고, compatible에서는
-32가 먼저 걸린다. 큰 단일 block은 sentence/whitespace 경계로 chunk하되 모든 chunk가
+모든 provider는 estimated output의 1.25배 feasibility reserve, context 90% 안전선, provider
+output ceiling을 함께 만족해야 한다. OpenAI/Gemini delivery ceiling은 128 items,
+OpenAI-compatible은 32 items다. 큰 단일 block은
+sentence/whitespace 경계로 chunk하되 모든 chunk가
 검증되어야 원래 target에 한 번 commit한다. inline placeholder inventory를 안전하게 나눌 수
 없는 긴 block은 tag 중간을 억지로 자르지 않고 per-Text atomic 경로로 degrade한다.
 
@@ -206,10 +217,10 @@ dispatch 순서는 scheduler가 현재 limiter 상태에 따라 별도로 정한
     시작한다(SPT). 짧은 clean completion으로 concurrency slot을 빨리 열기 위해서다.
 -   cap에 도달한 뒤에는 estimated output이 큰 packet부터 시작한다(LPT). 긴 generation 하나가
     full-page drain의 마지막 꼬리로 남는 것을 줄인다.
--   OpenAI/Gemini는 현재 congestion epoch의 clean completion마다 concurrency를 1씩 올리고,
-    OpenAI-compatible은 clean completion 4개마다 1씩 올린다. provider별
-    `(start, floor, cap)`은 각각 Google AI Studio `(4, 1, 12)`, OpenAI `(3, 1, 8)`,
-    OpenAI-compatible `(2, 1, 4)`다.
+-   공식 cloud provider는 cap을 첫 wave부터 채우는 speed mode로 시작한다. provider별
+    `(start, floor, cap)`은 Google AI Studio와 OpenAI 모두 `(40, 1, 40)`, OpenAI-compatible은
+    `(2, 1, 4)`다. congestion 감소 뒤 current-epoch clean completion은 Google/OpenAI `+4`,
+    compatible은 네 번당 `+1`로 cap까지 복구한다.
 -   429 또는 5xx congestion signal은 해당 key의 epoch를 올리고 concurrency를 0.5배로 줄인다.
     감소 전에 시작한 in-flight request의 뒤늦은 성공은 stale ACK라서 줄어든 concurrency를 즉시
     다시 올리지 못한다.
@@ -389,11 +400,11 @@ npm run smoke:ai-page:default:chrome -- --expect-pipeline=vnext
 npm run smoke:ai-page:stable:chrome -- --expect-pipeline=stable
 ```
 
-2026-07-13 현재 작업 트리 검증 snapshot:
+2026-07-15 현재 작업 트리 검증 snapshot:
 
 -   Chrome production build: PASS
--   EdgeTranslate: 53 suites / 972 tests PASS
--   translators: 11 suites / 178 tests PASS
+-   EdgeTranslate: 44 suites / 934 tests PASS
+-   translators: 11 suites / 185 tests PASS
 -   default pipeline smoke: observed `vnext`, 8 requests
     (initial 6 + late content 1 + late attribute 1), failed/recovery 0
 -   explicit stable smoke: observed `stable`, 5 requests, failed 0
@@ -413,21 +424,24 @@ npm run smoke:ai-page:vnext:wikipedia:gemini
 
 | 항목                         | OpenAI-shaped stub | Gemini-shaped stub |
 | ---------------------------- | -----------------: | -----------------: |
-| baseline generation requests |                 27 |                 27 |
+| baseline generation requests |                174 |                167 |
 | translated targets           |      2,004 / 2,004 |      2,004 / 2,004 |
 | failed / recovery requests   |              0 / 0 |              0 / 0 |
-| unique provider items        |              1,697 |              1,697 |
-| source chars                 |            116,501 |            116,501 |
+| unique provider items        |              1,700 |              1,699 |
+| source chars                 |            115,638 |            115,638 |
 | preserved anchors            |                100 |                100 |
 | runtime exceptions           |                  0 |                  0 |
-| synthetic usage              |             98,189 |             98,244 |
+| synthetic usage              |            165,707 |            162,224 |
 
 마지막 usage 두 값은 stub가 회계 경로를 검증하려고 만든 **합성 수치**다. 실제 OpenAI/Gemini
-tokenizer, 품질, 속도, 과금 근거가 아니다. 반대로 27 requests, target/anchor/exception 수는
-실제 페이지 DOM과 production collector/planner/adapter path의 구조 검증 결과다.
-두 script의 30-request 상한은 **이 京阪本線 regression fixture의 회귀 ceiling**이다. 임의의
-모든 페이지를 30 requests 이하로 번역한다는 global 제품 보장이 아니며, 더 큰 eligible
-document는 입력/출력/item ceiling을 지키기 위해 30을 넘을 수 있다.
+tokenizer, 품질, 속도, 과금 근거가 아니다. 반대로 request/target/anchor/exception 수는 실제
+페이지 DOM과 production collector/planner/adapter path의 구조 검증 결과다. 현재 두 provider는
+같은 16-item / 2.4K-char / 1K-est-out / 40-way profile을 사용한다. OpenAI estimator에는
+provider-specific 60-token incidental reserve가 있어 같은 hard cap 안에서도 일부 packet이 더
+보수적으로 나뉘므로 request 수가 완전히 같지는 않다. 두 실행의 실패·복구 요청은 0이었다.
+현재 두 script는 동일한 small-packet speed profile과 runaway 방지용 `260` request ceiling을
+사용한다. 이는 실제 목표 request 수가 아니라 이 京阪本線 fixture가 무한 분할되지 않는지
+검증하는 안전 상한이다.
 
 ### 12.1 Deterministic latency scheduler smoke
 
@@ -457,8 +471,8 @@ stub가 JSON byte length를 4로 나눠 올림한 결정론적 합성값이다. 
 있음을 함께 보여 주는 재확인 값이다.
 
 별도의 production-session 회귀는 5,282개 inline span을 하나의 실제 semantic block으로
-수집·직렬화해 provider 경로까지 보낸다. 현재 계측은 22 packets / 23 balanced chunk items,
-atomic fallback 없음이며 제품 계약은 미세한 packing 변경에 덜 취약한 `<=30 requests`,
+수집·직렬화해 provider 경로까지 보낸다. 공유 small-packet profile에서 Google은 96 balanced
+packets, atomic fallback 0이며 제품 계약은 16 items / 2.4K chars / 1K est-out cap,
 placeholder balance, 원래 DOM identity 보존으로 고정한다.
 
 ## 13. Gate 상태와 남은 일

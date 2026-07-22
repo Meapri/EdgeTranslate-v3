@@ -37,9 +37,10 @@ describe("DOM page translation banner", () => {
         };
         global.cancelAnimationFrame = jest.fn();
         chrome.storage.sync.set.mockClear();
+        chrome.i18n.getMessage.mockReset();
     });
 
-    it("shows a compact Material-style top banner for AI page translation progress", async () => {
+    it("shows a compact Liquid Glass top banner for AI page translation progress", async () => {
         const controller = new BannerController();
         controller._domPageTranslateOptions = {
             engine: "openai",
@@ -82,7 +83,7 @@ describe("DOM page translation banner", () => {
             },
         });
         controller.markDomPageTranslationEntriesCompleted(2);
-        expect(banner.shadowRoot.textContent).toContain("2 of 3 sections translated");
+        expect(banner.shadowRoot.textContent).toContain("2 / 3 translated");
         // Token/request telemetry was removed from the header (decluttered) — no token-meta node.
         expect(banner.shadowRoot.querySelector("[data-role='token-meta']")).toBeNull();
         expect(banner.shadowRoot.querySelector("[data-role='progress-meta']").textContent).toBe(
@@ -91,6 +92,29 @@ describe("DOM page translation banner", () => {
         expect(banner.shadowRoot.querySelector("[data-role='progress-fill']").style.width).toBe(
             "67%"
         );
+    });
+
+    it("keeps live status separate from localized interactive controls", async () => {
+        const controller = new BannerController();
+        controller._domPageTranslateOptions = {
+            engine: "openai",
+            model: "gpt-5.4-mini",
+            sl: "en",
+            tl: "ko",
+        };
+        controller.currentTranslator = "dom";
+        controller.showDomPageBanner();
+        await Promise.resolve();
+
+        const root = document.getElementById("edge-translate-dom-page-banner").shadowRoot;
+        expect(root.querySelector("[data-role='bar']").getAttribute("role")).toBe("region");
+        expect(root.querySelector("[data-role='status']").getAttribute("role")).toBe("status");
+        expect(root.querySelector("[data-role='status']").getAttribute("aria-live")).toBe("polite");
+        expect(root.querySelector("[data-action='hide']").getAttribute("aria-label")).toBe(
+            "Hide translation bar"
+        );
+        expect(root.querySelector("[data-action='show-source']").tagName).toBe("BUTTON");
+        expect(root.querySelector("[data-action='show-translation']").tagName).toBe("BUTTON");
     });
 
     it("does not let an already queued banner paint overwrite an explicit startup error", () => {
@@ -151,7 +175,7 @@ describe("DOM page translation banner", () => {
 
         expect(refs.querySelector("[data-role='bar']").dataset.state).toBe("complete");
         expect(refs.querySelector("[data-role='status']").textContent).toBe("Translation complete");
-        expect(refs.querySelector("[data-role='progress-meta']").textContent).toBe("100%");
+        expect(refs.querySelector("[data-role='progress-meta']").textContent).toBe("");
 
         controller._domCoverageStableScanCount = 1;
         controller.updateDomPageBannerStatus();
@@ -180,7 +204,7 @@ describe("DOM page translation banner", () => {
 
         expect(refs.querySelector("[data-role='bar']").dataset.state).toBe("running");
         expect(refs.querySelector("[data-role='status']").textContent).toBe(
-            "1 of 1 sections translated"
+            "1 / 1 translated"
         );
 
         controller._domActiveTranslations = 0;
@@ -189,7 +213,7 @@ describe("DOM page translation banner", () => {
 
         expect(refs.querySelector("[data-role='bar']").dataset.state).toBe("error");
         expect(refs.querySelector("[data-role='status']").textContent).toBe(
-            "Translation incomplete (1 section failed)"
+            "Translation incomplete (1 item failed)"
         );
         expect(refs.querySelector("[data-role='progress-meta']").textContent).toBe("Partial");
     });
@@ -1383,9 +1407,7 @@ describe("DOM page translation banner", () => {
         expect(menu.nextElementSibling.getAttribute("data-action")).toBe("hide");
         // Opening it shows the current target language as the selected option.
         controller._domBannerLangMenu.open();
-        const selected = document.body.querySelector(
-            ".et-lang-popover .et-lang-option.is-selected"
-        );
+        const selected = document.querySelector(".et-lang-popover .et-lang-option.is-selected");
         expect(selected.dataset.value).toBe("ko");
         controller._domBannerLangMenu.destroy();
     });

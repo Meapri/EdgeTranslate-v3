@@ -92,7 +92,7 @@ function setup(adapterOverrides = {}, profileOverrides = {}, transportOverrides 
     };
     const transport = new AiPageTranslationTransport({
         resolveProfile: jest.fn().mockResolvedValue(profile),
-        adapters: new Map([["openai-responses", adapter]]),
+        adapters: new Map([[profile.protocol, adapter]]),
         ...transportOverrides,
     });
     return { transport, adapter, profile };
@@ -654,6 +654,30 @@ describe("vNext AI page translation background transport", () => {
         });
 
         expect(adapter.executeOnce).toHaveBeenCalledTimes(1);
+        const [attemptProfile, adapterRequest] = adapter.executeOnce.mock.calls[0];
+        expect(attemptProfile).not.toBe(profile);
+        expect(attemptProfile.reasoningControl).toBe("none");
+        expect(attemptProfile.reasoningValue).toBeUndefined();
+        expect(adapterRequest.hint).toBeUndefined();
+        expect(profile).toEqual(originalProfile);
+    });
+
+    it("uses the same ephemeral reasoning-none profile for Gemini thinking downgrade", async () => {
+        const { transport, adapter, profile } = setup(
+            {},
+            {
+                protocol: "gemini-generate-content",
+                modelId: "gemini-3.5-flash",
+                reasoningControl: "thinking-config",
+                reasoningValue: "minimal",
+            }
+        );
+        const originalProfile = { ...profile };
+
+        await transport.translate(packet({ hint: "capability-drop-reasoning" }), {
+            tab: { id: 7 },
+        });
+
         const [attemptProfile, adapterRequest] = adapter.executeOnce.mock.calls[0];
         expect(attemptProfile).not.toBe(profile);
         expect(attemptProfile.reasoningControl).toBe("none");

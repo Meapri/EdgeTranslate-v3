@@ -2,6 +2,7 @@ import { LANGUAGES } from "@edge_translate/translators";
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 import createLanguageMenu from "common/scripts/language_menu.js";
+import { EDGE_UI } from "common/scripts/ui_design_tokens.js";
 import { isNativePdfDocument } from "./common.js";
 import {
     toChromeTranslatorLanguage,
@@ -42,6 +43,22 @@ const AI_PAGE_SEGMENT_PROTOCOL_VERSION = "seg-v6-semantic";
 const PAGE_TRANSLATOR_MODE_ATTRIBUTE = "data-edge-translate-page-translator";
 const GOOGLE_PAGE_TRANSLATOR_CONTROL_TYPE = "edge_translate_page_translate_control";
 const GOOGLE_PAGE_TRANSLATOR_STOP_TIMEOUT_MS = 100;
+
+function getUiMessage(key, substitutions, fallback = "") {
+    try {
+        const i18n = typeof chrome !== "undefined" ? chrome.i18n : null;
+        const message =
+            typeof i18n?.getMessage === "function"
+                ? substitutions === undefined
+                    ? i18n.getMessage(key)
+                    : i18n.getMessage(key, substitutions)
+                : "";
+        if (message) return message;
+    } catch {
+        /* Chrome i18n is unavailable in a few test/sandbox contexts. */
+    }
+    return typeof fallback === "function" ? fallback() : fallback;
+}
 const AI_PAGE_CONTEXTUAL_SEGMENT_ROLES = new Set([
     "caption",
     "date",
@@ -10466,7 +10483,7 @@ class BannerController {
                     :host {
                         color-scheme: light dark;
                         /* Apple single accent: Action Blue (#0066cc), Sky Blue on dark. */
-                        --et-primary: light-dark(#0066cc, #2997ff);
+                        --et-primary: light-dark(${EDGE_UI.color.accentLight}, ${EDGE_UI.color.accentDark});
                         --et-on-primary: #ffffff;
                         --et-primary-container: light-dark(rgba(0, 102, 204, 0.12), rgba(41, 151, 255, 0.20));
                         --et-on-primary-container: light-dark(#0066cc, #cce4ff);
@@ -10484,21 +10501,21 @@ class BannerController {
                         --et-glass-outline: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.10));
                         --et-specular: light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.18));
                         --et-surface-container: light-dark(rgba(255, 255, 255, 0.55), rgba(60, 60, 67, 0.40));
-                        --et-text: light-dark(#1d1d1f, #f2f2f7);
+                        --et-text: light-dark(${EDGE_UI.color.textLight}, ${EDGE_UI.color.textDark});
                         --et-muted: light-dark(#6e6e73, #aeaeb2);
                         --et-success: light-dark(#34c759, #30d158);
                         --et-error: light-dark(#ff3b30, #ff453a);
                         --pulse-color: color-mix(in oklab, var(--et-primary) 36%, transparent);
                         --et-progress-track: light-dark(rgba(120, 120, 128, 0.16), rgba(120, 120, 128, 0.32));
                         /* Apple card radius (DESIGN.md lg = 18px). */
-                        --et-radius: 18px;
+                        --et-radius: ${EDGE_UI.radius.surface};
                         /* iOS-18 elevation: soft, layered, never heavy. */
                         --et-elevation: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
                         --et-elevation-hover: 0 14px 36px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.08);
                         /* Spotlight enter/exit — byte-identical to the result panel's
                            MotionFloatingSpotlightIn / MotionFloatingSpotlightOut. */
-                        --et-spotlight-in: 210ms cubic-bezier(0.2, 0, 0, 1);
-                        --et-spotlight-out: 170ms cubic-bezier(0.32, 0, 0.67, 0);
+                        --et-spotlight-in: ${EDGE_UI.motion.spotlightIn};
+                        --et-spotlight-out: ${EDGE_UI.motion.spotlightOut};
                         /* Soft spring for micro-interactions. */
                         --ios-spring-soft: linear(0, 0.018 1.4%, 0.075 3.2%, 0.183 5.7%, 0.351 8.9%, 0.554 13.2%, 0.762 18.6%, 0.929 25.4%, 1.033 33.2%, 1.077 42.2%, 1.066 53.8%, 1.025 68%, 1.005 81.6%, 1);
                         --ios-glide: linear(0, 0.009, 0.035 2.1%, 0.078 3.6%, 0.182 6.7%, 0.323 10.5%, 0.496 14.9%, 0.679 19.8%, 0.84 25.4%, 0.937 31.5%, 0.984 38.3%, 1);
@@ -10569,7 +10586,6 @@ class BannerController {
                     }
                     .bar > * { position: relative; z-index: 1; }
                     .bar:hover {
-                        transform: translateY(-2px);
                         background: var(--et-glass-base-hover);
                         box-shadow:
                             inset 0 1px 0 var(--et-glass-edge-top),
@@ -10723,7 +10739,7 @@ class BannerController {
                     }
                     /* Target-language picker — reuse the shared menu but reshape the trigger to
                        match the bar's Liquid Glass capsules (the popover renders in the page body
-                       and keeps the menu's own Material card look). */
+                       and keeps the shared Liquid Glass treatment). */
                     .actions .et-lang-menu {
                         width: auto;
                         flex: 0 0 auto;
@@ -10754,7 +10770,8 @@ class BannerController {
                         color: var(--et-primary);
                         box-shadow: 0 0 0 2px var(--et-primary-container);
                     }
-                    .actions .et-lang-trigger-chevron { font-size: 10px; }
+                    .actions .et-lang-trigger-icon { display: none; }
+                    .actions .et-lang-trigger-chevron { width: 12px; height: 12px; }
                     .progress-meta {
                         min-width: 36px;
                         box-sizing: border-box;
@@ -10824,23 +10841,55 @@ class BannerController {
                         fill: currentColor;
                     }
                     button:hover {
-                        transform: translateY(-0.5px) scale(1.06);
+                        transform: none;
                         background: light-dark(rgba(255, 255, 255, 0.78), rgba(72, 72, 74, 0.70));
                     }
-                    /* Squish on press — non-uniform scale gives a gummy press feel. */
                     button:active {
-                        transform: scale(0.92, 1.04);
-                        transition-duration: 120ms;
+                        transform: scale(0.97);
+                        transition-duration: ${EDGE_UI.motion.press};
+                    }
+                    button:focus-visible {
+                        outline: none;
+                        box-shadow: 0 0 0 3px var(--et-primary-container);
                     }
                     button:disabled {
                         cursor: progress;
                         opacity: 0.55;
                         transform: none;
                     }
-                    .view-toggle[hidden] { display: none !important; }
-                    .view-toggle[aria-pressed="true"] {
+                    .view-switch {
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 2px;
+                        height: 32px;
+                        padding: 3px;
+                        border-radius: 16px;
+                        background: var(--et-surface-container);
+                        box-shadow:
+                            0 0.5px 0 light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08)) inset,
+                            0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
+                    }
+                    .view-switch[hidden] { display: none !important; }
+                    .view-option {
+                        height: 26px;
+                        min-width: 44px;
+                        padding: 0 9px;
+                        border-radius: 13px;
+                        background: transparent;
+                        box-shadow: none;
+                        color: var(--et-muted);
+                        font-size: 11px;
+                    }
+                    .view-option:hover {
+                        transform: none;
+                        background: light-dark(rgba(255, 255, 255, 0.48), rgba(72, 72, 74, 0.46));
+                    }
+                    .view-option[aria-pressed="true"] {
                         color: var(--et-primary);
-                        background: var(--et-primary-container);
+                        background: light-dark(rgba(255, 255, 255, 0.88), rgba(72, 72, 74, 0.82));
+                        box-shadow:
+                            0 1px 3px rgba(0, 0, 0, 0.10),
+                            0 0 0 0.5px light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.10));
                     }
                     .close {
                         color: var(--et-muted);
@@ -10851,10 +10900,6 @@ class BannerController {
                     }
                     .close:hover {
                         color: var(--et-text);
-                        transform: rotate(90deg) scale(1.12);
-                    }
-                    .close:active {
-                        transform: rotate(180deg) scale(0.88);
                     }
                     .progress {
                         position: absolute;
@@ -10926,6 +10971,11 @@ class BannerController {
                     .bar[data-state="complete"] .progress-fill {
                         background: linear-gradient(90deg, var(--et-success), color-mix(in oklab, var(--et-success) 70%, white));
                         box-shadow: 0 0 8px color-mix(in oklab, var(--et-success) 40%, transparent);
+                    }
+                    .bar[data-state="complete"] .progress,
+                    .bar[data-state="complete"] .progress-meta {
+                        opacity: 0;
+                        pointer-events: none;
                     }
                     /* Restore floater — mini Liquid Glass pill that lives at the top
                        when the banner is hidden. */
@@ -11027,6 +11077,24 @@ class BannerController {
                             box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.45) inset, 0 0 0 0px transparent, 0 0 4px var(--pulse-color);
                         }
                     }
+                    @media (max-width: 980px) {
+                        .bar {
+                            gap: 10px;
+                            padding-left: 14px;
+                            padding-right: 10px;
+                        }
+                        .title { display: none; }
+                        .model { max-width: 116px; }
+                        .status { max-width: 28vw; }
+                        .hide .button-text { display: none; }
+                        .hide { width: 32px; padding: 0; }
+                    }
+                    @media (max-width: 760px) {
+                        .bar { margin-left: 10px; margin-right: 10px; }
+                        .model { display: none; }
+                        .status { max-width: 30vw; }
+                        .view-option { min-width: 40px; padding-left: 7px; padding-right: 7px; }
+                    }
                     @media (max-width: 640px) {
                         .bar {
                             margin: 8px 8px;
@@ -11034,12 +11102,14 @@ class BannerController {
                             padding-left: 12px;
                             padding-right: 8px;
                         }
-                        .provider { max-width: 100px; }
-                        .model { max-width: 100px; }
-                        .status { max-width: 32vw; }
+                        .provider { max-width: 36px; padding-left: 7px; padding-right: 7px; }
+                        .provider span { display: none; }
+                        .status { max-width: 26vw; }
                         .token-meta { max-width: 100px; }
                         .progress-meta { display: none; }
-                        .hide .button-text { display: none; }
+                        .actions { gap: 4px; }
+                        .actions .et-lang-trigger { max-width: 96px; padding-left: 8px; padding-right: 8px; }
+                        .view-option { min-width: 38px; padding-left: 6px; padding-right: 6px; }
                     }
                     @media (prefers-reduced-motion: reduce) {
                         .progress-fill,
@@ -11067,34 +11137,33 @@ class BannerController {
                         }
                     }
                 </style>
-                <div class="bar" role="status" aria-live="polite" data-role="bar">
+                <div class="bar" role="region" aria-labelledby="edge-translate-page-title" data-role="bar">
                     <div class="main">
                         <span class="status-dot" aria-hidden="true"></span>
                         <div class="text">
                             <div class="summary">
-                                <span class="title" data-role="title">AI Page Translation</span>
+                                <span class="title" id="edge-translate-page-title" data-role="title"></span>
                                 <span class="provider" data-role="engine"></span>
                                 <span class="model" data-role="model"></span>
                             </div>
-                            <span class="status" data-role="status"></span>
+                            <span class="status" role="status" aria-live="polite" aria-atomic="true" data-role="status"></span>
                         </div>
                     </div>
                     <div class="actions">
                         <span class="progress-meta" data-role="progress-meta"></span>
-                        <button type="button" class="view-toggle" data-action="toggle-view"
-                                aria-label="Show original page" aria-pressed="false" hidden>
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M7.5 5h10v3l4-4-4-4v3h-12v7h2V5Zm9 14h-10v-3l-4 4 4 4v-3h12v-7h-2v5Z" />
-                            </svg>
-                            <span class="button-text" data-role="view-toggle-text">Original</span>
-                        </button>
-                        <button type="button" class="hide" data-action="hide" aria-label="Hide translation bar">
+                        <div class="view-switch" role="group" data-role="view-switch" hidden>
+                            <button type="button" class="view-option" data-action="show-translation"
+                                    aria-pressed="true" data-role="translation-view-label"></button>
+                            <button type="button" class="view-option" data-action="show-source"
+                                    aria-pressed="false" data-role="source-view-label"></button>
+                        </div>
+                        <button type="button" class="hide" data-action="hide">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M2.1 3.51 3.51 2.1 21.9 20.49l-1.41 1.41-3.08-3.08A11.46 11.46 0 0 1 12 20C7 20 2.73 16.89 1 12.5a11.82 11.82 0 0 1 4.2-5.34L2.1 3.51Zm5.66 6.25A4.68 4.68 0 0 0 7.5 12a4.5 4.5 0 0 0 4.5 4.5c.78 0 1.51-.2 2.15-.55l-1.69-1.69a2.48 2.48 0 0 1-2.72-2.72L7.76 9.76ZM12 5c5 0 9.27 3.11 11 7.5a11.7 11.7 0 0 1-3.18 4.35l-2.84-2.84c.33-.61.52-1.29.52-2.01A4.5 4.5 0 0 0 12 7.5c-.72 0-1.4.19-2.01.52L7.82 5.85A11.57 11.57 0 0 1 12 5Zm0 4.5A2.5 2.5 0 1 1 14.5 12c0 .16-.02.32-.05.47L11.53 9.55c.15-.03.31-.05.47-.05Z" />
                             </svg>
-                            <span class="button-text">Hide</span>
+                            <span class="button-text" data-role="hide-label"></span>
                         </button>
-                        <button type="button" class="close" data-action="close" aria-label="Close translation">
+                        <button type="button" class="close" data-action="close">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M18.3 5.71 16.89 4.3 12 9.17 7.11 4.3 5.7 5.71 10.59 10.6 5.7 15.49l1.41 1.41L12 12.03l4.89 4.87 1.41-1.41-4.89-4.89 4.89-4.89Z" />
                             </svg>
@@ -11108,18 +11177,66 @@ class BannerController {
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 5c5 0 9.27 3.11 11 7.5C21.27 16.89 17 20 12 20S2.73 16.89 1 12.5C2.73 8.11 7 5 12 5Zm0 2C8.29 7 5.11 9.1 3.18 12.5 5.11 15.9 8.29 18 12 18s6.89-2.1 8.82-5.5C18.89 9.1 15.71 7 12 7Zm0 1.5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
                     </svg>
-                    <span>Show translation</span>
+                    <span data-role="restore-label"></span>
                 </button>
             `;
+            root.querySelector("[data-role='title']").textContent = getUiMessage(
+                "AIPageTranslationTitle",
+                undefined,
+                "AI Page Translation"
+            );
+            const viewSwitch = root.querySelector("[data-role='view-switch']");
+            viewSwitch.setAttribute(
+                "aria-label",
+                getUiMessage("AIPageViewMode", undefined, "Page view")
+            );
+            root.querySelector("[data-role='translation-view-label']").textContent = getUiMessage(
+                "AIPageTranslationView",
+                undefined,
+                "Translation"
+            );
+            root.querySelector("[data-role='source-view-label']").textContent = getUiMessage(
+                "AIPageOriginalView",
+                undefined,
+                "Original"
+            );
+            const hideButton = root.querySelector("[data-action='hide']");
+            hideButton.setAttribute(
+                "aria-label",
+                getUiMessage("AIPageHideBar", undefined, "Hide translation bar")
+            );
+            root.querySelector("[data-role='hide-label']").textContent = getUiMessage(
+                "AIPageHide",
+                undefined,
+                "Hide"
+            );
+            const closeButton = root.querySelector("[data-action='close']");
+            closeButton.setAttribute(
+                "aria-label",
+                getUiMessage("AIPageClose", undefined, "Close translation")
+            );
+            const restoreButton = root.querySelector("[data-action='show']");
+            restoreButton.setAttribute(
+                "aria-label",
+                getUiMessage("AIPageShowBar", undefined, "Show translation bar")
+            );
+            root.querySelector("[data-role='restore-label']").textContent = getUiMessage(
+                "AIPageShow",
+                undefined,
+                "Show translation"
+            );
             root.querySelector("[data-action='hide']").addEventListener("click", () => {
                 this.setDomPageBannerVisible(false);
             });
             root.querySelector("[data-action='show']").addEventListener("click", () => {
                 this.setDomPageBannerVisible(true);
             });
-            root.querySelector("[data-action='toggle-view']").addEventListener("click", () => {
-                this.toggleDomPageTranslationView();
-            });
+            root.querySelector("[data-action='show-translation']").addEventListener("click", () =>
+                this.setDomPageTranslationView("translation")
+            );
+            root.querySelector("[data-action='show-source']").addEventListener("click", () =>
+                this.setDomPageTranslationView("source")
+            );
             root.querySelector("[data-action='close']").addEventListener("click", () => {
                 this.cancelDomPageTranslate();
             });
@@ -11306,6 +11423,13 @@ class BannerController {
         if (!pipeline || typeof pipeline.setViewMode !== "function") return null;
         const current = pipeline.getViewMode?.() || this._domPageViewMode || "translation";
         const next = current === "source" ? "translation" : "source";
+        return this.setDomPageTranslationView(next);
+    }
+
+    setDomPageTranslationView(mode) {
+        const pipeline = this._activePagePipeline;
+        if (!pipeline || typeof pipeline.setViewMode !== "function") return null;
+        const next = mode === "source" ? "source" : "translation";
         const result = pipeline.setViewMode(next) || { mode: next };
         this._domPageViewMode = result.mode === "source" ? "source" : "translation";
         if (this._domPageViewMode === "source") this.hideDomOriginalTooltip();
@@ -11317,22 +11441,26 @@ class BannerController {
         const host =
             this._domPageBanner || document.getElementById("edge-translate-dom-page-banner");
         const root = host?.shadowRoot;
-        const button = root?.querySelector?.("[data-action='toggle-view']");
-        if (!button) return;
+        const viewSwitch = root?.querySelector?.("[data-role='view-switch']");
+        if (!viewSwitch) return;
         const supported = typeof this._activePagePipeline?.setViewMode === "function";
-        button.hidden = !supported;
+        viewSwitch.hidden = !supported;
         if (!supported) return;
         const mode = this._activePagePipeline.getViewMode?.() || this._domPageViewMode;
         this._domPageViewMode = mode === "source" ? "source" : "translation";
         const showingSource = this._domPageViewMode === "source";
-        button.setAttribute("aria-pressed", showingSource ? "true" : "false");
-        button.setAttribute(
+        const sourceButton = viewSwitch.querySelector("[data-action='show-source']");
+        const translationButton = viewSwitch.querySelector("[data-action='show-translation']");
+        sourceButton?.setAttribute("aria-pressed", showingSource ? "true" : "false");
+        translationButton?.setAttribute("aria-pressed", showingSource ? "false" : "true");
+        sourceButton?.setAttribute(
             "aria-label",
-            showingSource ? "Show translated page" : "Show original page"
+            getUiMessage("AIPageShowOriginal", undefined, "Show original page")
         );
-        button.title = showingSource ? "Show translation" : "Show original";
-        const label = button.querySelector("[data-role='view-toggle-text']");
-        if (label) label.textContent = showingSource ? "Translation" : "Original";
+        translationButton?.setAttribute(
+            "aria-label",
+            getUiMessage("AIPageShowTranslation", undefined, "Show translated page")
+        );
     }
 
     /**
@@ -11385,7 +11513,7 @@ class BannerController {
             progressFill: root.querySelector("[data-role='progress-fill']"),
             progressMeta: root.querySelector("[data-role='progress-meta']"),
             tokenMeta: root.querySelector("[data-role='token-meta']"),
-            viewToggle: root.querySelector("[data-action='toggle-view']"),
+            viewToggle: root.querySelector("[data-role='view-switch']"),
         };
         if (!refs.bar || !refs.status) return null;
         this._domBannerRefs = refs;
@@ -11421,9 +11549,14 @@ class BannerController {
         if (this._domBannerPendingError || pipelineFailed) {
             const message = this._domBannerPendingError?.message || "";
             this._domBannerPendingError = null;
+            const failureMessage = String(message).slice(0, 120);
             const statusText = message
-                ? `Translation failed: ${String(message).slice(0, 120)}`
-                : "Translation failed";
+                ? getUiMessage(
+                      "AIPageTranslationFailedWithMessage",
+                      [failureMessage],
+                      `Translation failed: ${failureMessage}`
+                  )
+                : getUiMessage("AIPageTranslationFailed", undefined, "Translation failed");
             if (last.state !== "error") {
                 refs.bar.dataset.state = "error";
                 last.state = "error";
@@ -11436,9 +11569,10 @@ class BannerController {
                 refs.progressFill.style.width = "100%";
                 last.fillWidth = "100%";
             }
-            if (refs.progressMeta && last.percentText !== "Error") {
-                refs.progressMeta.textContent = "Error";
-                last.percentText = "Error";
+            const errorText = getUiMessage("AIPageError", undefined, "Error");
+            if (refs.progressMeta && last.percentText !== errorText) {
+                refs.progressMeta.textContent = errorText;
+                last.percentText = errorText;
             }
             return;
         }
@@ -11451,7 +11585,11 @@ class BannerController {
             // New session: progress restarts from empty (the monotonic clamp below is reset so a
             // fresh page never inherits the previous session's high-water mark).
             this._domBannerMaxPercent = 0;
-            const startingText = "Preparing page text";
+            const startingText = getUiMessage(
+                "AIPageTranslationPreparing",
+                undefined,
+                "Preparing page text"
+            );
             if (last.statusText !== startingText) {
                 refs.status.textContent = startingText;
                 last.statusText = startingText;
@@ -11506,23 +11644,19 @@ class BannerController {
             refs.progressFill.style.transition = "";
             last.fillWidth = "0%";
         }
-        const pipelineUnit = pipelineSnapshot?.progressUnit || "targets";
-        const failureUnit = pipelineSnapshot?.failureUnit || pipelineUnit;
         const nextStatus = requestsIncomplete
-            ? `Translation incomplete (${failed} ${
-                  this._activePagePipeline
-                      ? failed === 1
-                          ? failureUnit.replace(/s$/, "")
-                          : failureUnit
-                      : failed === 1
-                      ? "section"
-                      : "sections"
-              } failed)`
+            ? getUiMessage(
+                  "AIPageTranslationIncomplete",
+                  [String(failed)],
+                  `Translation incomplete (${failed} ${failed === 1 ? "item" : "items"} failed)`
+              )
             : requestsComplete
-            ? "Translation complete"
-            : `${completed} of ${total} ${
-                  this._activePagePipeline ? pipelineUnit : "sections"
-              } translated`;
+            ? getUiMessage("AIPageTranslationComplete", undefined, "Translation complete")
+            : getUiMessage(
+                  "AIPageTranslationProgress",
+                  [String(completed), String(total)],
+                  `${completed} / ${total} translated`
+              );
         if (last.statusText !== nextStatus) {
             refs.status.textContent = nextStatus;
             last.statusText = nextStatus;
@@ -11532,7 +11666,11 @@ class BannerController {
             refs.progressFill.style.width = nextFill;
             last.fillWidth = nextFill;
         }
-        const progressText = requestsIncomplete ? "Partial" : nextFill;
+        const progressText = requestsIncomplete
+            ? getUiMessage("AIPagePartial", undefined, "Partial")
+            : requestsComplete
+            ? ""
+            : nextFill;
         if (refs.progressMeta && last.percentText !== progressText) {
             refs.progressMeta.textContent = progressText;
             last.percentText = progressText;
