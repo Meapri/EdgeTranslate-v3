@@ -150,6 +150,26 @@ async function readPdfBlob(url) {
     }
   }
 
+  // Show the real filename (from `source`) as the tab title instead of the blob UUID
+  const applyRealTitle = () => {
+    try {
+      let src = new URLSearchParams(location.search).get('source');
+      if (!src) return;
+      // The cross-origin branch above double-encodes `source`; undo that if so
+      if (!src.includes('/')) src = decodeURIComponent(src);
+      const last = src.split(/[?#]/)[0].split('/').pop();
+      const name = decodeURIComponent(last);
+      if (!name) return;
+
+      const apply = () => { if (document.title !== name) document.title = name; };
+      apply();
+      new MutationObserver(apply).observe(document.head, {
+        childList: true, subtree: true, characterData: true,
+      });
+    } catch {}
+  };
+  applyRealTitle();
+
   // Load official viewer once URL is finalized (avoid duplicate insert)
   const ensureViewerLoaded = () => {
     if (document.getElementById('et-viewer-loader')) return;
