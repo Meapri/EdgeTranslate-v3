@@ -44,6 +44,32 @@ try {
 
   try { PDFJS.GlobalWorkerOptions.workerSrc = '../build/build/pdf.worker.mjs'; } catch {}
 
+// Helper: derive a friendly filename from a Response or original URL
+const getOriginalFilename = async (res, sourceUrl) => {
+  try {
+    const cd = res && res.headers && typeof res.headers.get === 'function'
+      ? res.headers.get('content-disposition')
+      : null;
+
+    if (cd) {
+      const match = cd.match(/filename\*?=(?:UTF-8'')?["']?([^;"']+)["']?/i);
+      if (match && match[1]) {
+        return decodeURIComponent(match[1].trim().replace(/^['\"]|['\"]$/g, ''));
+      }
+    }
+  } catch {}
+
+  try {
+    if (sourceUrl) {
+      const u = new URL(sourceUrl, location.href);
+      const name = decodeURIComponent(u.pathname.split('/').pop() || '');
+      if (name) return name;
+    }
+  } catch {}
+
+  return null;
+};
+
 // Prepare URL before loading viewer.mjs, following official behavior where file param drives initial load
 (async () => {
   const DEBUG = false;
@@ -85,6 +111,12 @@ try {
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         try { createdBlobUrls.add(blobUrl); } catch {}
+
+        try {
+          const friendlyName = await getOriginalFilename(res, original) || 'document.pdf';
+          document.title = friendlyName;
+        } catch {}
+
         params.set('file', encodeURIComponent(blobUrl));
         history.replaceState(null, '', urlObj.pathname + '?' + params.toString() + urlObj.hash);
       } catch (e) {
@@ -97,6 +129,12 @@ try {
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         try { createdBlobUrls.add(blobUrl); } catch {}
+
+        try {
+          const friendlyName = await getOriginalFilename(res, target.href) || 'document.pdf';
+          document.title = friendlyName;
+        } catch {}
+
         // Preserve original URL for refresh recovery
         params.set('source', encodeURIComponent(target.href));
         params.set('file', encodeURIComponent(blobUrl));
@@ -172,6 +210,7 @@ try {
   };
   setupGlobalMenuDismissal();
 })();
+
 
 
 
